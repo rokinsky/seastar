@@ -324,6 +324,9 @@ seastar_add_test (json_formatter
 if (Seastar_EXPERIMENTAL_KAFKA)
   seastar_add_test (kafka_connection
     SOURCES kafka_connection_test.cc)
+  seastar_add_test (kafka_protocol
+    KIND BOOST
+    SOURCES kafka_protocol_test.cc)
 endif()
 
 seastar_add_test (lowres_clock

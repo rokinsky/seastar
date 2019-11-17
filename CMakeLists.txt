@@ -651,6 +651,10 @@ if (Seastar_EXPERIMENTAL_KAFKA)
     # Kafka source files
     src/kafka/connection/tcp_connection.hh
     src/kafka/connection/tcp_connection.cc
+    src/kafka/protocol/api_versions_response.cc
+    src/kafka/protocol/api_versions_request.cc
+    src/kafka/protocol/metadata_response.cc
+    src/kafka/protocol/metadata_request.cc
   )
 endif()
 
