@@ -346,6 +346,11 @@ seastar_add_test (rpc
     loopback_socket.hh
     rpc_test.cc)
 
+if (Seastar_EXPERIMENTAL_FS)
+  seastar_add_test (seastarfs
+    SOURCES seastarfs_test.cc)
+endif()
+
 seastar_add_test (semaphore
   SOURCES semaphore_test.cc)
 
