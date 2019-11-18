@@ -288,28 +288,6 @@ seastar_add_test (file_io
 seastar_add_test (foreign_ptr
   SOURCES foreign_ptr_test.cc)
 
-seastar_add_app_test (fs_block_device
-  SOURCES fs_block_device_test.cc
-  LIBRARIES seastar_testing)
-
-seastar_add_test (fs_bootstrap_record
-  SOURCES
-    fs_bootstrap_record_test.cc
-    mock_block_device.hh)
-
-seastar_add_test (fs_cluster_allocator
-  KIND BOOST
-  SOURCES fs_cluster_allocator_test.cc)
-
-seastar_add_test (fs_path
-  KIND BOOST
-  SOURCES fs_path_test.cc)
-
-seastar_add_test (fs_to_disk_buffer
-  SOURCES
-    fs_to_disk_buffer_test.cc
-    mock_block_device.hh)
-
 seastar_add_test (fstream
   SOURCES
     fstream_test.cc
@@ -368,8 +346,27 @@ seastar_add_test (rpc
     loopback_socket.hh
     rpc_test.cc)
 
-seastar_add_test (seastarfs
-  SOURCES seastarfs_test.cc)
+if (Seastar_EXPERIMENTAL_FS)
+  seastar_add_app_test (fs_block_device
+    SOURCES fs_block_device_test.cc
+    LIBRARIES seastar_testing)
+  seastar_add_test (fs_bootstrap_record
+    SOURCES
+      fs_bootstrap_record_test.cc
+      mock_block_device.hh)
+  seastar_add_test (fs_cluster_allocator
+    KIND BOOST
+    SOURCES fs_cluster_allocator_test.cc)
+  seastar_add_test (fs_path
+    KIND BOOST
+    SOURCES fs_path_test.cc)
+  seastar_add_test (fs_to_disk_buffer
+    SOURCES
+      fs_to_disk_buffer_test.cc
+      mock_block_device.hh)
+  seastar_add_test (seastarfs
+    SOURCES seastarfs_test.cc)
+endif()
 
 seastar_add_test (semaphore
   SOURCES semaphore_test.cc)
