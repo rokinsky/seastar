@@ -654,6 +654,8 @@ if (Seastar_EXPERIMENTAL_FS)
   target_sources(seastar
     PRIVATE
     # SeastarFS source files
+    include/seastar/fs/file.hh
+    src/fs/file.cc
   )
 endif()
 
