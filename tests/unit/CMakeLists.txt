@@ -346,6 +346,9 @@ seastar_add_test (rpc
     loopback_socket.hh
     rpc_test.cc)
 
+seastar_add_test (seastarfs
+  SOURCES seastarfs_test.cc)
+
 seastar_add_test (semaphore
   SOURCES semaphore_test.cc)
 
