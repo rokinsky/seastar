@@ -321,6 +321,11 @@ seastar_add_test (network_interface
 seastar_add_test (json_formatter
   SOURCES json_formatter_test.cc)
 
+if (Seastar_EXPERIMENTAL_KAFKA)
+  seastar_add_test (kafka_connection
+    SOURCES kafka_connection_test.cc)
+endif()
+
 seastar_add_test (lowres_clock
   SOURCES lowres_clock_test.cc)
 

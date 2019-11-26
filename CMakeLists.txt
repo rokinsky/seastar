@@ -649,6 +649,8 @@ if (Seastar_EXPERIMENTAL_KAFKA)
   target_sources(seastar
     PRIVATE
     # Kafka source files
+    src/kafka/connection/tcp_connection.hh
+    src/kafka/connection/tcp_connection.cc
   )
 endif()
 
