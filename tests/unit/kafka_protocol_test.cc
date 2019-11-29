@@ -71,6 +71,34 @@ BOOST_AUTO_TEST_CASE(kafka_primitives_number_test) {
     BOOST_REQUIRE_EQUAL(*number, 0x12345678);
 }
 
+BOOST_AUTO_TEST_CASE(kafka_primitives_varint_test) {
+    kafka::kafka_varint_t number(155);
+
+    test_deserialize_serialize({0x00}, number, 0);
+    BOOST_REQUIRE_EQUAL(*number, 0);
+
+    test_deserialize_serialize({0x08}, number, 0);
+    BOOST_REQUIRE_EQUAL(*number, 4);
+
+    test_deserialize_serialize({0x07}, number, 0);
+    BOOST_REQUIRE_EQUAL(*number, -4);
+
+    test_deserialize_serialize({0xAC, 0x02}, number, 0);
+    BOOST_REQUIRE_EQUAL(*number, 150);
+
+    test_deserialize_serialize({0xAB, 0x02}, number, 0);
+    BOOST_REQUIRE_EQUAL(*number, -150);
+
+    test_deserialize_throw({0xAC}, number, 0);
+    BOOST_REQUIRE_EQUAL(*number, -150);
+
+    test_deserialize_serialize({0xFF, 0xFF, 0xFF, 0xFF, 0xF}, number, 0);
+    BOOST_REQUIRE_EQUAL(*number, -2147483648);
+
+    test_deserialize_throw({0xFF, 0xFF, 0xFF, 0xFF, 0x1F}, number, 0);
+    BOOST_REQUIRE_EQUAL(*number, -2147483648);
+}
+
 BOOST_AUTO_TEST_CASE(kafka_primitives_string_test) {
     kafka::kafka_string_t string("321");
     BOOST_REQUIRE_EQUAL(*string, "321");

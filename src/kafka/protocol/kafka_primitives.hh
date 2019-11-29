@@ -85,6 +85,59 @@ using kafka_int64_t = kafka_number_t<int64_t>;
 using kafka_uint32_t = kafka_number_t<uint32_t>;
 using kafka_bool_t = kafka_number_t<uint8_t>;
 
+class kafka_varint_t {
+private:
+    int32_t _value;
+public:
+    kafka_varint_t() noexcept : kafka_varint_t(0) {}
+
+    explicit kafka_varint_t(int32_t value) noexcept : _value(value) {}
+
+    [[nodiscard]] const int32_t &operator*() const noexcept { return _value; }
+
+    [[nodiscard]] int32_t &operator*() noexcept { return _value; }
+
+    kafka_varint_t &operator=(int32_t value) noexcept {
+        _value = value;
+        return *this;
+    }
+
+    void serialize(std::ostream &os, int16_t api_version) const {
+        auto current_value = (static_cast<uint32_t>(_value) << 1) ^ static_cast<uint32_t>(_value >> 31);
+        do {
+            uint8_t current_byte = current_value & 0x7F;
+            current_value >>= 7;
+            if (current_value != 0) {
+                current_byte |= 0x80;
+            }
+            os.write(reinterpret_cast<const char*>(&current_byte), 1);
+        } while (current_value != 0);
+    }
+
+    void deserialize(std::istream &is, int16_t api_version) {
+        uint32_t current_value = 0;
+        int32_t current_offset = 0;
+        char current_byte = 0;
+        do {
+            is.read(&current_byte, 1);
+            if (is.gcount() != 1) {
+                throw parsing_exception("Stream ended prematurely when reading varint");
+            }
+            if (current_byte == 0) {
+                break;
+            }
+            auto max_bit_write = current_offset + 32 -  __builtin_clz(static_cast<uint8_t>(current_byte));
+            if (max_bit_write > 32) {
+                throw parsing_exception("Deserialized varint is larger than 32 bits");
+            }
+            current_value |= static_cast<int32_t>(current_byte & 0x7F) << current_offset;
+            current_offset += 7;
+        } while (current_byte & 0x80);
+        current_value = (current_value >> 1) ^ -(current_value & 1);
+        _value = current_value;
+    }
+};
+
 template<typename SizeType>
 class kafka_buffer_t {
 private:
@@ -234,7 +287,7 @@ using kafka_nullable_string_t = kafka_nullable_buffer_t<int16_t>;
 using kafka_bytes_t = kafka_buffer_t<int32_t>;
 using kafka_nullable_bytes_t = kafka_nullable_buffer_t<int32_t>;
 
-template<typename ElementType>
+template<typename ElementType, typename ElementCountType = kafka_int32_t>
 class kafka_array_t {
 private:
     std::vector<ElementType> _elems;
@@ -308,10 +361,10 @@ public:
 
     void serialize(std::ostream &os, int16_t api_version) const {
         if (_is_null) {
-            kafka_int32_t null_indicator(-1);
+            ElementCountType null_indicator(-1);
             null_indicator.serialize(os, api_version);
         } else {
-            kafka_int32_t length(_elems.size());
+            ElementCountType length(_elems.size());
             length.serialize(os, api_version);
             for (const auto &elem : _elems) {
                 elem.serialize(os, api_version);
@@ -320,7 +373,7 @@ public:
     }
 
     void deserialize(std::istream &is, int16_t api_version) {
-        kafka_int32_t length;
+        ElementCountType length;
         length.deserialize(is, api_version);
         if (*length >= 0) {
             // TODO: Max length check
