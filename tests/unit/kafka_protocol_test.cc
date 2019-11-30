@@ -30,6 +30,7 @@
 #include "../../src/kafka/protocol/metadata_response.hh"
 #include "../../src/kafka/protocol/kafka_primitives.hh"
 #include "../../src/kafka/protocol/api_versions_response.hh"
+#include "../../src/kafka/protocol/kafka_records.hh"
 
 using namespace seastar;
 
@@ -150,7 +151,7 @@ BOOST_AUTO_TEST_CASE(kafka_primitives_array_test) {
     BOOST_REQUIRE_EQUAL(*strings[1], "fg");
 }
 
-BOOST_AUTO_TEST_CASE(kafka_api_versions_reponse_deserialize_test) {
+BOOST_AUTO_TEST_CASE(kafka_api_versions_response_parsing_test) {
     kafka::api_versions_response response;
     test_deserialize_serialize({
         0x00, 0x00, 0x00, 0x00, 0x00, 0x2d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x01, 0x00, 0x00,
@@ -184,7 +185,7 @@ BOOST_AUTO_TEST_CASE(kafka_api_versions_reponse_deserialize_test) {
     BOOST_REQUIRE_EQUAL(*response._api_keys[1]._max_version, 11);
 }
 
-BOOST_AUTO_TEST_CASE(kafka_metadata_request_deserialize_test) {
+BOOST_AUTO_TEST_CASE(kafka_metadata_request_parsing_test) {
     kafka::metadata_request request;
     test_deserialize_serialize({
         0x00, 0x00, 0x00, 0x01, 0x00, 0x05, 0x74, 0x65, 0x73, 0x74, 0x35, 0x01, 0x00, 0x00
@@ -197,7 +198,7 @@ BOOST_AUTO_TEST_CASE(kafka_metadata_request_deserialize_test) {
     BOOST_REQUIRE(!*request._include_topic_authorized_operations);
 }
 
-BOOST_AUTO_TEST_CASE(kafka_metadata_response_deserialize_test) {
+BOOST_AUTO_TEST_CASE(kafka_metadata_response_parsing_test) {
     kafka::metadata_response response;
     test_deserialize_serialize({
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x03, 0xe9, 0x00, 0x0a, 0x31, 0x37,
@@ -233,4 +234,29 @@ BOOST_AUTO_TEST_CASE(kafka_metadata_response_deserialize_test) {
     BOOST_REQUIRE_EQUAL(*response._topics[0]._partitions[0]._isr_nodes[0], 0x3e9);
     BOOST_REQUIRE_EQUAL(*response._topics[0]._topic_authorized_operations, 0);
     BOOST_REQUIRE_EQUAL(*response._cluster_authorized_operations, 0);
+}
+
+BOOST_AUTO_TEST_CASE(kafka_record_parsing_test) {
+    kafka::kafka_record record;
+    test_deserialize_serialize({
+        0x20, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00
+    }, record, 0);
+    BOOST_REQUIRE_EQUAL(*record._timestamp_delta, 0);
+    BOOST_REQUIRE_EQUAL(*record._offset_delta, 0);
+    std::string expected_key{"\x00\x00\x00\x01", 4};
+    BOOST_REQUIRE_EQUAL(record._key, expected_key);
+    std::string expected_value{"\x00\x00\x00\x00\x00\x00", 6};
+    BOOST_REQUIRE_EQUAL(record._value, expected_value);
+    BOOST_REQUIRE_EQUAL(record._headers.size(), 0);
+
+    kafka::kafka_record record2;
+    test_deserialize_serialize({
+        0x10, 0x00, 0x00, 0x00, 0x02, 0x34, 0x02, 0x36, 0x00
+    }, record2, 0);
+    BOOST_REQUIRE_EQUAL(*record2._timestamp_delta, 0);
+    BOOST_REQUIRE_EQUAL(*record2._offset_delta, 0);
+    BOOST_REQUIRE_EQUAL(record2._key, "4");
+    BOOST_REQUIRE_EQUAL(record2._value, "6");
+    BOOST_REQUIRE_EQUAL(record2._headers.size(), 0);
 }

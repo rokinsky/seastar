@@ -166,14 +166,14 @@ public:
     }
 
     void serialize(std::ostream &os, int16_t api_version) const {
-        kafka_number_t<SizeType> length(_value.size());
+        SizeType length(_value.size());
         length.serialize(os, api_version);
 
         os.write(_value.data(), _value.size());
     }
 
     void deserialize(std::istream &is, int16_t api_version) {
-        kafka_number_t<SizeType> length;
+        SizeType length;
         length.deserialize(is, api_version);
         // TODO: Max length check
         if (*length < 0) {
@@ -250,17 +250,17 @@ public:
 
     void serialize(std::ostream &os, int16_t api_version) const {
         if (_is_null) {
-            kafka_number_t<SizeType> null_indicator(-1);
+            SizeType null_indicator(-1);
             null_indicator.serialize(os, api_version);
         } else {
-            kafka_number_t<SizeType> length(_value.size());
+            SizeType length(_value.size());
             length.serialize(os, api_version);
             os.write(_value.data(), _value.size());
         }
     }
 
     void deserialize(std::istream &is, int16_t api_version) {
-        kafka_number_t<SizeType> length;
+        SizeType length;
         length.deserialize(is, api_version);
         if (*length >= 0) {
             std::string value;
@@ -281,11 +281,11 @@ public:
     }
 };
 
-using kafka_string_t = kafka_buffer_t<int16_t>;
-using kafka_nullable_string_t = kafka_nullable_buffer_t<int16_t>;
+using kafka_string_t = kafka_buffer_t<kafka_int16_t>;
+using kafka_nullable_string_t = kafka_nullable_buffer_t<kafka_int16_t>;
 
-using kafka_bytes_t = kafka_buffer_t<int32_t>;
-using kafka_nullable_bytes_t = kafka_nullable_buffer_t<int32_t>;
+using kafka_bytes_t = kafka_buffer_t<kafka_int32_t>;
+using kafka_nullable_bytes_t = kafka_nullable_buffer_t<kafka_int32_t>;
 
 template<typename ElementType, typename ElementCountType = kafka_int32_t>
 class kafka_array_t {
