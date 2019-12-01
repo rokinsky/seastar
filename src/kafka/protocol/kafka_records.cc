@@ -312,6 +312,44 @@ void kafka_record_batch::deserialize(std::istream &is, int16_t api_version) {
     }
 }
 
+void kafka_records::serialize(std::ostream &os, int16_t api_version) const {
+    std::vector<char> serialized_batches;
+    boost::iostreams::back_insert_device<std::vector<char>> serialized_batches_sink{serialized_batches};
+    boost::iostreams::stream<boost::iostreams::back_insert_device<std::vector<char>>> serialized_batches_stream{serialized_batches_sink};
+
+    for (const auto &batch : _record_batches) {
+        batch.serialize(serialized_batches_stream, api_version);
+    }
+
+    serialized_batches_stream.flush();
+
+    kafka_int32_t records_length(serialized_batches.size());
+    records_length.serialize(os, api_version);
+
+    os.write(serialized_batches.data(), serialized_batches.size());
+}
+
+void kafka_records::deserialize(std::istream &is, int16_t api_version) {
+    kafka_int32_t records_length;
+    records_length.deserialize(is, api_version);
+    if (*records_length < 0) {
+        throw parsing_exception("Records length is invalid");
+    }
+
+    auto expected_end_of_records = is.tellg();
+    expected_end_of_records += *records_length;
+
+    _record_batches.clear();
+    while (is.tellg() < expected_end_of_records) {
+        _record_batches.emplace_back();
+        _record_batches.back().deserialize(is, api_version);
+    }
+
+    if (is.tellg() != expected_end_of_records) {
+        throw parsing_exception("Stream ended prematurely when reading records");
+    }
+}
+
 }
 
 }

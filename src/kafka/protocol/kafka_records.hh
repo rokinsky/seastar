@@ -85,8 +85,12 @@ public:
 };
 
 class kafka_records {
-private:
+public:
     std::vector<kafka_record_batch> _record_batches;
+
+    void serialize(std::ostream &os, int16_t api_version) const;
+
+    void deserialize(std::istream &is, int16_t api_version);
 };
 
 }
