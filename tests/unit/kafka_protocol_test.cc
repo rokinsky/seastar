@@ -32,6 +32,7 @@
 #include "../../src/kafka/protocol/api_versions_response.hh"
 #include "../../src/kafka/protocol/kafka_records.hh"
 #include "../../src/kafka/protocol/produce_request.hh"
+#include "../../src/kafka/protocol/produce_response.hh"
 
 using namespace seastar;
 
@@ -417,4 +418,28 @@ BOOST_AUTO_TEST_CASE(kafka_produce_request_parsing_test) {
     BOOST_REQUIRE_EQUAL(records._record_batches[0]._records[0]._key, "0");
     BOOST_REQUIRE_EQUAL(records._record_batches[0]._records[0]._value, "0");
     BOOST_REQUIRE_EQUAL(records._record_batches[0]._records[0]._headers.size(), 0);
+}
+
+BOOST_AUTO_TEST_CASE(kafka_produce_response_parsing_test) {
+    kafka::produce_response response;
+    test_deserialize_serialize({
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x05, 0x74, 0x65, 0x73, 0x74, 0x35, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00
+    }, response, 7);
+
+    BOOST_REQUIRE_EQUAL(response._responses->size(), 1);
+    BOOST_REQUIRE_EQUAL(*response._throttle_time_ms, 0);
+    
+    const auto &inner_response = response._responses[0];
+    BOOST_REQUIRE_EQUAL(*inner_response._name, "test5");
+    BOOST_REQUIRE_EQUAL(inner_response._partitions->size(), 1);
+
+    const auto &partition = inner_response._partitions[0];
+    BOOST_REQUIRE_EQUAL(*partition._partition_index, 0);
+    BOOST_REQUIRE_EQUAL(*partition._error_code, 0);
+    BOOST_REQUIRE_EQUAL(*partition._base_offset, 0x46);
+    BOOST_REQUIRE_EQUAL(*partition._log_append_time_ms, -1);
+    BOOST_REQUIRE_EQUAL(*partition._log_start_offset, 0);
 }

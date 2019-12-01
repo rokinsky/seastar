@@ -656,6 +656,7 @@ if (Seastar_EXPERIMENTAL_KAFKA)
     src/kafka/protocol/kafka_records.cc
     src/kafka/protocol/metadata_response.cc
     src/kafka/protocol/metadata_request.cc
+    src/kafka/protocol/produce_response.cc
     src/kafka/protocol/produce_request.cc
   )
 endif()
