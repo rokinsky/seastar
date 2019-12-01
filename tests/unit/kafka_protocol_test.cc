@@ -31,6 +31,7 @@
 #include "../../src/kafka/protocol/kafka_primitives.hh"
 #include "../../src/kafka/protocol/api_versions_response.hh"
 #include "../../src/kafka/protocol/kafka_records.hh"
+#include "../../src/kafka/protocol/produce_request.hh"
 
 using namespace seastar;
 
@@ -376,4 +377,44 @@ BOOST_AUTO_TEST_CASE(kafka_records_parsing_test) {
     BOOST_REQUIRE_EQUAL(records._record_batches[2]._records[0]._key, expected_key);
     BOOST_REQUIRE_EQUAL(records._record_batches[2]._records[0]._value, expected_value);
     BOOST_REQUIRE_EQUAL(records._record_batches[2]._records[0]._headers.size(), 0);
+}
+
+BOOST_AUTO_TEST_CASE(kafka_produce_request_parsing_test) {
+    kafka::produce_request request;
+    test_deserialize_serialize({
+        0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x75, 0x30, 0x00, 0x00, 0x00, 0x01, 0x00, 0x05, 0x74, 0x65,
+        0x73, 0x74, 0x35, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3a, 0xff, 0xff, 0xff, 0xff, 0x02,
+        0x06, 0x76, 0x5e, 0x6f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x6e, 0x5b, 0x6e,
+        0xba, 0x2c, 0x00, 0x00, 0x01, 0x6e, 0x5b, 0x6e, 0xba, 0x2c, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x10, 0x00, 0x00, 0x00,
+        0x02, 0x30, 0x02, 0x30, 0x00
+    }, request, 7);
+
+    BOOST_REQUIRE(request._transactional_id.is_null());
+    BOOST_REQUIRE_EQUAL(*request._acks, -1);
+    BOOST_REQUIRE_EQUAL(*request._timeout_ms, 30000);
+    BOOST_REQUIRE_EQUAL(request._topics->size(), 1);
+    BOOST_REQUIRE_EQUAL(*request._topics[0]._name, "test5");
+    BOOST_REQUIRE_EQUAL(request._topics[0]._partitions->size(), 1);
+    BOOST_REQUIRE_EQUAL(*request._topics[0]._partitions[0]._partition_index, 0);
+    const auto &records = request._topics[0]._partitions[0]._records;
+    BOOST_REQUIRE_EQUAL(records._record_batches.size(), 1);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._base_offset, 0);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._partition_leader_epoch, -1);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._magic, 2);
+    BOOST_REQUIRE(records._record_batches[0]._compression_type == kafka::kafka_record_compression_type::NO_COMPRESSION);
+    BOOST_REQUIRE(records._record_batches[0]._timestamp_type == kafka::kafka_record_timestamp_type::CREATE_TIME);
+    BOOST_REQUIRE(!records._record_batches[0]._is_transactional);
+    BOOST_REQUIRE(!records._record_batches[0]._is_control_batch);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._first_timestamp, 0x16e5b6eba2c);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._producer_id, -1);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._producer_epoch, -1);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._base_sequence, -1);
+    BOOST_REQUIRE_EQUAL(records._record_batches[0]._records.size(), 1);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._records[0]._timestamp_delta, 0);
+    BOOST_REQUIRE_EQUAL(*records._record_batches[0]._records[0]._offset_delta, 0);
+    BOOST_REQUIRE_EQUAL(records._record_batches[0]._records[0]._key, "0");
+    BOOST_REQUIRE_EQUAL(records._record_batches[0]._records[0]._value, "0");
+    BOOST_REQUIRE_EQUAL(records._record_batches[0]._records[0]._headers.size(), 0);
 }
