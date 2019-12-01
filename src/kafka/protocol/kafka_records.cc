@@ -25,7 +25,8 @@
 #include <boost/iostreams/device/array.hpp>
 #include <boost/iostreams/device/back_inserter.hpp>
 #include <boost/iostreams/stream.hpp>
-#include <iostream>
+#include <boost/crc.hpp>
+
 namespace seastar {
 
 namespace kafka {
@@ -115,6 +116,199 @@ void kafka_record::deserialize(std::istream &is, int16_t api_version) {
 
     if (is.tellg() != expected_end_of_record) {
         throw parsing_exception("Stream ended prematurely when reading record");
+    }
+}
+
+void kafka_record_batch::serialize(std::ostream &os, int16_t api_version) const {
+    if (*_magic != 2) {
+        // TODO: Implement parsing of versions 0, 1.
+        throw parsing_exception("Unsupported version of record batch");
+    }
+
+    // Payload stores the data after CRC field.
+    std::vector<char> payload;
+    boost::iostreams::back_insert_device<std::vector<char>> payload_sink{payload};
+    boost::iostreams::stream<boost::iostreams::back_insert_device<std::vector<char>>> payload_stream{payload_sink};
+
+    kafka_int16_t attributes(0);
+    attributes = *attributes | static_cast<int16_t>(_compression_type);
+    attributes = *attributes | (static_cast<int16_t>(_timestamp_type) << 3);
+    if (_is_transactional) {
+        attributes = *attributes | 0x10;
+    }
+    if (_is_control_batch) {
+        attributes = *attributes | 0x20;
+    }
+
+    attributes.serialize(payload_stream, api_version);
+
+    kafka_int32_t last_offset_delta(0);
+    if (!_records.empty()) {
+        last_offset_delta = *_records.back()._offset_delta;
+    }
+
+    last_offset_delta.serialize(payload_stream, api_version);
+
+    _first_timestamp.serialize(payload_stream, api_version);
+
+    int32_t max_timestamp_delta = 0;
+    for (const auto &record : _records) {
+        max_timestamp_delta = std::max(max_timestamp_delta, *record._timestamp_delta);
+    }
+    kafka_int64_t max_timestamp(*_first_timestamp + max_timestamp_delta);
+    max_timestamp.serialize(payload_stream, api_version);
+
+    _producer_id.serialize(payload_stream, api_version);
+
+    _producer_epoch.serialize(payload_stream, api_version);
+
+    _base_sequence.serialize(payload_stream, api_version);
+
+    std::vector<char> serialized_records;
+    boost::iostreams::back_insert_device<std::vector<char>> serialized_records_sink{serialized_records};
+    boost::iostreams::stream<boost::iostreams::back_insert_device<std::vector<char>>> serialized_records_stream{serialized_records_sink};
+
+    for (const auto &record : _records) {
+        record.serialize(serialized_records_stream, api_version);
+    }
+
+    serialized_records_stream.flush();
+
+    if (_compression_type != kafka_record_compression_type::NO_COMPRESSION) {
+        // TODO: Add support for compression.
+        throw parsing_exception("Unsupported compression type");
+    }
+
+    kafka_int32_t records_count(_records.size());
+    records_count.serialize(payload_stream, api_version);
+
+    payload_stream.write(serialized_records.data(), serialized_records.size());
+
+    payload_stream.flush();
+
+    _base_offset.serialize(os, api_version);
+
+    kafka_int32_t batch_length(0);
+    batch_length = *batch_length + payload.size();
+    // fields before the CRC field.
+    batch_length = *batch_length + 4 + 4 + 1;
+    batch_length.serialize(os, api_version);
+
+    _partition_leader_epoch.serialize(os, api_version);
+
+    _magic.serialize(os, api_version);
+
+    boost::crc_optimal<32, 0x1EDC6F41, 0xFFFFFFFF, 0xFFFFFFFF, true, true> crc_value;
+    crc_value.process_bytes(payload.data(), payload.size());
+
+    kafka_int32_t crc(crc_value.checksum());
+    crc.serialize(os, api_version);
+
+    os.write(payload.data(), payload.size());
+}
+
+void kafka_record_batch::deserialize(std::istream &is, int16_t api_version) {
+    // Move to magic byte, read it and return back to start.
+    auto start_position = is.tellg();
+    is.seekg(8 + 4 + 4, std::ios_base::cur);
+    _magic.deserialize(is, api_version);
+    is.seekg(start_position);
+
+    if (*_magic != 2) {
+        // TODO: Implement parsing of versions 0, 1.
+        throw parsing_exception("Unsupported record batch version");
+    }
+
+    _base_offset.deserialize(is, api_version);
+
+    kafka_int32_t batch_length;
+    batch_length.deserialize(is, api_version);
+
+    auto expected_end_of_batch = is.tellg();
+    expected_end_of_batch += *batch_length;
+
+    _partition_leader_epoch.deserialize(is, api_version);
+
+    _magic.deserialize(is, api_version);
+
+    kafka_int32_t crc;
+    crc.deserialize(is, api_version);
+
+    // TODO: Missing validation of returned CRC value.
+
+    kafka_int16_t attributes;
+    attributes.deserialize(is, api_version);
+
+    auto compression_type = *attributes & 0x7;
+    switch (compression_type) {
+        case 0:
+            _compression_type = kafka_record_compression_type::NO_COMPRESSION;
+            break;
+        case 1:
+            _compression_type = kafka_record_compression_type::GZIP;
+            break;
+        case 2:
+            _compression_type = kafka_record_compression_type::SNAPPY;
+            break;
+        case 3:
+            _compression_type = kafka_record_compression_type::LZ4;
+            break;
+        case 4:
+            _compression_type = kafka_record_compression_type::ZSTD;
+            break;
+        default:
+            throw parsing_exception("Unsupported compression type");
+    }
+
+    if (*attributes & 0x8) {
+        _timestamp_type = kafka_record_timestamp_type::LOG_APPEND_TIME;
+    } else _timestamp_type = kafka_record_timestamp_type::CREATE_TIME;
+
+    if (*attributes & 0x10) {
+        _is_transactional = true;
+    } else _is_transactional = false;
+
+    if (*attributes & 0x20) {
+        _is_control_batch = true;
+    } else _is_control_batch = false;
+
+    kafka_int32_t last_offset_delta;
+    last_offset_delta.deserialize(is, api_version);
+
+    _first_timestamp.deserialize(is, api_version);
+
+    kafka_int64_t max_timestamp;
+    max_timestamp.deserialize(is, api_version);
+
+    _producer_id.deserialize(is, api_version);
+
+    _producer_epoch.deserialize(is, api_version);
+
+    _base_sequence.deserialize(is, api_version);
+
+    kafka_int32_t records_count;
+    records_count.deserialize(is, api_version);
+
+    if (*records_count < 0) {
+        throw parsing_exception("Record count in batch is invalid");
+    }
+    _records.resize(*records_count);
+
+    auto remaining_bytes = expected_end_of_batch - is.tellg();
+    std::vector<char> records_payload(remaining_bytes);
+
+    is.read(records_payload.data(), remaining_bytes);
+    if (is.gcount() != remaining_bytes) {
+        throw parsing_exception("Stream ended prematurely when reading record batch");
+    }
+
+    boost::iostreams::stream<boost::iostreams::array_source> records_stream(records_payload.data(), records_payload.size());
+    for (auto &record : _records) {
+        record.deserialize(records_stream, api_version);
+    }
+
+    if (records_stream.tellg() != remaining_bytes) {
+        throw parsing_exception("Stream ended prematurely when reading record batch");
     }
 }
 
