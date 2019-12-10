@@ -38,14 +38,14 @@ public:
 
 private:
     bootstrap_record(uint64_t magic, uint64_t version, uint32_t sector_size, uint32_t cluster_size,
-            uint32_t root_id, uint8_t shards_nb, std::vector<uint64_t> metadata_ptr)
+            uint32_t root_id, uint32_t shards_nb, std::vector<uint64_t> metadata_ptr)
         : _magic(magic), _version(version), _sector_size(sector_size), _cluster_size(cluster_size),  _root_id(root_id)
         , _shards_nb(shards_nb), _metadata_ptr(std::move(metadata_ptr)) {}
 
 public:
-    static future<bootstrap_record> read_from_disk(const block_device& device);
+    static future<bootstrap_record> read_from_disk(block_device& device);
     static future<bootstrap_record> create_from_memory();
-    future<> write_to_disk(const block_device& device);
+    future<> write_to_disk(block_device& device);
 };
 
 }
