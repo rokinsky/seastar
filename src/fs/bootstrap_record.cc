@@ -30,7 +30,7 @@ namespace {
 
 constexpr size_t alignment = 4 * KB;
 constexpr uint64_t boot_record_offset = 0;
-constexpr uint32_t max_shards_nb = 4;
+constexpr uint32_t max_shards_nb = 500;
 
 struct bootstrap_record_disk {
     uint64_t _magic;
@@ -44,9 +44,7 @@ struct bootstrap_record_disk {
     char _padding[4]; // TODO(fs): try remove that padding, maybe pack?
 };
 
-constexpr size_t aligned_boot_record_size = sizeof(bootstrap_record_disk) % alignment
-        ? sizeof(bootstrap_record_disk) + alignment - sizeof(bootstrap_record_disk) % alignment
-        : sizeof(bootstrap_record_disk);
+constexpr size_t aligned_boot_record_size = 4096;
 constexpr size_t crc_offset = offsetof(bootstrap_record_disk, _crc);
 
 uint32_t crc32(const char* buff, size_t len) {
