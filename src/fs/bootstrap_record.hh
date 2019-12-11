@@ -37,7 +37,7 @@ public:
     std::vector<uint64_t> _metadata_ptr; /// pointers to metadatalog for each shard
 
 private:
-    bootstrap_record() {}
+    bootstrap_record() = default;
     bootstrap_record(uint64_t magic, uint64_t version, uint32_t sector_size, uint32_t cluster_size,
             uint32_t root_id, uint32_t shards_nb, std::vector<uint64_t> metadata_ptr)
         : _magic(magic), _version(version), _sector_size(sector_size), _cluster_size(cluster_size),  _root_id(root_id)
