@@ -23,25 +23,26 @@
 
 #include "block_allocator.hh"
 #include "bootstrap_record.hh"
+#include "cluster.hh"
 #include "seastar/core/future.hh"
 #include "seastar/fs/block_device.hh"
 
-#include <bits/stdint-uintn.h>
 #include <seastar/core/file.hh>
 #include <seastar/core/sstring.hh>
+#include <sys/types.h>
 
 namespace seastar::fs {
 
 struct inode_data_vec {
-	uint64_t file_offset; // offset of data in file
-	uint64_t length; // data length in bytes
+	offset_t file_offset; // offset of data in file
+	offset_t length; // data length in bytes
 
 	struct in_mem_data {
 		char* ptr;
 	};
 
 	struct on_disk_data {
-		uint64_t device_offset;
+		offset_t device_offset;
 	};
 
 	std::variant<in_mem_data, on_disk_data> data_location;
@@ -49,14 +50,14 @@ struct inode_data_vec {
 
 class inode_data_vec_comparare {
 	struct key {
-		uint64_t file_offset;
+		offset_t file_offset;
 	};
 
 	static key to_key(const inode_data_vec& dv) noexcept {
 		return {dv.file_offset};
 	}
 
-	static key to_key(uint64_t file_offset) noexcept { return {file_offset}; }
+	static key to_key(offset_t file_offset) noexcept { return {file_offset}; }
 
 public:
 	template<class A, class B>
@@ -66,10 +67,9 @@ public:
 };
 
 struct unix_metadata {
-	uint32_t mode;
-	uint32_t uid;
-	uint32_t gid;
-	uint64_t atime_ns;
+	mode_t mode;
+	uid_t uid;
+	gid_t gid;
 	uint64_t mtime_ns;
 	uint64_t ctime_ns;
 };
@@ -80,29 +80,33 @@ struct inode_info {
 	std::set<inode_data_vec, inode_data_vec_comparare> data;
 };
 
+using inode_t = uint64_t;
+
 class metadata_log {
 	block_device _device;
 	const uint32_t _cluster_size;
 	const uint32_t _alignment;
 	// To-disk metadata buffer
 	basic_sstring<char, uint32_t, 15, false> _unwritten_metadata;
-	uint64_t _current_cluster_offset;
-	uint64_t _bytes_left_in_current_cluster;
+	offset_t _next_write_offset;
+	offset_t _bytes_left_in_current_cluster;
 
 	// In memory metadata
-	using inode_t = uint64_t;
 	std::map<inode_t, inode_info> _inodes;
+	// TODO: add directory DAG (may not be tree because of hardlinks...)
 
 public:
-	metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment, uint64_t first_metadata_cluster_offset);
+	metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment);
+
+	future<> bootstrap(cluster_id_t first_metadata_cluster_id, cluster_range available_clusters);
 
 private:
 	future<> append_unwritten_metadata(char* data, uint32_t len, block_allocator& cluster_alloc);
 
 public:
-	future<inode_t> create_file(sstring path, uint32_t mode);
+	future<inode_t> create_file(sstring path, mode_t mode);
 
-	future<inode_t> create_directory(sstring path, uint32_t mode);
+	future<inode_t> create_directory(sstring path, mode_t mode);
 
 	future<inode_t> open_file(sstring path);
 
@@ -112,12 +116,11 @@ public:
 
 	future<size_t> read(inode_t inode, char* buffer, size_t len, const io_priority_class& pc = default_priority_class());
 
-	future<> small_write(inode_t inode, const char* aligned_buffer, size_t aligned_len, const io_priority_class& pc = default_priority_class());
+	future<> small_write(inode_t inode, const char* buffer, size_t len, const io_priority_class& pc = default_priority_class());
 
-
-	future<> truncate_file(inode_t inode, uint64_t new_size);
+	future<> truncate_file(inode_t inode, offset_t new_size);
 
 	future<> flush_log();
 };
 
-}
+} // namespace seastar::fs

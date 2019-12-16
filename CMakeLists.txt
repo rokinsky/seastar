@@ -457,8 +457,8 @@ add_library (seastar STATIC
   include/seastar/core/units.hh
   include/seastar/core/vector-data-sink.hh
   include/seastar/core/weak_ptr.hh
-  include/seastar/fs/file.hh
   include/seastar/fs/block_device.hh
+  include/seastar/fs/file.hh
   include/seastar/fs/temporary_file.hh
   include/seastar/http/api_docs.hh
   include/seastar/http/common.hh
@@ -567,7 +567,10 @@ add_library (seastar STATIC
   src/core/io_queue.cc
   src/fs/block_allocator.cc
   src/fs/bootstrap_record.cc
+  src/fs/cluster.hh
   src/fs/file.cc
+  src/fs/metadata_log.cc
+  src/fs/metadata_log.hh
   src/http/api_docs.cc
   src/http/common.cc
   src/http/file_handler.cc
