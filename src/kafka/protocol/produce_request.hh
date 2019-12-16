@@ -34,9 +34,9 @@ public:
     kafka_int32_t _partition_index;
     kafka_records _records;
 
-    void serialize(std::ostream &os, int16_t api_version) const;
+    void serialize(kafka::output_stream &os, int16_t api_version) const;
 
-    void deserialize(std::istream &is, int16_t api_version);
+    void deserialize(kafka::input_stream &is, int16_t api_version);
 };
 
 class produce_request_topic_produce_data {
@@ -44,9 +44,9 @@ public:
     kafka_string_t _name;
     kafka_array_t<produce_request_partition_produce_data> _partitions;
 
-    void serialize(std::ostream &os, int16_t api_version) const;
+    void serialize(kafka::output_stream &os, int16_t api_version) const;
 
-    void deserialize(std::istream &is, int16_t api_version);
+    void deserialize(kafka::input_stream &is, int16_t api_version);
 };
 
 class produce_request {
@@ -56,9 +56,9 @@ public:
     kafka_int32_t _timeout_ms;
     kafka_array_t<produce_request_topic_produce_data> _topics;
 
-    void serialize(std::ostream &os, int16_t api_version) const;
+    void serialize(kafka::output_stream &os, int16_t api_version) const;
 
-    void deserialize(std::istream &is, int16_t api_version);
+    void deserialize(kafka::input_stream &is, int16_t api_version);
 };
 
 }

@@ -23,21 +23,16 @@
 #pragma once
 
 #include <cstdint>
-#include <ostream>
-#include <istream>
 #include <array>
 #include <vector>
+
+#include "streams.hh"
 
 #include <seastar/net/byteorder.hh>
 
 namespace seastar {
 
 namespace kafka {
-
-struct parsing_exception : public std::runtime_error {
-public:
-    parsing_exception(const std::string& message) : runtime_error(message) {}
-};
 
 template<typename NumberType>
 class kafka_number_t {
@@ -59,7 +54,7 @@ public:
         return *this;
     }
 
-    void serialize(std::ostream &os, int16_t api_version) const {
+    void serialize(kafka::output_stream &os, int16_t api_version) const {
         std::array<char, NUMBER_SIZE> buffer{};
         auto value = net::hton(_value);
         auto value_pointer = reinterpret_cast<const char *>(&value);
@@ -68,7 +63,7 @@ public:
         os.write(buffer.data(), NUMBER_SIZE);
     }
 
-    void deserialize(std::istream &is, int16_t api_version) {
+    void deserialize(kafka::input_stream &is, int16_t api_version) {
         std::array<char, NUMBER_SIZE> buffer{};
         is.read(buffer.data(), NUMBER_SIZE);
         if (is.gcount() != NUMBER_SIZE) {
@@ -102,7 +97,7 @@ public:
         return *this;
     }
 
-    void serialize(std::ostream &os, int16_t api_version) const {
+    void serialize(kafka::output_stream &os, int16_t api_version) const {
         auto current_value = (static_cast<uint32_t>(_value) << 1) ^ static_cast<uint32_t>(_value >> 31);
         do {
             uint8_t current_byte = current_value & 0x7F;
@@ -114,7 +109,7 @@ public:
         } while (current_value != 0);
     }
 
-    void deserialize(std::istream &is, int16_t api_version) {
+    void deserialize(kafka::input_stream &is, int16_t api_version) {
         uint32_t current_value = 0;
         int32_t current_offset = 0;
         char current_byte = 0;
@@ -165,14 +160,14 @@ public:
         return *this;
     }
 
-    void serialize(std::ostream &os, int16_t api_version) const {
+    void serialize(kafka::output_stream &os, int16_t api_version) const {
         SizeType length(_value.size());
         length.serialize(os, api_version);
 
         os.write(_value.data(), _value.size());
     }
 
-    void deserialize(std::istream &is, int16_t api_version) {
+    void deserialize(kafka::input_stream &is, int16_t api_version) {
         SizeType length;
         length.deserialize(is, api_version);
         // TODO: Max length check
@@ -248,7 +243,7 @@ public:
         return *this;
     }
 
-    void serialize(std::ostream &os, int16_t api_version) const {
+    void serialize(kafka::output_stream &os, int16_t api_version) const {
         if (_is_null) {
             SizeType null_indicator(-1);
             null_indicator.serialize(os, api_version);
@@ -259,7 +254,7 @@ public:
         }
     }
 
-    void deserialize(std::istream &is, int16_t api_version) {
+    void deserialize(kafka::input_stream &is, int16_t api_version) {
         SizeType length;
         length.deserialize(is, api_version);
         if (*length >= 0) {
@@ -359,7 +354,7 @@ public:
         _is_null = true;
     }
 
-    void serialize(std::ostream &os, int16_t api_version) const {
+    void serialize(kafka::output_stream &os, int16_t api_version) const {
         if (_is_null) {
             ElementCountType null_indicator(-1);
             null_indicator.serialize(os, api_version);
@@ -372,7 +367,7 @@ public:
         }
     }
 
-    void deserialize(std::istream &is, int16_t api_version) {
+    void deserialize(kafka::input_stream &is, int16_t api_version) {
         ElementCountType length;
         length.deserialize(is, api_version);
         if (*length >= 0) {

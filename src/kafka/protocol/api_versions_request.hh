@@ -22,8 +22,7 @@
 
 #pragma once
 
-#include <istream>
-#include <ostream>
+#include "streams.hh"
 
 namespace seastar {
 
@@ -31,8 +30,8 @@ namespace kafka {
 
 class api_versions_request {
 public:
-    void serialize(std::ostream &os, int16_t api_version) const;
-    void deserialize(std::istream &is, int16_t api_version);
+    void serialize(kafka::output_stream &os, int16_t api_version) const;
+    void deserialize(kafka::input_stream &is, int16_t api_version);
 };
 
 }

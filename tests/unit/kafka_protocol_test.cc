@@ -21,6 +21,7 @@
 
 #define BOOST_TEST_MODULE kafka
 
+#include <iostream>
 #include <cstdint>
 
 #include <boost/iostreams/stream.hpp>
@@ -39,30 +40,25 @@ using namespace seastar;
 template <typename KafkaType>
 void test_deserialize_serialize(std::vector<unsigned char> data,
         KafkaType &kafka_value, int16_t api_version) {
-    boost::iostreams::stream<boost::iostreams::array_source> input_stream(reinterpret_cast<char *>(data.data()),
-            data.size());
 
-    kafka_value.deserialize(input_stream, api_version);
+    kafka::input_stream is(reinterpret_cast<const char *>(data.data()), data.size());
 
-    std::vector<unsigned char> output(data.size());
-    boost::iostreams::stream<boost::iostreams::array_sink> output_stream(reinterpret_cast<char *>(output.data()),
-                                                                          output.size());
-    kafka_value.serialize(output_stream, api_version);
+    kafka_value.deserialize(is, api_version);
 
-    BOOST_REQUIRE(!output_stream.bad());
+    kafka::output_stream os = kafka::output_stream::resizable_stream();
+    kafka_value.serialize(os, api_version);
 
-    BOOST_REQUIRE_EQUAL(output_stream.tellp(), output.size());
+    BOOST_REQUIRE_EQUAL(os.get_position(), os.get_vector().size());
 
-    BOOST_TEST(output == data, boost::test_tools::per_element());
+    BOOST_TEST(os.get_vector() == vector<char>(data.begin(), data.end()), boost::test_tools::per_element());
 }
 
 template <typename KafkaType>
 void test_deserialize_throw(std::vector<unsigned char> data,
                                 KafkaType &kafka_value, int16_t api_version) {
-    boost::iostreams::stream<boost::iostreams::array_source> input_stream(reinterpret_cast<char *>(data.data()),
-                                                                          data.size());
+    kafka::input_stream is(reinterpret_cast<char *>(data.data()), data.size());
 
-    BOOST_REQUIRE_THROW(kafka_value.deserialize(input_stream, api_version), kafka::parsing_exception);
+    BOOST_REQUIRE_THROW(kafka_value.deserialize(is, api_version), kafka::parsing_exception);
 }
 
 BOOST_AUTO_TEST_CASE(kafka_primitives_number_test) {

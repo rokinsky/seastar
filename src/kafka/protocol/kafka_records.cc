@@ -31,7 +31,7 @@ namespace seastar {
 
 namespace kafka {
 
-void kafka_record_header::serialize(std::ostream &os, int16_t api_version) const {
+void kafka_record_header::serialize(kafka::output_stream &os, int16_t api_version) const {
     kafka_varint_t header_key_length(_header_key.size());
     header_key_length.serialize(os, api_version);
     os.write(_header_key.data(), _header_key.size());
@@ -41,7 +41,7 @@ void kafka_record_header::serialize(std::ostream &os, int16_t api_version) const
     os.write(_value.data(), _value.size());
 }
 
-void kafka_record_header::deserialize(std::istream &is, int16_t api_version) {
+void kafka_record_header::deserialize(kafka::input_stream &is, int16_t api_version) {
     kafka_buffer_t<kafka_varint_t> header_key;
     header_key.deserialize(is, api_version);
     _header_key.swap(*header_key);
@@ -51,10 +51,8 @@ void kafka_record_header::deserialize(std::istream &is, int16_t api_version) {
     _value.swap(*value);
 }
 
-void kafka_record::serialize(std::ostream &os, int16_t api_version) const {
-    std::vector<char> record_data;
-    boost::iostreams::back_insert_device<std::vector<char>> record_data_sink{record_data};
-    boost::iostreams::stream<boost::iostreams::back_insert_device<std::vector<char>>> record_data_stream{record_data_sink};
+void kafka_record::serialize(kafka::output_stream &os, int16_t api_version) const {
+    kafka::output_stream record_data_stream = kafka::output_stream::resizable_stream();
 
     kafka_int8_t attributes(0);
     attributes.serialize(record_data_stream, api_version);
@@ -72,28 +70,28 @@ void kafka_record::serialize(std::ostream &os, int16_t api_version) const {
 
     record_data_stream.write(_value.data(), _value.size());
 
+
     kafka_varint_t header_count(_headers.size());
     header_count.serialize(record_data_stream, api_version);
 
     for (const auto &header : _headers) {
         header.serialize(record_data_stream, api_version);
     }
-    record_data_stream.flush();
 
-    kafka_varint_t length(record_data.size());
+    kafka_varint_t length(record_data_stream.size());
     length.serialize(os, api_version);
 
-    os.write(record_data.data(), record_data.size());
+    os.write(record_data_stream.begin(), record_data_stream.size());
 }
 
-void kafka_record::deserialize(std::istream &is, int16_t api_version) {
+void kafka_record::deserialize(kafka::input_stream &is, int16_t api_version) {
     kafka_varint_t length;
     length.deserialize(is, api_version);
     if (*length < 0) {
         throw parsing_exception("Length of record is invalid");
     }
 
-    auto expected_end_of_record = is.tellg();
+    auto expected_end_of_record = is.get_position();
     expected_end_of_record += *length;
 
     kafka_int8_t attributes;
@@ -114,21 +112,19 @@ void kafka_record::deserialize(std::istream &is, int16_t api_version) {
     headers.deserialize(is, api_version);
     _headers.swap(*headers);
 
-    if (is.tellg() != expected_end_of_record) {
+    if (is.get_position() != expected_end_of_record) {
         throw parsing_exception("Stream ended prematurely when reading record");
     }
 }
 
-void kafka_record_batch::serialize(std::ostream &os, int16_t api_version) const {
+void kafka_record_batch::serialize(kafka::output_stream &os, int16_t api_version) const {
     if (*_magic != 2) {
         // TODO: Implement parsing of versions 0, 1.
         throw parsing_exception("Unsupported version of record batch");
     }
 
     // Payload stores the data after CRC field.
-    std::vector<char> payload;
-    boost::iostreams::back_insert_device<std::vector<char>> payload_sink{payload};
-    boost::iostreams::stream<boost::iostreams::back_insert_device<std::vector<char>>> payload_stream{payload_sink};
+    kafka::output_stream payload_stream = kafka::output_stream::resizable_stream();
 
     kafka_int16_t attributes(0);
     attributes = *attributes | static_cast<int16_t>(_compression_type);
@@ -164,15 +160,11 @@ void kafka_record_batch::serialize(std::ostream &os, int16_t api_version) const 
 
     _base_sequence.serialize(payload_stream, api_version);
 
-    std::vector<char> serialized_records;
-    boost::iostreams::back_insert_device<std::vector<char>> serialized_records_sink{serialized_records};
-    boost::iostreams::stream<boost::iostreams::back_insert_device<std::vector<char>>> serialized_records_stream{serialized_records_sink};
+    kafka::output_stream serialized_records_stream = kafka::output_stream::resizable_stream();
 
     for (const auto &record : _records) {
         record.serialize(serialized_records_stream, api_version);
     }
-
-    serialized_records_stream.flush();
 
     if (_compression_type != kafka_record_compression_type::NO_COMPRESSION) {
         // TODO: Add support for compression.
@@ -182,14 +174,12 @@ void kafka_record_batch::serialize(std::ostream &os, int16_t api_version) const 
     kafka_int32_t records_count(_records.size());
     records_count.serialize(payload_stream, api_version);
 
-    payload_stream.write(serialized_records.data(), serialized_records.size());
-
-    payload_stream.flush();
+    payload_stream.write(serialized_records_stream.begin(), serialized_records_stream.size());
 
     _base_offset.serialize(os, api_version);
 
     kafka_int32_t batch_length(0);
-    batch_length = *batch_length + payload.size();
+    batch_length = *batch_length + payload_stream.size();
     // fields before the CRC field.
     batch_length = *batch_length + 4 + 4 + 1;
     batch_length.serialize(os, api_version);
@@ -199,20 +189,20 @@ void kafka_record_batch::serialize(std::ostream &os, int16_t api_version) const 
     _magic.serialize(os, api_version);
 
     boost::crc_optimal<32, 0x1EDC6F41, 0xFFFFFFFF, 0xFFFFFFFF, true, true> crc_value;
-    crc_value.process_bytes(payload.data(), payload.size());
+    crc_value.process_bytes(payload_stream.begin(), payload_stream.size());
 
     kafka_int32_t crc(crc_value.checksum());
     crc.serialize(os, api_version);
 
-    os.write(payload.data(), payload.size());
+    os.write(payload_stream.begin(), payload_stream.size());
 }
 
-void kafka_record_batch::deserialize(std::istream &is, int16_t api_version) {
+void kafka_record_batch::deserialize(kafka::input_stream &is, int16_t api_version) {
     // Move to magic byte, read it and return back to start.
-    auto start_position = is.tellg();
-    is.seekg(8 + 4 + 4, std::ios_base::cur);
+    auto start_position = is.get_position();
+    is.set_position(8 + 4 + 4 + start_position);
     _magic.deserialize(is, api_version);
-    is.seekg(start_position);
+    is.set_position(start_position);
 
     if (*_magic != 2) {
         // TODO: Implement parsing of versions 0, 1.
@@ -224,7 +214,7 @@ void kafka_record_batch::deserialize(std::istream &is, int16_t api_version) {
     kafka_int32_t batch_length;
     batch_length.deserialize(is, api_version);
 
-    auto expected_end_of_batch = is.tellg();
+    auto expected_end_of_batch = is.get_position();
     expected_end_of_batch += *batch_length;
 
     _partition_leader_epoch.deserialize(is, api_version);
@@ -294,7 +284,7 @@ void kafka_record_batch::deserialize(std::istream &is, int16_t api_version) {
     }
     _records.resize(*records_count);
 
-    auto remaining_bytes = expected_end_of_batch - is.tellg();
+    auto remaining_bytes = expected_end_of_batch - is.get_position();
     std::vector<char> records_payload(remaining_bytes);
 
     is.read(records_payload.data(), remaining_bytes);
@@ -302,50 +292,46 @@ void kafka_record_batch::deserialize(std::istream &is, int16_t api_version) {
         throw parsing_exception("Stream ended prematurely when reading record batch");
     }
 
-    boost::iostreams::stream<boost::iostreams::array_source> records_stream(records_payload.data(), records_payload.size());
+    kafka::input_stream records_stream(records_payload.data(), records_payload.size());
     for (auto &record : _records) {
         record.deserialize(records_stream, api_version);
     }
 
-    if (records_stream.tellg() != remaining_bytes) {
+    if (records_stream.get_position() != remaining_bytes) {
         throw parsing_exception("Stream ended prematurely when reading record batch");
     }
 }
 
-void kafka_records::serialize(std::ostream &os, int16_t api_version) const {
-    std::vector<char> serialized_batches;
-    boost::iostreams::back_insert_device<std::vector<char>> serialized_batches_sink{serialized_batches};
-    boost::iostreams::stream<boost::iostreams::back_insert_device<std::vector<char>>> serialized_batches_stream{serialized_batches_sink};
+void kafka_records::serialize(kafka::output_stream &os, int16_t api_version) const {
+    kafka::output_stream serialized_batches_stream = kafka::output_stream::resizable_stream();
 
     for (const auto &batch : _record_batches) {
         batch.serialize(serialized_batches_stream, api_version);
     }
 
-    serialized_batches_stream.flush();
-
-    kafka_int32_t records_length(serialized_batches.size());
+    kafka_int32_t records_length(serialized_batches_stream.size());
     records_length.serialize(os, api_version);
 
-    os.write(serialized_batches.data(), serialized_batches.size());
+    os.write(serialized_batches_stream.begin(), serialized_batches_stream.size());
 }
 
-void kafka_records::deserialize(std::istream &is, int16_t api_version) {
+void kafka_records::deserialize(kafka::input_stream &is, int16_t api_version) {
     kafka_int32_t records_length;
     records_length.deserialize(is, api_version);
     if (*records_length < 0) {
         throw parsing_exception("Records length is invalid");
     }
 
-    auto expected_end_of_records = is.tellg();
+    auto expected_end_of_records = is.get_position();
     expected_end_of_records += *records_length;
 
     _record_batches.clear();
-    while (is.tellg() < expected_end_of_records) {
+    while (is.get_position() < expected_end_of_records) {
         _record_batches.emplace_back();
         _record_batches.back().deserialize(is, api_version);
     }
 
-    if (is.tellg() != expected_end_of_records) {
+    if (is.get_position() != expected_end_of_records) {
         throw parsing_exception("Stream ended prematurely when reading records");
     }
 }

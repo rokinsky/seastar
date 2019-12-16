@@ -26,19 +26,19 @@ namespace seastar {
 
 namespace kafka {
 
-void api_versions_response_key::serialize(std::ostream &os, int16_t api_version) const {
+void api_versions_response_key::serialize(kafka::output_stream &os, int16_t api_version) const {
     _api_key.serialize(os, api_version);
     _min_version.serialize(os, api_version);
     _max_version.serialize(os, api_version);
 }
 
-void api_versions_response_key::deserialize(std::istream &is, int16_t api_version) {
+void api_versions_response_key::deserialize(kafka::input_stream &is, int16_t api_version) {
     _api_key.deserialize(is, api_version);
     _min_version.deserialize(is, api_version);
     _max_version.deserialize(is, api_version);
 }
 
-void api_versions_response::serialize(std::ostream &os, int16_t api_version) const {
+void api_versions_response::serialize(kafka::output_stream &os, int16_t api_version) const {
     _error_code.serialize(os, api_version);
     _api_keys.serialize(os, api_version);
     if (api_version >= 1) {
@@ -46,7 +46,7 @@ void api_versions_response::serialize(std::ostream &os, int16_t api_version) con
     }
 }
 
-void api_versions_response::deserialize(std::istream &is, int16_t api_version) {
+void api_versions_response::deserialize(kafka::input_stream &is, int16_t api_version) {
     _error_code.deserialize(is, api_version);
     _api_keys.deserialize(is, api_version);
     if (api_version >= 1) {
