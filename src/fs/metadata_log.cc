@@ -19,16 +19,24 @@
  * Copyright (C) 2019 ScyllaDB
  */
 
+#include "fs/block_allocator.hh"
+#include "fs/cluster.hh"
 #include "fs/metadata_log.hh"
-#include <endian.h>
+#include "seastar/core/aligned_buffer.hh"
+#include "seastar/core/do_with.hh"
+#include "seastar/core/future-util.hh"
+#include "seastar/core/future.hh"
+
 #include <boost/crc.hpp>
+#include <cstddef>
 #include <seastar/core/units.hh>
+#include <stdexcept>
 
 namespace seastar::fs {
 
 namespace {
 
-enum ondisk_type {
+enum ondisk_type : uint8_t {
 	INODE = 1,
 	DELETE = 2,
 	SMALL_DATA = 3,
@@ -111,14 +119,103 @@ struct ondisk_delete_dir_entry {
 
 } // namespace
 
-metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment) : _device(std::move(device)), _cluster_size(cluster_size), _alignment(alignment) {
+metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment) : _device(std::move(device)), _cluster_size(cluster_size), _alignment(alignment), _unwritten_metadata(allocate_aligned_buffer<uint8_t>(cluster_size, alignment)), _cluster_allocator({}) {
 	assert(is_power_of_2(alignment));
 	assert(cluster_size > 0 and cluster_size % alignment == 0);
 }
 
 future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster_range available_clusters) {
-	// TODO:
-	return now();
+	// Clear state of the metadata log
+	_next_write_offset = 0;
+	_bytes_left_in_current_cluster = _cluster_size;
+	_inodes.clear();
+	// TODO: clear directory DAG
+	// Bootstrap
+	return do_with(first_metadata_cluster_id, std::vector<cluster_id_t>{}, [this, available_clusters, &buff = _unwritten_metadata](auto& cluster_id, auto& taken_clusters) {
+		return repeat([this, &cluster_id, &taken_clusters, &buff] {
+			return _device.read(cluster_id_to_offset(cluster_id, _cluster_size), buff.get(), _cluster_size).then([this](size_t bytes_read) {
+				if (bytes_read != _cluster_size) {
+					return make_exception_future(std::runtime_error("Failed to read whole metadata log cluster"));
+				}
+				return now();
+
+			}).then([this, &cluster_id, &taken_clusters, &buff] {
+				taken_clusters.emplace_back(cluster_id);
+				// TODO: read the data
+				size_t pos = 0;
+				ondisk_type entry_type;
+
+				auto load_entry = [this, &buff, &pos](auto& entry) {
+					if (pos + sizeof(entry) > _cluster_size) {
+						return false;
+					}
+
+					memcpy(&entry, &buff[pos], sizeof(entry));
+					pos += sizeof(entry);
+					return true;
+				};
+
+				for (;;) {
+					if (not load_entry(entry_type)) {
+						break;
+					}
+
+					switch (entry_type) {
+					case NEXT_METADATA_CLUSTER: {
+						ondisk_next_metadata_cluster entry;
+						if (not load_entry(entry)) {
+							break;
+						}
+						cluster_id = entry.cluster_id;
+					}
+
+					case CHECKPOINT: {
+						ondisk_checkpoint entry;
+						if (not load_entry(entry)) {
+							break;
+						}
+
+						// TODO: validate metadata log since last checkpoint and add every entry to the in-memory log
+						// TODO: maybe change format a little to be like this:
+						// | checkpoint | data... | checkpoint | data... |
+						// instead of
+						// | data... | checkpoint | data... | checkpoint |
+						// this would eliminate the need for parsing disk content twice / keeping "uncommited" parsed disk content in memory before reaching checkpoint
+					}
+
+					case INODE:
+					case DELETE:
+					case SMALL_DATA:
+					case MEDIUM_DATA:
+					case LARGE_DATA:
+					case TRUNCATE:
+					case MTIME_UPDATE:
+					case DELETE_DIR_ENTRY:
+						throw std::runtime_error("Not implemented");
+
+					// default is omitted to make compiler warn if there is an unhandled type
+					// unknown type => metadata log inconsistency
+					}
+
+					// TODO: rollback
+				}
+
+				return stop_iteration::no;
+			});
+		}).then([this, &available_clusters, &taken_clusters] {
+			// Initialize _cluser_allocator
+			sort(taken_clusters.begin(), taken_clusters.end(), std::greater{});
+			std::queue<cluster_id_t> free_clusters;
+			for (auto cid = available_clusters.beg; cid < available_clusters.end; ++cid) {
+				if (taken_clusters.size() and taken_clusters.back() == cid) {
+					taken_clusters.pop_back();
+					continue;
+				}
+				free_clusters.emplace(cid);
+			}
+			_cluster_allocator = block_allocator(std::move(free_clusters));
+		});
+	});
 }
 
 } // namespace seastar::fs

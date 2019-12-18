@@ -24,12 +24,13 @@
 #include "block_allocator.hh"
 #include "bootstrap_record.hh"
 #include "cluster.hh"
+#include "seastar/core/aligned_buffer.hh"
 #include "seastar/core/future.hh"
 #include "seastar/fs/block_device.hh"
 
 #include <seastar/core/file.hh>
 #include <seastar/core/sstring.hh>
-#include <sys/types.h>
+#include <type_traits>
 
 namespace seastar::fs {
 
@@ -87,11 +88,13 @@ class metadata_log {
 	const uint32_t _cluster_size;
 	const uint32_t _alignment;
 	// To-disk metadata buffer
-	basic_sstring<char, uint32_t, 15, false> _unwritten_metadata;
+	using AlignedBuff = std::invoke_result_t<decltype(allocate_aligned_buffer<uint8_t>), size_t, size_t>;
+	AlignedBuff _unwritten_metadata;
 	offset_t _next_write_offset;
 	offset_t _bytes_left_in_current_cluster;
 
 	// In memory metadata
+	block_allocator _cluster_allocator;
 	std::map<inode_t, inode_info> _inodes;
 	// TODO: add directory DAG (may not be tree because of hardlinks...)
 
