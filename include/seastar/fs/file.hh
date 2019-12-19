@@ -25,9 +25,7 @@
 #include <seastar/core/future.hh>
 #include <seastar/fs/block_device.hh>
 
-namespace seastar {
-
-namespace fs {
+namespace seastar::fs {
 
 class seastarfs_file_impl : public file_impl {
     block_device _block_device;
@@ -53,7 +51,5 @@ public:
 };
 
 future<file> open_file_dma(sstring name, open_flags flags);
-
-}
 
 }
