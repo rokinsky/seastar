@@ -40,12 +40,12 @@ future<std::optional<sstring>> read_object(input_stream<char>& input) {
 	});
 }
 
-__attribute__((unused)) future<> read_objects(input_stream<char>&) {
+future<> read_objects(input_stream<char>&) {
 	return make_ready_future<>();
 }
 
 template<typename T1, typename... T>
-__attribute__((unused)) future<> read_objects(input_stream<char>& input, T1 &head, T&... ts){
+future<> read_objects(input_stream<char>& input, T1 &head, T&... ts){
     return read_object<T1>(input).then([&input, &head, &ts...] (std::optional<T1> ret) {
 		if (!ret.has_value())
 			return make_exception_future<>(std::runtime_error("Couldn't read all expected objects"));
@@ -55,25 +55,58 @@ __attribute__((unused)) future<> read_objects(input_stream<char>& input, T1 &hea
 }
 
 template<typename T>
-__attribute__((unused)) future<> write_object(output_stream<char>& output, T&& obj) {
+future<> write_object(output_stream<char>& output, T&& obj) {
 	return output.write(obj);
 }
 
 template<>
-__attribute__((unused)) future<> write_object(output_stream<char>& output, sstring&& str) {
+future<> write_object(output_stream<char>& output, sstring&& str) {
 	return output.write(str.size()).then([&output, str = std::move(str)] () {
 		return output.write(std::move(str));
 	});
 }
 
-__attribute__((unused)) future<> write_objects(output_stream<char>&) {
+__attribute__((unused)) future<> write_objects(output_stream<char>&) { // TODO: why not used?
 	return make_ready_future<>();
 }
 
 template<typename T1, typename... T>
-__attribute__((unused)) future<> write_objects(output_stream<char>& output, T1&& head, T&&... ts){
+future<> write_objects(output_stream<char>& output, T1&& head, T&&... ts){
     return write_object<T1>(output, head).then([&output, &ts...] () {
 		return write_object(output, std::forward<T>(ts)...);
+	});
+}
+
+struct Files {
+	std::unordered_map<int, file> fd_map;
+	int curr_fd = 0;
+} files;
+
+// input format  - path:str flags:int
+// output format - retopen (fd|err):int
+future<bool> handle_open(input_stream<char>& input, output_stream<char>& output) {
+	return do_with(sstring(), 0, 0, [&input, &output] (sstring& path, int& flags, int& fd) {
+		return read_objects(input, path, flags).then([&path/*, &flags*/, &fd] { // TODO: use flags
+			return open_file_dma(path, open_flags::rw).then([&fd] (auto file) {
+				fd = files.curr_fd++;
+				files.fd_map[fd] = std::move(file);
+			});
+		}).then([&output, &fd] {
+			return write_objects(output, "retopen", " " + to_sstring(fd)); // TODO: change sstring to int
+		}).then([&output] {
+			return output.flush();
+		}).then([] {
+			return true;
+		});
+	}).handle_exception([&output] (std::exception_ptr e) {
+		cerr << "An error occurred in " << __FUNCTION__ << ": " << e << endl;
+		return write_objects(output, "retopen", " -1").then([&output] {
+			return output.flush();
+		}).then([&output] {
+			return output.close(); // TODO: close?
+		}).then([] {
+			return false;
+		});
 	});
 }
 
@@ -86,8 +119,8 @@ future<bool> handle_single_operation(input_stream<char>& input, output_stream<ch
 
 		future<bool> operation = make_ready_future<bool>(false);
 		// TODO: implement functions
-		// if (option.value() == "open")
-		// 	operation = handle_open(input, output);
+		if (option.value() == "open")
+			operation = handle_open(input, output);
 		// else if (option.value() == "close")
 		// 	operation = handle_close(input, output);
 		// else if (option.value() == "pread")
