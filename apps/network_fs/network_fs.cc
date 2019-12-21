@@ -99,11 +99,38 @@ future<bool> handle_open(input_stream<char>& input, output_stream<char>& output)
 			return true;
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
-		cerr << "An error occurred in " << __FUNCTION__ << ": " << e << endl;
+		cerr << "An error occurred in handle_open: " << e << endl;
 		return write_objects(output, "retopen", " -1").then([&output] {
 			return output.flush();
+		}).then([] {
+			return false;
+		});
+	});
+}
+
+// input format  - fd:int
+// output format - retclose err:int
+future<bool> handle_close(input_stream<char>& input, output_stream<char>& output) {
+	return do_with(0, [&input, &output] (int& fd) {
+		return read_objects(input, fd).then([&fd] () {
+			auto it = files.fd_map.find(fd);
+			if (it == files.fd_map.end())
+				return make_exception_future<>(std::runtime_error("Couldn't find given fd"));
+			file file = it->second;
+			return file.close().then([it = std::move(it)] {
+				files.fd_map.erase(it);
+			});
 		}).then([&output] {
-			return output.close(); // TODO: close?
+			return write_objects(output, "retclose", " 0"); // TODO: change sstring to int
+		}).then([&output] {
+			return output.flush();
+		}).then([] {
+			return true;
+		});
+	}).handle_exception([&output] (std::exception_ptr e) {
+		cerr << "An error occurred in handle_close: " << e << endl;
+		return write_objects(output, "retclose", " -1").then([&output] {
+			return output.flush();
 		}).then([] {
 			return false;
 		});
@@ -121,8 +148,8 @@ future<bool> handle_single_operation(input_stream<char>& input, output_stream<ch
 		// TODO: implement functions
 		if (option.value() == "open")
 			operation = handle_open(input, output);
-		// else if (option.value() == "close")
-		// 	operation = handle_close(input, output);
+		else if (option.value() == "close")
+			operation = handle_close(input, output);
 		// else if (option.value() == "pread")
 		// 	operation = handle_pread(input, output);
 		// else if (option.value() == "pwrite")
@@ -144,6 +171,8 @@ future<> handle_connection(connected_socket connection, socket_address remote_ad
 			return handle_single_operation(input, output).then([] (auto cont) {
 				return cont ? stop_iteration::no : stop_iteration::yes;
 			});
+		}).finally([&output] {
+			return output.close();
 		});
 	}).finally([connection = std::move(connection), remote_address = std::move(remote_address)] {
 		cerr << "Closing connection with " << remote_address << endl;
