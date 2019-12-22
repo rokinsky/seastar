@@ -104,7 +104,7 @@ struct Files {
 
 // input format  - path:str flags:int
 // output format - retopen err:int [fd:int]
-future<bool> handle_open(input_stream<char>& input, output_stream<char>& output) {
+future<> handle_open(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(sstring(), 0, 0, [&input, &output] (sstring& path, int& flags, int& fd) {
 		return read_objects(input, path, flags).then([&path/*, &flags*/, &fd] { // TODO: use flags
 			return open_file_dma(path, open_flags::rw).then([&fd] (auto file) {
@@ -116,22 +116,20 @@ future<bool> handle_open(input_stream<char>& input, output_stream<char>& output)
 			return write_objects(output, "retopen", " 0 ", to_sstring(fd)); // TODO: change sstring to int
 		}).then([&output] {
 			return output.flush();
-		}).then([] {
-			return true;
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
-		cerr << "An error occurred in handle_open: " << e << endl;
+		cerr << "An error occurred in handle_open" << endl;
 		return write_objects(output, "retopen", " -1").then([&output] {
 			return output.flush();
-		}).then([] {
-			return false;
+		}).then([e] {
+			return make_exception_future(e);
 		});
 	});
 }
 
 // input format  - fd:int
 // output format - retclose err:int
-future<bool> handle_close(input_stream<char>& input, output_stream<char>& output) {
+future<> handle_close(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(0, [&input, &output] (int& fd) {
 		return read_objects(input, fd).then([&fd] () {
 			auto it = files.fd_map.find(fd);
@@ -145,22 +143,20 @@ future<bool> handle_close(input_stream<char>& input, output_stream<char>& output
 			return write_objects(output, "retclose", " 0"); // TODO: change sstring to int
 		}).then([&output] {
 			return output.flush();
-		}).then([] {
-			return true;
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
-		cerr << "An error occurred in handle_close: " << e << endl;
+		cerr << "An error occurred in handle_close" << endl;
 		return write_objects(output, "retclose", " -1").then([&output] {
 			return output.flush();
-		}).then([] {
-			return false;
+		}).then([e] {
+			return make_exception_future(e);
 		});
 	});
 }
 
 // input format  - fd:int count:size_t offset:off_t
 // output format - retpread err:int [buff:str]
-future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output) {
+future<> handle_pread(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(0, (size_t)0, (off_t)0, [&input, &output] (int& fd, size_t& count, off_t& offset) {
 		return read_objects(input, fd, count, offset).then([&fd, &count, &offset] () {
 			auto it = files.fd_map.find(fd);
@@ -173,15 +169,13 @@ future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output
 			return write_objects(output, "retpread", " 0 ", std::move(read_buf));
 		}).then([&output] {
 			return output.flush();
-		}).then([] {
-			return true;
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
-		cerr << "An error occurred in handle_pread: " << e << endl;
+		cerr << "An error occurred in handle_pread" << endl;
 		return write_objects(output, "retpread", " -1").then([&output] {
 			return output.flush();
-		}).then([] {
-			return false;
+		}).then([e] {
+			return make_exception_future(e);
 		});
 	});
 }
@@ -189,7 +183,7 @@ future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output
 // input format  - fd:int buff:str count:size_t
 // output format - retpwrite err:int [size:size_t]
 // TODO: solve alignment problem
-future<bool> handle_pwrite(input_stream<char>& input, output_stream<char>& output) {
+future<> handle_pwrite(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(0, sstring(), (size_t)0, (off_t)0,
 	                        [&input, &output]
 	                        (int& fd, sstring& buff, size_t& count, off_t& offset) {
@@ -210,24 +204,20 @@ future<bool> handle_pwrite(input_stream<char>& input, output_stream<char>& outpu
 			return write_objects(output, "retpwrite", " 0 ", write_size);
 		}).then([&output] {
 			return output.flush();
-		}).then([] {
-			return true;
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
-		cerr << "An error occurred in handle_pwrite: " << e << endl;
+		cerr << "An error occurred in handle_pwrite" << endl;
 		return write_objects(output, "retpwrite", " -1").then([&output] {
 			return output.flush();
-		}).then([&output] {
-			return output.close();
-		}).then([] {
-			return false;
+		}).then([e] {
+			return make_exception_future(e);
 		});
 	});
 }
 
 // input format  - path:str
 // output format - retreaddir err:int size:int [name:str]{size}
-future<bool> handle_readdir(input_stream<char>& input, output_stream<char>& output) {
+future<> handle_readdir(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(sstring(), [&input, &output] (sstring& path) {
 		return read_objects(input, path).then([&path] () {
 			return open_directory(path);
@@ -246,22 +236,20 @@ future<bool> handle_readdir(input_stream<char>& input, output_stream<char>& outp
 			return write_objects(output, "retreaddir", " 0 ", std::move(vec));
 		}).then([&output] {
 			return output.flush();
-		}).then([] {
-			return true;
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
-		cerr << "An error occurred in handle_readdir: " << e << endl;
+		cerr << "An error occurred in handle_readdir" << endl;
 		return write_objects(output, "retreaddir", " -1").then([&output] {
 			return output.flush();
-		}).then([] {
-			return false;
+		}).then([e] {
+			return make_exception_future(e);
 		});
 	});
 }
 
 // input format  - path:str
 // output format - retgetattr err:int [stat:stat]
-future<bool> handle_getattr(input_stream<char>& input, output_stream<char>& output) {
+future<> handle_getattr(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(sstring(), [&input, &output] (sstring& path) {
 		return read_objects(input, path).then([&path] () {
 			return open_file_dma(path, open_flags::ro);
@@ -271,27 +259,25 @@ future<bool> handle_getattr(input_stream<char>& input, output_stream<char>& outp
 			return write_objects(output, "retgetattr", " 0 ", stat); // TODO: should we pack struct stat before sending?
 		}).then([&output] {
 			return output.flush();
-		}).then([] {
-			return true;
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
-		cerr << "An error occurred in handle_getattr: " << e << endl;
+		cerr << "An error occurred in handle_getattr" << endl;
 		return write_objects(output, "retgetattr", " -1").then([&output] {
 			return output.flush();
-		}).then([] {
-			return false;
+		}).then([e] {
+			return make_exception_future(e);
 		});
 	});
 }
 
-future<bool> handle_single_operation(input_stream<char>& input, output_stream<char>& output) {
-	// read operation name and decide which operation handler start
+future<> handle_single_operation(input_stream<char>& input, output_stream<char>& output) {
+	// read operation name and decide which operation handler to start
 	return read_object<sstring>(input).then([&input, &output] (std::optional<sstring> option) {
 		if (!option.has_value())
-			return make_ready_future<bool>(false);
+			return make_exception_future<>(std::runtime_error("Error while reading operation name"));
 		cerr << "operation: " << option.value() << endl;
 
-		future<bool> operation = make_ready_future<bool>(false);
+		future<> operation = make_ready_future<>();
 		if (option.value() == "open")
 			operation = handle_open(input, output);
 		else if (option.value() == "close")
@@ -304,6 +290,8 @@ future<bool> handle_single_operation(input_stream<char>& input, output_stream<ch
 			operation = handle_readdir(input, output);
 		else if (option.value() == "getattr")
 			operation = handle_getattr(input, output);
+		else
+			operation = make_exception_future<>(std::runtime_error("Operation name invalid"));
 
 		return operation;
 	});
@@ -314,8 +302,8 @@ future<> handle_connection(connected_socket connection, socket_address remote_ad
 	return do_with(connection.input(), connection.output(),
 			[] (input_stream<char>& input, output_stream<char>& output) {
 		return repeat([&input, &output] {
-			return handle_single_operation(input, output).then([] (auto cont) {
-				return cont ? stop_iteration::no : stop_iteration::yes;
+			return handle_single_operation(input, output).then([] () {
+				return stop_iteration::no;
 			});
 		}).finally([&output] {
 			return output.close();
@@ -356,7 +344,7 @@ int main(int argc, char** argv) {
 		app.run(argc, argv, [&app] {
 			auto& args = app.configuration();
 			return start_server(args["port"].as<uint16_t>())
-			       .handle_exception([] (std::exception_ptr e) {
+					.handle_exception([] (std::exception_ptr e) {
 				cerr << "An error occurred: " << e << endl;
 			});
 		});
