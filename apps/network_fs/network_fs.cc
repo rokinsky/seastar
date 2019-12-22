@@ -75,6 +75,15 @@ future<> write_object(output_stream<char>& output, temporary_buffer<char>&& buf)
 	});
 }
 
+template<>
+future<> write_object(output_stream<char>& output, vector<sstring>&& vec) { // TODO: partial specialization?
+	return output.write(vec.size()).then([&output, vec = std::move(vec)] () {
+		return seastar::do_for_each(vec, [&output] (sstring obj) { // TODO: solve copying
+            return write_object<sstring>(output, std::move(obj));
+        });
+	});
+}
+
 future<> write_objects(output_stream<char>&) {
 	return make_ready_future<>();
 }
@@ -176,12 +185,46 @@ future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output
 }
 
 // input format  - path:str
+// output format - retreaddir err:int size:int [name:str]{size}
+future<bool> handle_readdir(input_stream<char>& input, output_stream<char>& output) {
+	return do_with(sstring(), [&input, &output] (sstring& path) {
+		return read_objects(input, path).then([&path] () {
+			return open_directory(path);
+		}).then([] (file dir) {
+			auto vec = make_lw_shared(vector<sstring>());
+			auto listing_lmb = dir.list_directory([vec] (directory_entry de) {
+					cerr << de.name << endl;
+					vec->emplace_back(std::move(de.name));
+					return make_ready_future<>();
+				});
+			auto listing = make_lw_shared(std::move(listing_lmb));
+			return listing->done().then([vec, listing, dir] {
+				return std::move(*vec);
+			});
+		}).then([&output] (vector<sstring> vec) {
+			return write_objects(output, "retreaddir", " 0 ", std::move(vec));
+		}).then([&output] {
+			return output.flush();
+		}).then([] {
+			return true;
+		});
+	}).handle_exception([&output] (std::exception_ptr e) {
+		cerr << "An error occurred in handle_pread: " << e << endl;
+		return write_objects(output, "retreaddir", " -1").then([&output] {
+			return output.flush();
+		}).then([] {
+			return false;
+		});
+	});
+}
+
+// input format  - path:str
 // output format - retgetattr err:int [stat:stat]
 future<bool> handle_getattr(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(sstring(), [&input, &output] (sstring& path) {
 		return read_objects(input, path).then([&path] () {
 			return open_file_dma(path, open_flags::ro);
-		}).then([&output] (file file) {
+		}).then([] (file file) {
 			return file.stat();
 		}).then([&output] (struct stat stat) {
 			return write_objects(output, "retgetattr", " 0 ", stat); // TODO: should we pack struct stat before sending?
@@ -217,8 +260,8 @@ future<bool> handle_single_operation(input_stream<char>& input, output_stream<ch
 			operation = handle_pread(input, output);
 		// else if (option.value() == "pwrite")
 		// 	operation = handle_pwrite(input, output);
-		// else if (option.value() == "readdir")
-		// 	operation = handle_readdir(input, output);
+		else if (option.value() == "readdir")
+			operation = handle_readdir(input, output);
 		else if (option.value() == "getattr")
 			operation = handle_getattr(input, output);
 
