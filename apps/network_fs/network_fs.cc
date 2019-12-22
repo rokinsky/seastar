@@ -56,7 +56,9 @@ future<> read_objects(input_stream<char>& input, T1 &head, T&... ts){
 
 template<typename T>
 future<> write_object(output_stream<char>& output, T&& obj) {
-	return output.write(obj);
+	char buff[sizeof(obj)];
+	std::memcpy(buff, &obj, sizeof(obj));
+	return output.write(buff, sizeof(obj));
 }
 
 template<>
@@ -90,7 +92,7 @@ struct Files {
 } files;
 
 // input format  - path:str flags:int
-// output format - retopen (fd|err):int
+// output format - retopen err:int [fd:int]
 future<bool> handle_open(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(sstring(), 0, 0, [&input, &output] (sstring& path, int& flags, int& fd) {
 		return read_objects(input, path, flags).then([&path/*, &flags*/, &fd] { // TODO: use flags
@@ -100,7 +102,7 @@ future<bool> handle_open(input_stream<char>& input, output_stream<char>& output)
 			});
 		}).then([&output, &fd] {
 			// TODO: send sstring not char[]
-			return write_objects(output, "retopen", " " + to_sstring(fd)); // TODO: change sstring to int
+			return write_objects(output, "retopen", " 0 ", to_sstring(fd)); // TODO: change sstring to int
 		}).then([&output] {
 			return output.flush();
 		}).then([] {
@@ -146,7 +148,7 @@ future<bool> handle_close(input_stream<char>& input, output_stream<char>& output
 }
 
 // input format  - fd:int count:size_t offset:off_t
-// output format - retpread (err|size):int [buf:str]
+// output format - retpread err:int [buf:str]
 future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(0, (size_t)0, (off_t)0, [&input, &output] (int& fd, size_t& count, off_t& offset) {
 		return read_objects(input, fd, count, offset).then([&fd, &count, &offset] () {
@@ -157,7 +159,7 @@ future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output
 			file file = it->second;
 			return file.dma_read<char>(offset, count);
 		}).then([&output] (temporary_buffer<char> read_buf) {
-			return write_objects(output, "retpread", " " + to_sstring(read_buf.size()) + " ", std::move(read_buf));
+			return write_objects(output, "retpread", " 0 ", std::move(read_buf));
 		}).then([&output] {
 			return output.flush();
 		}).then([] {
@@ -166,6 +168,31 @@ future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output
 	}).handle_exception([&output] (std::exception_ptr e) {
 		cerr << "An error occurred in handle_pread: " << e << endl;
 		return write_objects(output, "retpread", " -1").then([&output] {
+			return output.flush();
+		}).then([] {
+			return false;
+		});
+	});
+}
+
+// input format  - path:str
+// output format - retgetattr err:int [stat:stat]
+future<bool> handle_getattr(input_stream<char>& input, output_stream<char>& output) {
+	return do_with(sstring(), [&input, &output] (sstring& path) {
+		return read_objects(input, path).then([&path] () {
+			return open_file_dma(path, open_flags::ro);
+		}).then([&output] (file file) {
+			return file.stat();
+		}).then([&output] (struct stat stat) {
+			return write_objects(output, "retgetattr", " 0 ", stat); // TODO: should we pack struct stat before sending?
+		}).then([&output] {
+			return output.flush();
+		}).then([] {
+			return true;
+		});
+	}).handle_exception([&output] (std::exception_ptr e) {
+		cerr << "An error occurred in handle_getattr: " << e << endl;
+		return write_objects(output, "retgetattr", " -1").then([&output] {
 			return output.flush();
 		}).then([] {
 			return false;
@@ -192,8 +219,8 @@ future<bool> handle_single_operation(input_stream<char>& input, output_stream<ch
 		// 	operation = handle_pwrite(input, output);
 		// else if (option.value() == "readdir")
 		// 	operation = handle_readdir(input, output);
-		// else if (option.value() == "getattr")
-		// 	operation = handle_getattr(input, output);
+		else if (option.value() == "getattr")
+			operation = handle_getattr(input, output);
 
 		return operation;
 	});
@@ -217,7 +244,7 @@ future<> handle_connection(connected_socket connection, socket_address remote_ad
 
 future<> start_server(uint16_t port) {
 	return do_with(engine().listen(make_ipv4_address({port})),
-	                        gate(), [] (server_socket& listener, gate& gate) {
+			gate(), [] (server_socket& listener, gate& gate) {
 		return keep_doing([&listener, &gate] () {
 			return listener.accept().then([&gate] (accept_result connection) {
 				auto connection_handler = with_gate(gate, [connection = std::move(connection)] () mutable {
