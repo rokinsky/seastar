@@ -15,13 +15,15 @@ using std::endl;
 
 namespace {
 
+constexpr uint32_t alignment = 4096;
+
 template<typename T>
 future<std::optional<T>> read_object(input_stream<char>& input) {
-	return input.read_exactly(sizeof(T)).then([] (temporary_buffer<char> buf) {
-		if (buf.size() != sizeof(T))
+	return input.read_exactly(sizeof(T)).then([] (temporary_buffer<char> buff) {
+		if (buff.size() != sizeof(T))
 			return make_ready_future<std::optional<T>>(std::nullopt);
 		T value;
-		std::memcpy(&value, buf.get(), sizeof(value));
+		std::memcpy(&value, buff.get(), sizeof(value));
 		return make_ready_future<std::optional<T>>(std::move(value)); // TODO: add htons etc?
 	});
 }
@@ -31,9 +33,9 @@ template <>
 future<std::optional<sstring>> read_object(input_stream<char>& input) {
 	return read_object<size_t>(input).then([&input] (std::optional<size_t> size) {
 		if (size.has_value()) {
-			return input.read_exactly(size.value()).then([] (temporary_buffer<char> buf) {
+			return input.read_exactly(size.value()).then([] (temporary_buffer<char> buff) {
 				return make_ready_future<std::optional<sstring>>(
-					std::optional<sstring>(sstring(buf.begin(), buf.end())));
+					std::optional<sstring>(sstring(buff.begin(), buff.end())));
 			});
 		}
 		return make_ready_future<std::optional<sstring>>(std::nullopt);
@@ -69,9 +71,9 @@ future<> write_object(output_stream<char>& output, sstring&& str) {
 }
 
 template<>
-future<> write_object(output_stream<char>& output, temporary_buffer<char>&& buf) {
-	return output.write(buf.size()).then([&output, buf = std::move(buf)] () {
-		return output.write(buf.get(), buf.size());
+future<> write_object(output_stream<char>& output, temporary_buffer<char>&& buff) {
+	return output.write(buff.size()).then([&output, buff = std::move(buff)] () {
+		return output.write(buff.get(), buff.size());
 	});
 }
 
@@ -157,7 +159,7 @@ future<bool> handle_close(input_stream<char>& input, output_stream<char>& output
 }
 
 // input format  - fd:int count:size_t offset:off_t
-// output format - retpread err:int [buf:str]
+// output format - retpread err:int [buff:str]
 future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(0, (size_t)0, (off_t)0, [&input, &output] (int& fd, size_t& count, off_t& offset) {
 		return read_objects(input, fd, count, offset).then([&fd, &count, &offset] () {
@@ -178,6 +180,45 @@ future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output
 		cerr << "An error occurred in handle_pread: " << e << endl;
 		return write_objects(output, "retpread", " -1").then([&output] {
 			return output.flush();
+		}).then([] {
+			return false;
+		});
+	});
+}
+
+// input format  - fd:int buff:str count:size_t
+// output format - retpwrite err:int [size:size_t]
+// TODO: solve alignment problem
+future<bool> handle_pwrite(input_stream<char>& input, output_stream<char>& output) {
+	return do_with(0, sstring(), (size_t)0, (off_t)0,
+	                        [&input, &output]
+	                        (int& fd, sstring& buff, size_t& count, off_t& offset) {
+		return read_objects(input, fd, buff, count, offset).then([&fd, &buff, &count, &offset] () {
+			if (count % alignment || offset % alignment)
+				return make_exception_future<size_t>(std::runtime_error("count and offset not aligned"));
+			auto it = files.fd_map.find(fd);
+			if (it == files.fd_map.end())
+				return make_exception_future<size_t>(std::runtime_error("Couldn't find given fd"));
+			file file = it->second;
+			auto temp_buf = temporary_buffer<char>::aligned(alignment, buff.size());
+			std::memcpy(temp_buf.get_write(), buff.data(), buff.size());
+			return file.dma_write<char>(offset, temp_buf.get(), count)
+					.then([temp_buf = std::move(temp_buf)] (size_t write_size) {
+				return write_size;
+			});
+		}).then([&output] (size_t write_size) {
+			return write_objects(output, "retpwrite", " 0 ", write_size);
+		}).then([&output] {
+			return output.flush();
+		}).then([] {
+			return true;
+		});
+	}).handle_exception([&output] (std::exception_ptr e) {
+		cerr << "An error occurred in handle_pwrite: " << e << endl;
+		return write_objects(output, "retpwrite", " -1").then([&output] {
+			return output.flush();
+		}).then([&output] {
+			return output.close();
 		}).then([] {
 			return false;
 		});
@@ -209,7 +250,7 @@ future<bool> handle_readdir(input_stream<char>& input, output_stream<char>& outp
 			return true;
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
-		cerr << "An error occurred in handle_pread: " << e << endl;
+		cerr << "An error occurred in handle_readdir: " << e << endl;
 		return write_objects(output, "retreaddir", " -1").then([&output] {
 			return output.flush();
 		}).then([] {
@@ -251,15 +292,14 @@ future<bool> handle_single_operation(input_stream<char>& input, output_stream<ch
 		cerr << "operation: " << option.value() << endl;
 
 		future<bool> operation = make_ready_future<bool>(false);
-		// TODO: implement functions
 		if (option.value() == "open")
 			operation = handle_open(input, output);
 		else if (option.value() == "close")
 			operation = handle_close(input, output);
 		else if (option.value() == "pread")
 			operation = handle_pread(input, output);
-		// else if (option.value() == "pwrite")
-		// 	operation = handle_pwrite(input, output);
+		else if (option.value() == "pwrite")
+			operation = handle_pwrite(input, output);
 		else if (option.value() == "readdir")
 			operation = handle_readdir(input, output);
 		else if (option.value() == "getattr")
