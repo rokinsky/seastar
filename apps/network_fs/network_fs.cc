@@ -66,14 +66,21 @@ future<> write_object(output_stream<char>& output, sstring&& str) {
 	});
 }
 
-__attribute__((unused)) future<> write_objects(output_stream<char>&) { // TODO: why not used?
+template<>
+future<> write_object(output_stream<char>& output, temporary_buffer<char>&& buf) {
+	return output.write(buf.size()).then([&output, buf = std::move(buf)] () {
+		return output.write(buf.get(), buf.size());
+	});
+}
+
+future<> write_objects(output_stream<char>&) {
 	return make_ready_future<>();
 }
 
 template<typename T1, typename... T>
 future<> write_objects(output_stream<char>& output, T1&& head, T&&... ts){
-    return write_object<T1>(output, head).then([&output, &ts...] () {
-		return write_object(output, std::forward<T>(ts)...);
+    return write_object<T1>(output, std::forward<T1>(head)).then([&output, &ts...] () {
+		return write_objects(output, std::forward<T>(ts)...);
 	});
 }
 
@@ -92,6 +99,7 @@ future<bool> handle_open(input_stream<char>& input, output_stream<char>& output)
 				files.fd_map[fd] = std::move(file);
 			});
 		}).then([&output, &fd] {
+			// TODO: send sstring not char[]
 			return write_objects(output, "retopen", " " + to_sstring(fd)); // TODO: change sstring to int
 		}).then([&output] {
 			return output.flush();
@@ -137,6 +145,34 @@ future<bool> handle_close(input_stream<char>& input, output_stream<char>& output
 	});
 }
 
+// input format  - fd:int count:size_t offset:off_t
+// output format - retpread (err|size):int [buf:str]
+future<bool> handle_pread(input_stream<char>& input, output_stream<char>& output) {
+	return do_with(0, (size_t)0, (off_t)0, [&input, &output] (int& fd, size_t& count, off_t& offset) {
+		return read_objects(input, fd, count, offset).then([&fd, &count, &offset] () {
+			auto it = files.fd_map.find(fd);
+			if (it == files.fd_map.end())
+				return make_exception_future<temporary_buffer<char>>
+				       (std::runtime_error("File is not open"));
+			file file = it->second;
+			return file.dma_read<char>(offset, count);
+		}).then([&output] (temporary_buffer<char> read_buf) {
+			return write_objects(output, "retpread", " " + to_sstring(read_buf.size()) + " ", std::move(read_buf));
+		}).then([&output] {
+			return output.flush();
+		}).then([] {
+			return true;
+		});
+	}).handle_exception([&output] (std::exception_ptr e) {
+		cerr << "An error occurred in handle_pread: " << e << endl;
+		return write_objects(output, "retpread", " -1").then([&output] {
+			return output.flush();
+		}).then([] {
+			return false;
+		});
+	});
+}
+
 future<bool> handle_single_operation(input_stream<char>& input, output_stream<char>& output) {
 	// read operation name and decide which operation handler start
 	return read_object<sstring>(input).then([&input, &output] (std::optional<sstring> option) {
@@ -150,8 +186,8 @@ future<bool> handle_single_operation(input_stream<char>& input, output_stream<ch
 			operation = handle_open(input, output);
 		else if (option.value() == "close")
 			operation = handle_close(input, output);
-		// else if (option.value() == "pread")
-		// 	operation = handle_pread(input, output);
+		else if (option.value() == "pread")
+			operation = handle_pread(input, output);
 		// else if (option.value() == "pwrite")
 		// 	operation = handle_pwrite(input, output);
 		// else if (option.value() == "readdir")
