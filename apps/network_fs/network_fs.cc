@@ -58,28 +58,28 @@ future<> read_objects(input_stream<char>& input, T1 &head, T&... ts){
 
 template<typename T>
 future<> write_object(output_stream<char>& output, T&& obj) {
-	char buff[sizeof(obj)];
+	char buff[sizeof(obj)]; // TODO: make buff's life longer
 	std::memcpy(buff, &obj, sizeof(obj));
 	return output.write(buff, sizeof(obj));
 }
 
 template<>
 future<> write_object(output_stream<char>& output, sstring&& str) {
-	return output.write(str.size()).then([&output, str = std::move(str)] () {
-		return output.write(std::move(str));
+	return write_object(output, str.size()).then([&output, str = std::move(str)] () {
+		return output.write(std::move(str)).then([str = std::move(str)] {});
 	});
 }
 
 template<>
 future<> write_object(output_stream<char>& output, temporary_buffer<char>&& buff) {
-	return output.write(buff.size()).then([&output, buff = std::move(buff)] () {
-		return output.write(buff.get(), buff.size());
+	return write_object(output, buff.size()).then([&output, buff = std::move(buff)] () mutable {
+		return output.write(buff.get(), buff.size()).then([buff = std::move(buff)] {});
 	});
 }
 
 template<>
 future<> write_object(output_stream<char>& output, vector<sstring>&& vec) { // TODO: partial specialization?
-	return output.write(vec.size()).then([&output, vec = std::move(vec)] () {
+	return write_object(output, vec.size()).then([&output, vec = std::move(vec)] () {
 		return seastar::do_for_each(vec, [&output] (sstring obj) { // TODO: solve copying
             return write_object<sstring>(output, std::move(obj));
         });
@@ -112,14 +112,13 @@ future<> handle_open(input_stream<char>& input, output_stream<char>& output) {
 				files.fd_map[fd] = std::move(file);
 			});
 		}).then([&output, &fd] {
-			// TODO: send sstring not char[]
-			return write_objects(output, "retopen", " 0 ", to_sstring(fd)); // TODO: change sstring to int
+			return write_objects(output, sstring("retopen"), 0, fd);
 		}).then([&output] {
 			return output.flush();
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
 		cerr << "An error occurred in handle_open" << endl;
-		return write_objects(output, "retopen", " -1").then([&output] {
+		return write_objects(output, sstring("retopen"), -1).then([&output] {
 			return output.flush();
 		}).then([e] {
 			return make_exception_future(e);
@@ -140,13 +139,13 @@ future<> handle_close(input_stream<char>& input, output_stream<char>& output) {
 				files.fd_map.erase(it);
 			});
 		}).then([&output] {
-			return write_objects(output, "retclose", " 0"); // TODO: change sstring to int
+			return write_objects(output, sstring("retclose"), 0);
 		}).then([&output] {
 			return output.flush();
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
 		cerr << "An error occurred in handle_close" << endl;
-		return write_objects(output, "retclose", " -1").then([&output] {
+		return write_objects(output, sstring("retclose"), -1).then([&output] {
 			return output.flush();
 		}).then([e] {
 			return make_exception_future(e);
@@ -166,13 +165,13 @@ future<> handle_pread(input_stream<char>& input, output_stream<char>& output) {
 			file file = it->second;
 			return file.dma_read<char>(offset, count);
 		}).then([&output] (temporary_buffer<char> read_buf) {
-			return write_objects(output, "retpread", " 0 ", std::move(read_buf));
+			return write_objects(output, sstring("retpread"), 0, std::move(read_buf));
 		}).then([&output] {
 			return output.flush();
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
 		cerr << "An error occurred in handle_pread" << endl;
-		return write_objects(output, "retpread", " -1").then([&output] {
+		return write_objects(output, sstring("retpread"), -1).then([&output] {
 			return output.flush();
 		}).then([e] {
 			return make_exception_future(e);
@@ -180,7 +179,7 @@ future<> handle_pread(input_stream<char>& input, output_stream<char>& output) {
 	});
 }
 
-// input format  - fd:int buff:str count:size_t
+// input format  - fd:int buff:str count:size_t offset:off_t
 // output format - retpwrite err:int [size:size_t]
 // TODO: solve alignment problem
 future<> handle_pwrite(input_stream<char>& input, output_stream<char>& output) {
@@ -195,19 +194,19 @@ future<> handle_pwrite(input_stream<char>& input, output_stream<char>& output) {
 				return make_exception_future<size_t>(std::runtime_error("Couldn't find given fd"));
 			file file = it->second;
 			auto temp_buf = temporary_buffer<char>::aligned(alignment, buff.size());
-			std::memcpy(temp_buf.get_write(), buff.data(), buff.size());
+			std::memcpy(temp_buf.get_write(), buff.c_str(), buff.size());
 			return file.dma_write<char>(offset, temp_buf.get(), count)
 					.then([temp_buf = std::move(temp_buf)] (size_t write_size) {
 				return write_size;
 			});
 		}).then([&output] (size_t write_size) {
-			return write_objects(output, "retpwrite", " 0 ", write_size);
+			return write_objects(output, sstring("retpwrite"), 0, write_size);
 		}).then([&output] {
 			return output.flush();
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
 		cerr << "An error occurred in handle_pwrite" << endl;
-		return write_objects(output, "retpwrite", " -1").then([&output] {
+		return write_objects(output, sstring("retpwrite"), -1).then([&output] {
 			return output.flush();
 		}).then([e] {
 			return make_exception_future(e);
@@ -233,13 +232,13 @@ future<> handle_readdir(input_stream<char>& input, output_stream<char>& output) 
 				return std::move(*vec);
 			});
 		}).then([&output] (vector<sstring> vec) {
-			return write_objects(output, "retreaddir", " 0 ", std::move(vec));
+			return write_objects(output, sstring("retreaddir"), 0, std::move(vec));
 		}).then([&output] {
 			return output.flush();
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
 		cerr << "An error occurred in handle_readdir" << endl;
-		return write_objects(output, "retreaddir", " -1").then([&output] {
+		return write_objects(output, sstring("retreaddir"), -1).then([&output] {
 			return output.flush();
 		}).then([e] {
 			return make_exception_future(e);
@@ -247,22 +246,46 @@ future<> handle_readdir(input_stream<char>& input, output_stream<char>& output) 
 	});
 }
 
+struct timespec time_point_to_timespec(
+		const std::chrono::system_clock::time_point &tp) {
+	auto secs = std::chrono::time_point_cast<std::chrono::seconds>(tp);
+	auto ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(tp) -
+		std::chrono::time_point_cast<std::chrono::nanoseconds>(secs);
+	return timespec{secs.time_since_epoch().count(), ns.count()};
+}
+
+struct stat stat_data_to_stat(const struct stat_data& stat_data) {
+	struct stat stat;
+	stat.st_dev = stat_data.device_id;
+	stat.st_ino = stat_data.inode_number;
+	stat.st_mode = stat_data.mode;
+	stat.st_nlink = stat_data.number_of_links;
+	stat.st_uid = stat_data.uid;
+	stat.st_gid = stat_data.gid;
+	stat.st_rdev = stat_data.rdev;
+	stat.st_size = stat_data.size;
+	stat.st_blksize = stat_data.block_size;
+	stat.st_blocks = stat_data.allocated_size / 512;
+	stat.st_atim = time_point_to_timespec(stat_data.time_accessed);
+	stat.st_mtim = time_point_to_timespec(stat_data.time_modified);
+	stat.st_ctim = time_point_to_timespec(stat_data.time_changed);
+	return stat;
+}
+
 // input format  - path:str
 // output format - retgetattr err:int [stat:stat]
 future<> handle_getattr(input_stream<char>& input, output_stream<char>& output) {
 	return do_with(sstring(), [&input, &output] (sstring& path) {
 		return read_objects(input, path).then([&path] () {
-			return open_file_dma(path, open_flags::ro);
-		}).then([] (file file) {
-			return file.stat();
-		}).then([&output] (struct stat stat) {
-			return write_objects(output, "retgetattr", " 0 ", stat); // TODO: should we pack struct stat before sending?
+			return file_stat(path);
+		}).then([&output] (struct stat_data stat_data) {
+			return write_objects(output, sstring("retgetattr"), 0, stat_data_to_stat(stat_data)); // TODO: should we pack struct stat before sending?
 		}).then([&output] {
 			return output.flush();
 		});
 	}).handle_exception([&output] (std::exception_ptr e) {
 		cerr << "An error occurred in handle_getattr" << endl;
-		return write_objects(output, "retgetattr", " -1").then([&output] {
+		return write_objects(output, sstring("retgetattr"), -1).then([&output] {
 			return output.flush();
 		}).then([e] {
 			return make_exception_future(e);
@@ -308,13 +331,16 @@ future<> handle_connection(connected_socket connection, socket_address remote_ad
 		}).finally([&output] {
 			return output.close();
 		});
-	}).finally([connection = std::move(connection), remote_address = std::move(remote_address)] {
+	// TODO: why needs to be commented out to work with multiple connections?
+	}).finally([/* connection = std::move(connection),  */remote_address = std::move(remote_address)] {
 		cerr << "Closing connection with " << remote_address << endl;
 	});
 }
 
 future<> start_server(uint16_t port) {
-	return do_with(engine().listen(make_ipv4_address({port})),
+    seastar::listen_options lo;
+    lo.reuse_address = true;
+	return do_with(engine().listen(make_ipv4_address({port}), lo),
 			gate(), [] (server_socket& listener, gate& gate) {
 		return keep_doing([&listener, &gate] () {
 			return listener.accept().then([&gate] (accept_result connection) {
@@ -329,7 +355,6 @@ future<> start_server(uint16_t port) {
 			return gate.close();
 		});
 	});
-
 }
 
 }
@@ -349,8 +374,7 @@ int main(int argc, char** argv) {
 			});
 		});
 	} catch(...) {
-		cerr << "Couldn't start application: "
-		          << std::current_exception() << "\n";
+		cerr << "Couldn't start application: " << std::current_exception() << "\n";
 		return 1;
 	}
 	return 0;
