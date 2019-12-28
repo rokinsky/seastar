@@ -597,6 +597,8 @@ add_library (seastar STATIC
   src/core/vla.hh
   src/core/io_queue.cc
   src/fs/bitwise.hh
+  src/fs/bootstrap_record.cc
+  src/fs/bootstrap_record.hh
   src/fs/cluster.hh
   src/fs/cluster_allocator.cc
   src/fs/file.cc
