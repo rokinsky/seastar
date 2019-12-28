@@ -21,7 +21,8 @@
 
 #pragma once
 
-#include "fs/cluster.hh"
+#include "cluster.hh"
+#include "inode.hh"
 
 #include <seastar/core/reactor.hh>
 #include <seastar/fs/block_device.hh>
@@ -40,7 +41,7 @@ public:
     static constexpr uint32_t max_shards_nb = 500;
 
     struct shard_info {
-        cluster_id_t metadata_cl; /// cluster id of the first metadatalog cluster
+        cluster_id_t metadata_cl; /// cluster id of the first metadata log cluster
         cluster_range range_cl; /// range of clusters for data for this shard
 
         bool operator==(const shard_info &) const noexcept;
@@ -50,13 +51,13 @@ public:
     uint64_t version; /// file system version
     unit_size_t sector_size; /// sector size in bytes
     unit_size_t cluster_size; /// cluster size in bytes
-    uint32_t root_directory; /// root inode number
+    inode_t root_directory; /// root inode number
     uint32_t shards_nb; /// number of file system shards
     std::vector<shard_info> shards_info; /// basic informations about each file system shard
 
     bootstrap_record() = default;
     bootstrap_record(uint64_t version, unit_size_t sector_size, unit_size_t cluster_size,
-            uint32_t root_directory, uint32_t shards_nb, std::vector<shard_info> shards_info)
+            inode_t root_directory, uint32_t shards_nb, std::vector<shard_info> shards_info)
         : version(version), sector_size(sector_size), cluster_size(cluster_size) , root_directory(root_directory)
         , shards_nb(shards_nb), shards_info(std::move(shards_info)) {}
 
@@ -73,7 +74,7 @@ struct bootstrap_record_disk {
     uint64_t version;
     unit_size_t sector_size;
     unit_size_t cluster_size;
-    uint32_t root_directory;
+    inode_t root_directory;
     uint32_t shards_nb;
     bootstrap_record::shard_info shards_info[bootstrap_record::max_shards_nb];
     uint32_t crc;

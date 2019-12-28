@@ -28,7 +28,7 @@ namespace seastar::fs {
 
 namespace {
 
-constexpr size_t alignment = 4 * KB;
+constexpr unit_size_t alignment = 4 * KB;
 constexpr disk_offset_t boot_record_offset = 0;
 constexpr unit_size_t min_sector_size = 512;
 
@@ -54,8 +54,9 @@ future<size_t> read_exactly(block_device& device, disk_offset_t off, char* buff,
     return do_with((size_t)0, [&device, off, buff, size] (auto& count) {
         return repeat([&count, &device, off, buff, size] () {
             return device.read(off + count, buff, size - count).then([&count] (size_t ret) {
-                if (ret == 0 || ret % alignment)
+                if (ret == 0 || ret % alignment) {
                     return stop_iteration::yes;
+                }
                 count += ret;
                 return stop_iteration::no;
             });
@@ -69,8 +70,9 @@ future<size_t> write_exactly(block_device& device, disk_offset_t off, const char
     return do_with((size_t)0, [&device, off, buff, size] (auto& count) {
         return repeat([&count, &device, off, buff, size] () {
             return device.write(off + count, buff, size - count).then([&count] (size_t ret) {
-                if (ret == 0 || ret % alignment)
+                if (ret == 0 || ret % alignment) {
                     return stop_iteration::yes;
+                }
                 count += ret;
                 return stop_iteration::no;
             });
@@ -132,8 +134,7 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
     // initial check
     if (shards_info.size() > max_shards_nb) {
         return make_exception_future<>(invalid_bootstrap_record("Too many shards to fit into the bootstrap record"));
-    }
-    else if (shards_nb != shards_info.size()) {
+    } else if (shards_nb != shards_info.size()) {
         return make_exception_future<>(
                 invalid_bootstrap_record("Shards number should match number of metadata pointers"));
     }
