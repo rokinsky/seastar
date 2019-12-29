@@ -20,6 +20,7 @@
  */
 
 #include "fs/bootstrap_record.hh"
+#include "seastar/core/smp.hh"
 
 #include <boost/crc.hpp>
 #include <seastar/core/units.hh>
@@ -32,32 +33,56 @@ constexpr unit_size_t alignment = 4 * KB;
 constexpr disk_offset_t boot_record_offset = 0;
 constexpr unit_size_t min_sector_size = 512;
 
-constexpr size_t aligned_boot_record_size =
-        ((sizeof(bootstrap_record_disk) / alignment) + (sizeof(bootstrap_record_disk) % alignment > 0)) * alignment;
+constexpr size_t aligned_bootstrap_record_size = (1 + (sizeof(bootstrap_record_disk) - 1) / alignment) * alignment;
 constexpr size_t crc_offset = offsetof(bootstrap_record_disk, crc);
 
-uint32_t crc32(const char* buff, size_t len) {
+inline uint32_t crc32(const void* buff, size_t len) {
     boost::crc_32_type result;
     result.process_bytes(buff, len);
     return result.checksum();
 }
 
-bool is_sector_size_valid(unit_size_t sector_size) {
+inline bool is_sector_size_valid(unit_size_t sector_size) noexcept {
     return is_power_of_2(sector_size) && sector_size >= min_sector_size;
 }
 
-bool is_cluster_size_valid(unit_size_t cluster_size, unit_size_t sector_size) {
+inline bool is_cluster_size_valid(unit_size_t cluster_size, unit_size_t sector_size) noexcept {
     return is_power_of_2(cluster_size) && cluster_size % sector_size == 0;
 }
 
+bool is_shards_info_valid(std::vector<bootstrap_record::shard_info> shards_info) {
+    // check 1 <= beg <= metadata_cluster < end
+    for (const bootstrap_record::shard_info& info : shards_info) {
+        if (info.metadata_cluster < info.available_clusters.beg ||
+                info.metadata_cluster >= info.available_clusters.end ||
+                info.available_clusters.beg < 1) {
+            return false;
+        }
+    }
+
+    // check that ranges don't overlap
+    sort(shards_info.begin(), shards_info.end(),
+        [] (const bootstrap_record::shard_info& left,
+                const bootstrap_record::shard_info& right) {
+            return left.available_clusters.beg < right.available_clusters.beg;
+        });
+    for (size_t i = 1; i < shards_info.size(); i++) {
+        if (shards_info[i - 1].available_clusters.end > shards_info[i].available_clusters.beg) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 future<size_t> read_exactly(block_device& device, disk_offset_t off, char* buff, size_t size) {
-    return do_with((size_t)0, [&device, off, buff, size] (auto& count) {
+    return do_with((size_t)0, [&device, off, buff, size] (size_t& count) {
         return repeat([&count, &device, off, buff, size] () {
             return device.read(off + count, buff, size - count).then([&count] (size_t ret) {
-                if (ret == 0 || ret % alignment) {
+                count += ret;
+                if (ret == 0 || ret % alignment != 0) {
                     return stop_iteration::yes;
                 }
-                count += ret;
                 return stop_iteration::no;
             });
         }).then([&count] {
@@ -67,13 +92,13 @@ future<size_t> read_exactly(block_device& device, disk_offset_t off, char* buff,
 }
 
 future<size_t> write_exactly(block_device& device, disk_offset_t off, const char* buff, size_t size) {
-    return do_with((size_t)0, [&device, off, buff, size] (auto& count) {
+    return do_with((size_t)0, [&device, off, buff, size] (size_t& count) {
         return repeat([&count, &device, off, buff, size] () {
             return device.write(off + count, buff, size - count).then([&count] (size_t ret) {
-                if (ret == 0 || ret % alignment) {
+                count += ret;
+                if (ret == 0 || ret % alignment != 0) {
                     return stop_iteration::yes;
                 }
-                count += ret;
                 return stop_iteration::no;
             });
         }).then([&count] {
@@ -85,10 +110,10 @@ future<size_t> write_exactly(block_device& device, disk_offset_t off, const char
 }
 
 future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) {
-    auto boot_record_buff = temporary_buffer<char>::aligned(alignment, aligned_boot_record_size);
-    return read_exactly(device, boot_record_offset, boot_record_buff.get_write(), aligned_boot_record_size)
+    auto boot_record_buff = temporary_buffer<char>::aligned(alignment, aligned_bootstrap_record_size);
+    return read_exactly(device, boot_record_offset, boot_record_buff.get_write(), aligned_bootstrap_record_size)
             .then([boot_record_buff = std::move(boot_record_buff)] (size_t ret) {
-        if (ret != aligned_boot_record_size) {
+        if (ret != aligned_bootstrap_record_size) {
             return make_exception_future<bootstrap_record>(
                     invalid_bootstrap_record("Error while reading bootstrap record block"));
         }
@@ -98,14 +123,10 @@ future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) 
 
         const uint32_t crc_calc = crc32(boot_record_buff.get(), crc_offset);
         if (crc_calc != boot_record_disk.crc) {
-            return make_exception_future<bootstrap_record>(invalid_bootstrap_record("Read CRC is invalid"));
+            return make_exception_future<bootstrap_record>(invalid_bootstrap_record("CRC is invalid"));
         }
         if (magic_number != boot_record_disk.magic) {
-            return make_exception_future<bootstrap_record>(invalid_bootstrap_record("Read Magic Number is invalid"));
-        }
-        if (boot_record_disk.shards_nb > max_shards_nb) {
-            return make_exception_future<bootstrap_record>(
-                    invalid_bootstrap_record("Read number of shards is bigger than max number of shards"));
+            return make_exception_future<bootstrap_record>(invalid_bootstrap_record("Magic Number is invalid"));
         }
         if (!is_sector_size_valid(boot_record_disk.sector_size)) {
             return make_exception_future<bootstrap_record>(
@@ -115,37 +136,48 @@ future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) 
             return make_exception_future<bootstrap_record>(
                     invalid_bootstrap_record("Cluster size should be a power of 2 and be divisible by sector size"));
         }
+        if (boot_record_disk.shards_nb > max_shards_nb || boot_record_disk.shards_nb == 0) {
+            return make_exception_future<bootstrap_record>(
+                    invalid_bootstrap_record("Shards number is invalid"));
+        }
 
-        const std::vector<shard_info> shards_info(boot_record_disk.shards_info,
+        const std::vector<shard_info> tmp_shards_info(boot_record_disk.shards_info,
                 boot_record_disk.shards_info + boot_record_disk.shards_nb);
+
+        if (!is_shards_info_valid(tmp_shards_info)) {
+            return make_exception_future<bootstrap_record>(invalid_bootstrap_record("Shards info is invalid"));
+        }
 
         bootstrap_record boot_record_mem(boot_record_disk.version,
                 boot_record_disk.sector_size,
                 boot_record_disk.cluster_size,
                 boot_record_disk.root_directory,
-                boot_record_disk.shards_nb,
-                std::move(shards_info));
+                std::move(tmp_shards_info));
 
-        return make_ready_future<bootstrap_record>(boot_record_mem);
+        return make_ready_future<bootstrap_record>(std::move(boot_record_mem));
     });
 }
 
 future<> bootstrap_record::write_to_disk(block_device& device) const {
     // initial check
-    if (shards_info.size() > max_shards_nb) {
-        return make_exception_future<>(invalid_bootstrap_record("Too many shards to fit into the bootstrap record"));
-    } else if (shards_nb != shards_info.size()) {
-        return make_exception_future<>(
-                invalid_bootstrap_record("Shards number should match number of metadata pointers"));
-    }
     if (!is_sector_size_valid(sector_size)) {
-        return make_exception_future<>(invalid_bootstrap_record("Sector size should be a power of 2 and greater than 512"));
+        return make_exception_future<>(
+                invalid_bootstrap_record("Sector size should be a power of 2 and greater than 512"));
     }
     if (!is_cluster_size_valid(cluster_size, sector_size)) {
-        return make_exception_future<>(invalid_bootstrap_record("Cluster size should be a power of 2 and be divisible by sector size"));
+        return make_exception_future<>(
+                invalid_bootstrap_record("Cluster size should be a power of 2 and be divisible by sector size"));
+    }
+    if (shards_nb() > max_shards_nb || shards_nb() == 0) {
+        return make_exception_future<>(
+                invalid_bootstrap_record("Shards number is invalid"));
+    }
+    if (!is_shards_info_valid(shards_info)) {
+        return make_exception_future<>(invalid_bootstrap_record("Shards info is invalid"));
     }
 
     bootstrap_record_disk boot_record_disk;
+    // using memset to zero out the whole memory used by boot_record_disk including paddings
     std::memset(&boot_record_disk, 0, sizeof(boot_record_disk));
 
     // prepare bootstrap_record_disk records
@@ -154,20 +186,18 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
     boot_record_disk.sector_size = sector_size;
     boot_record_disk.cluster_size = cluster_size;
     boot_record_disk.root_directory = root_directory;
-    boot_record_disk.shards_nb = shards_nb;
+    boot_record_disk.shards_nb = shards_nb();
     std::copy(shards_info.begin(), shards_info.end(), boot_record_disk.shards_info);
+    boot_record_disk.crc = crc32(&boot_record_disk, crc_offset);
 
-    auto boot_record_buff = temporary_buffer<char>::aligned(alignment, aligned_boot_record_size);
+    auto boot_record_buff = temporary_buffer<char>::aligned(alignment, aligned_bootstrap_record_size);
     std::memcpy(boot_record_buff.get_write(), &boot_record_disk, sizeof(boot_record_disk));
     std::memset(boot_record_buff.get_write() + sizeof(boot_record_disk), 0,
-            aligned_boot_record_size - sizeof(boot_record_disk));
+            aligned_bootstrap_record_size - sizeof(boot_record_disk));
 
-    boot_record_disk.crc = crc32(boot_record_buff.get(), crc_offset);
-    std::memcpy(boot_record_buff.get_write() + crc_offset, &boot_record_disk.crc, sizeof(boot_record_disk.crc));
-
-    return write_exactly(device, boot_record_offset, boot_record_buff.get(), aligned_boot_record_size)
+    return write_exactly(device, boot_record_offset, boot_record_buff.get(), aligned_bootstrap_record_size)
             .then([boot_record_buff = std::move(boot_record_buff)] (size_t ret) {
-        if (ret != aligned_boot_record_size) {
+        if (ret != aligned_bootstrap_record_size) {
             return make_exception_future<>(
                     invalid_bootstrap_record("Error while writing bootstrap record block to disk"));
         }
@@ -175,13 +205,15 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
     });
 }
 
-bool bootstrap_record::shard_info::operator==(const shard_info &rhs) const noexcept {
-    return metadata_cl == rhs.metadata_cl && range_cl == rhs.range_cl;
+
+bool operator==(const bootstrap_record::shard_info& lhs, const bootstrap_record::shard_info& rhs) noexcept {
+    return lhs.metadata_cluster == rhs.metadata_cluster && lhs.available_clusters == rhs.available_clusters;
 }
 
-bool bootstrap_record::operator==(const bootstrap_record &rhs) const noexcept {
-    return version == rhs.version && sector_size == rhs.sector_size && cluster_size == rhs.cluster_size &&
-            root_directory == rhs.root_directory &&  shards_info == rhs.shards_info;
+bool operator==(const bootstrap_record& lhs, const bootstrap_record& rhs) noexcept {
+    return lhs.version == rhs.version && lhs.sector_size == rhs.sector_size &&
+            lhs.cluster_size == rhs.cluster_size && lhs.root_directory == rhs.root_directory &&
+            lhs.shards_info == rhs.shards_info;
 }
 
 }

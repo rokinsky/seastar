@@ -20,8 +20,10 @@
  */
 
 #include "fs/bootstrap_record.hh"
+#include "fs/cluster.hh"
 
 #include <boost/crc.hpp>
+#include <cstring>
 #include <seastar/core/thread.hh>
 #include <seastar/core/units.hh>
 #include <seastar/fs/block_device.hh>
@@ -35,144 +37,239 @@ using namespace seastar::fs;
 
 namespace {
 
-constexpr off_t device_size = 1 * MB;
-
 class mock_block_device_impl : public block_device_impl {
 public:
     using buf_type = basic_sstring<uint8_t, size_t, 32, false>;
     buf_type buf;
     ~mock_block_device_impl() override = default;
 
-    future<size_t> write(uint64_t pos, const void* buffer, size_t len, const io_priority_class& pc) override {
+    future<size_t> write(uint64_t pos, const void* buffer, size_t len, const io_priority_class&) override {
         if (buf.size() < pos + len)
             buf.resize(pos + len);
         std::memcpy(buf.data() + pos, buffer, len);
         return make_ready_future<size_t>(len);
     }
 
-    future<size_t> read(uint64_t pos, void* buffer, size_t len, const io_priority_class& pc) override {
-        std::memcpy(buffer, buf.data() + pos, len);
+    future<size_t> read(uint64_t pos, void* buffer, size_t len, const io_priority_class&) noexcept override {
+        std::memcpy(buffer, buf.c_str() + pos, len);
         return make_ready_future<size_t>(len);
     }
 
-    future<> flush() override {
+    future<> flush() noexcept override {
         return make_ready_future<>();
     }
 
-    future<> close() override {
+    future<> close() noexcept override {
         return make_ready_future<>();
     }
 };
 
-future<block_device> prepare_device() {
-    return async([&] {
-        sstring device_path = [&]() -> sstring {
-            temporary_file tmp_device_file("/tmp/bootstrap_record_test_file");
-            return tmp_device_file.path();
-        }();
+inline std::vector<bootstrap_record::shard_info> prepare_valid_shards_info(uint32_t size) {
+    std::vector<bootstrap_record::shard_info> ret(size);
+    cluster_id_t curr = 1;
+    for (bootstrap_record::shard_info& info : ret) {
+        info.available_clusters = {curr, curr + 1};
+        info.metadata_cluster = curr;
+        curr++;
+    }
+    return ret;
+};
 
-        file f = open_file_dma(device_path, open_flags::rw | open_flags::create).get0();
-        f.truncate(device_size).get();
-        f.close().get();
-
-        return open_block_device(device_path).get0();
-    });
-}
-
-}
-
-BOOST_TEST_DONT_PRINT_LOG_VALUE(bootstrap_record)
-SEASTAR_TEST_CASE(test_valid_read_write) {
-    return prepare_device().then([] (block_device dev) {
-        return do_with(std::move(dev), [] (block_device& dev) {
-            return async([&] {
-                bootstrap_record write_record(1, 1024, 1024, 1, 3, {{6, {6, 9}}, {9, {9, 12}}, {12, {12, 15}}});
-                // basic test
-                write_record.write_to_disk(dev).get();
-                auto read_record = bootstrap_record::read_from_disk(dev).get0();
-                BOOST_REQUIRE_EQUAL(write_record, read_record);
-
-                // max number of shards
-                write_record.shards_nb = bootstrap_record::max_shards_nb;
-                write_record.shards_info.resize(write_record.shards_nb, {1, {2, 3}});
-                write_record.write_to_disk(dev).get();
-                read_record = bootstrap_record::read_from_disk(dev).get0();
-                BOOST_REQUIRE_EQUAL(write_record, read_record);
-
-                // 0 shards
-                write_record.shards_nb = 0;
-                write_record.shards_info.clear();
-                write_record.write_to_disk(dev).get();
-                read_record = bootstrap_record::read_from_disk(dev).get0();
-                BOOST_REQUIRE_EQUAL(write_record, read_record);
-            }).finally([&] {
-                return dev.close();
-            });
-        });
-    });
-}
-
-namespace {
-
-void repair_crc32(shared_ptr<mock_block_device_impl> dev_impl) {
+inline void repair_crc32(shared_ptr<mock_block_device_impl> dev_impl) noexcept {
     auto crc32 = [](const uint8_t* buff, size_t len) {
         boost::crc_32_type result;
         result.process_bytes(buff, len);
         return result.checksum();
     };
+
     mock_block_device_impl::buf_type& buff = dev_impl.get()->buf;
     size_t crc_pos = offsetof(bootstrap_record_disk, crc);
     uint32_t crc_new = crc32(buff.data(), crc_pos);
     std::memcpy(buff.data() + crc_pos, &crc_new, sizeof(crc_new));
 }
 
-void change_byte_at_offset(shared_ptr<mock_block_device_impl> dev_impl, size_t offset) {
-    dev_impl.get()->buf[offset]++;
+inline void change_byte_at_offset(shared_ptr<mock_block_device_impl> dev_impl, size_t offset) noexcept {
+    dev_impl.get()->buf[offset] ^= 1;
 }
 
 template<typename T>
-void change_bytes_at_offset_to(shared_ptr<mock_block_device_impl> dev_impl, size_t offset, T value) {
+inline void place_at_offset(shared_ptr<mock_block_device_impl> dev_impl, size_t offset, T value) noexcept {
     std::memcpy(dev_impl.get()->buf.data() + offset, &value, sizeof(value));
 }
 
+template<>
+inline void place_at_offset(shared_ptr<mock_block_device_impl> dev_impl, size_t offset,
+        std::vector<bootstrap_record::shard_info> shards_info) noexcept {
+    bootstrap_record::shard_info shards_info_disk[bootstrap_record::max_shards_nb];
+    std::memset(shards_info_disk, 0, sizeof(shards_info_disk));
+    std::copy(shards_info.begin(), shards_info.end(), shards_info_disk);
+
+    std::memcpy(dev_impl.get()->buf.data() + offset, shards_info_disk, sizeof(shards_info_disk));
 }
 
-SEASTAR_THREAD_TEST_CASE(test_invalid_read) {
+const bootstrap_record default_write_record(1, 1024, 1024, 1, {{6, {6, 9}}, {9, {9, 12}}, {12, {12, 15}}});
+
+}
+
+
+
+BOOST_TEST_DONT_PRINT_LOG_VALUE(bootstrap_record)
+
+SEASTAR_THREAD_TEST_CASE(valid_basic_test) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
-    bootstrap_record write_record(1, 1024, 1024, 1, 3, {{6, {6, 9}}, {9, {9, 12}}, {12, {12, 15}}});
+    const bootstrap_record write_record = default_write_record;
+
+    write_record.write_to_disk(dev).get();
+    const bootstrap_record read_record = bootstrap_record::read_from_disk(dev).get0();
+    BOOST_REQUIRE_EQUAL(write_record, read_record);
+}
+
+SEASTAR_THREAD_TEST_CASE(valid_max_shards_nb_test) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    bootstrap_record write_record = default_write_record;
+    write_record.shards_info = prepare_valid_shards_info(bootstrap_record::max_shards_nb);
+
+    write_record.write_to_disk(dev).get();
+    const bootstrap_record read_record = bootstrap_record::read_from_disk(dev).get0();
+    BOOST_REQUIRE_EQUAL(write_record, read_record);
+}
+
+SEASTAR_THREAD_TEST_CASE(valid_one_shard_test) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    bootstrap_record write_record = default_write_record;
+    write_record.shards_info = prepare_valid_shards_info(1);
+
+    write_record.write_to_disk(dev).get();
+    const bootstrap_record read_record = bootstrap_record::read_from_disk(dev).get0();
+    BOOST_REQUIRE_EQUAL(write_record, read_record);
+}
+
+
+
+SEASTAR_THREAD_TEST_CASE(invalid_crc_read) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    const bootstrap_record write_record = default_write_record;
 
     size_t crc_offset = offsetof(bootstrap_record_disk, crc);
-    size_t magic_offset = offsetof(bootstrap_record_disk, magic);
-    size_t shards_nb_offset = offsetof(bootstrap_record_disk, shards_nb);
-    size_t sector_size_offset = offsetof(bootstrap_record_disk, sector_size);
-    size_t cluster_size_offset = offsetof(bootstrap_record_disk, cluster_size);
 
-    // invalid crc
     write_record.write_to_disk(dev).get();
     change_byte_at_offset(dev_impl, crc_offset);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
-            [] (const invalid_bootstrap_record& ex) { return sstring(ex.what()) == "Read CRC is invalid"; });
+            [] (const invalid_bootstrap_record& ex) { return sstring(ex.what()) == "CRC is invalid"; });
+}
 
-    // invalid magic
+SEASTAR_THREAD_TEST_CASE(invalid_magic_read) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    const bootstrap_record write_record = default_write_record;
+
+    size_t magic_offset = offsetof(bootstrap_record_disk, magic);
+
     write_record.write_to_disk(dev).get();
     change_byte_at_offset(dev_impl, magic_offset);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
-            [] (const invalid_bootstrap_record& ex) { return sstring(ex.what()) == "Read Magic Number is invalid"; });
+            [] (const invalid_bootstrap_record& ex) { return sstring(ex.what()) == "Magic Number is invalid"; });
+}
 
-    // invalid shards_nb
+SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    const bootstrap_record write_record = default_write_record;
+
+    size_t shards_nb_offset = offsetof(bootstrap_record_disk, shards_nb);
+    size_t shards_info_offset = offsetof(bootstrap_record_disk, shards_info);
+
+    // shards_nb > max_shards_nb
     write_record.write_to_disk(dev).get();
-    change_bytes_at_offset_to(dev_impl, shards_nb_offset, bootstrap_record::max_shards_nb + 1);
+    place_at_offset(dev_impl, shards_nb_offset, bootstrap_record::max_shards_nb + 1);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Read number of shards is bigger than max number of shards";
+                return sstring(ex.what()) == "Shards number is invalid";
             });
+
+    // shards_nb == 0
+    write_record.write_to_disk(dev).get();
+    place_at_offset(dev_impl, shards_nb_offset, 0);
+    repair_crc32(dev_impl);
+    BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards number is invalid";
+            });
+
+    std::vector<bootstrap_record::shard_info> shards_info;
+
+    // metadata_cluster not in available_clusters range
+    write_record.write_to_disk(dev).get();
+    shards_info = {{1, {2, 3}}};
+    place_at_offset(dev_impl, shards_nb_offset, shards_info.size());
+    place_at_offset(dev_impl, shards_info_offset, shards_info);
+    repair_crc32(dev_impl);
+    BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
+    // available_clusters.beg > available_clusters.end
+    write_record.write_to_disk(dev).get();
+    shards_info = {{3, {4, 2}}};
+    place_at_offset(dev_impl, shards_nb_offset, shards_info.size());
+    place_at_offset(dev_impl, shards_info_offset, shards_info);
+    repair_crc32(dev_impl);
+    BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
+    // available_clusters.beg == available_clusters.end
+    write_record.write_to_disk(dev).get();
+    shards_info = {{2, {2, 2}}};
+    place_at_offset(dev_impl, shards_nb_offset, shards_info.size());
+    place_at_offset(dev_impl, shards_info_offset, shards_info);
+    repair_crc32(dev_impl);
+    BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
+    // available_clusters contains cluster 0
+    write_record.write_to_disk(dev).get();
+    shards_info = {{1, {0, 5}}};
+    place_at_offset(dev_impl, shards_nb_offset, shards_info.size());
+    place_at_offset(dev_impl, shards_info_offset, shards_info);
+    repair_crc32(dev_impl);
+    BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
+    // available_clusters overlap
+    write_record.write_to_disk(dev).get();
+    shards_info = {{1, {1, 3}}, {2, {2, 4}}};
+    place_at_offset(dev_impl, shards_nb_offset, shards_info.size());
+    place_at_offset(dev_impl, shards_info_offset, shards_info);
+    repair_crc32(dev_impl);
+    BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+}
+
+SEASTAR_THREAD_TEST_CASE(invalid_sector_size_read) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    const bootstrap_record write_record = default_write_record;
+
+    size_t sector_size_offset = offsetof(bootstrap_record_disk, sector_size);
 
     // sector_size not power of 2
     write_record.write_to_disk(dev).get();
-    change_bytes_at_offset_to(dev_impl, sector_size_offset, 1234);
+    place_at_offset(dev_impl, sector_size_offset, 1234);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
@@ -181,16 +278,24 @@ SEASTAR_THREAD_TEST_CASE(test_invalid_read) {
 
     // sector_size smaller than 512
     write_record.write_to_disk(dev).get();
-    change_bytes_at_offset_to(dev_impl, sector_size_offset, 256);
+    place_at_offset(dev_impl, sector_size_offset, 256);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
                 return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
             });
+}
+
+SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_read) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    const bootstrap_record write_record = default_write_record;
+
+    size_t cluster_size_offset = offsetof(bootstrap_record_disk, cluster_size);
 
     // cluster_size not divisible by sector_size
     write_record.write_to_disk(dev).get();
-    change_bytes_at_offset_to(dev_impl, cluster_size_offset, 512);
+    place_at_offset(dev_impl, cluster_size_offset, 512);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
@@ -199,7 +304,7 @@ SEASTAR_THREAD_TEST_CASE(test_invalid_read) {
 
     // cluster_size not power of 2
     write_record.write_to_disk(dev).get();
-    change_bytes_at_offset_to(dev_impl, cluster_size_offset, 3072);
+    place_at_offset(dev_impl, cluster_size_offset, 3072);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
@@ -207,63 +312,110 @@ SEASTAR_THREAD_TEST_CASE(test_invalid_read) {
             });
 }
 
-SEASTAR_TEST_CASE(test_invalid_write) {
-    return prepare_device().then([] (block_device dev) {
-        return do_with(std::move(dev), [] (block_device& dev) {
-            return async([&] {
-                bootstrap_record write_record_default(1, 1024, 1024, 1, 0, {});
-                bootstrap_record write_record = write_record_default;
-                // shards_nb != shards_info.size()
-                write_record.shards_nb = 2;
-                write_record.shards_info.resize(3, {1, {2, 3}});
-                BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
-                        [] (const invalid_bootstrap_record& ex) {
-                            return sstring(ex.what()) == "Shards number should match number of metadata pointers";
-                        });
 
-                // shards_nb > max_shards_nb
-                write_record = write_record_default;
-                write_record.shards_nb = bootstrap_record::max_shards_nb + 1;
-                write_record.shards_info.resize(write_record.shards_nb, {1, {2, 3}});
-                BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
-                        [] (const invalid_bootstrap_record& ex) {
-                            return sstring(ex.what()) == "Too many shards to fit into the bootstrap record";
-                        });
 
-                // sector_size not power of 2
-                write_record = write_record_default;
-                write_record.sector_size = 1234;
-                BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
-                        [] (const invalid_bootstrap_record& ex) {
-                            return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
-                        });
+SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    bootstrap_record write_record = default_write_record;
 
-                // sector_size smaller than 512
-                write_record = write_record_default;
-                write_record.sector_size = 256;
-                BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
-                        [] (const invalid_bootstrap_record& ex) {
-                            return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
-                        });
-
-                // cluster_size not divisible by sector_size
-                write_record = write_record_default;
-                write_record.cluster_size = 512;
-                BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
-                        [] (const invalid_bootstrap_record& ex) {
-                            return sstring(ex.what()) == "Cluster size should be a power of 2 and be divisible by sector size";
-                        });
-
-                // cluster_size not power of 2
-                write_record = write_record_default;
-                write_record.cluster_size = 3072;
-                BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
-                        [] (const invalid_bootstrap_record& ex) {
-                            return sstring(ex.what()) == "Cluster size should be a power of 2 and be divisible by sector size";
-                        });
-            }).finally([&] {
-                return dev.close();
+    // shards_nb > max_shards_nb
+    write_record = default_write_record;
+    write_record.shards_info = prepare_valid_shards_info(bootstrap_record::max_shards_nb + 1);
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards number is invalid";
             });
-        });
-    });
+
+    // shards_nb == 0
+    write_record = default_write_record;
+    write_record.shards_info.clear();
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards number is invalid";
+            });
+
+    // metadata_cluster not in available_clusters range
+    write_record = default_write_record;
+    write_record.shards_info = {{1, {2, 3}}};
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
+    // available_clusters.beg > available_clusters.end
+    write_record = default_write_record;
+    write_record.shards_info = {{3, {4, 2}}};
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
+    // available_clusters.beg == available_clusters.end
+    write_record = default_write_record;
+    write_record.shards_info = {{2, {2, 2}}};
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
+    // available_clusters contains cluster 0
+    write_record = default_write_record;
+    write_record.shards_info = {{1, {0, 5}}};
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
+    // available_clusters overlap
+    write_record = default_write_record;
+    write_record.shards_info = {{1, {1, 3}}, {2, {2, 4}}};
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+}
+
+SEASTAR_THREAD_TEST_CASE(invalid_sector_size_write) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    bootstrap_record write_record = default_write_record;
+
+    // sector_size not power of 2
+    write_record = default_write_record;
+    write_record.sector_size = 1234;
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
+            });
+
+    // sector_size smaller than 512
+    write_record = default_write_record;
+    write_record.sector_size = 256;
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
+            });
+}
+
+SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_write) {
+    auto dev_impl = make_shared<mock_block_device_impl>();
+    block_device dev(dev_impl);
+    bootstrap_record write_record = default_write_record;
+
+    // cluster_size not divisible by sector_size
+    write_record = default_write_record;
+    write_record.cluster_size = 512;
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Cluster size should be a power of 2 and be divisible by sector size";
+            });
+
+    // cluster_size not power of 2
+    write_record = default_write_record;
+    write_record.cluster_size = 3072;
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Cluster size should be a power of 2 and be divisible by sector size";
+            });
 }
