@@ -215,6 +215,16 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
                 return sstring(ex.what()) == "Shards info is invalid";
             });
 
+    write_record.write_to_disk(dev).get();
+    shards_info = {{3, {2, 3}}};
+    place_at_offset(dev_impl, shards_nb_offset, shards_info.size());
+    place_at_offset(dev_impl, shards_info_offset, shards_info);
+    repair_crc32(dev_impl);
+    BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return sstring(ex.what()) == "Shards info is invalid";
+            });
+
     // available_clusters.beg > available_clusters.end
     write_record.write_to_disk(dev).get();
     shards_info = {{3, {4, 2}}};
