@@ -75,43 +75,11 @@ bool is_shards_info_valid(std::vector<bootstrap_record::shard_info> shards_info)
     return true;
 }
 
-future<size_t> read_exactly(block_device& device, disk_offset_t off, char* buff, size_t size) {
-    return do_with((size_t)0, [&device, off, buff, size] (size_t& count) {
-        return repeat([&count, &device, off, buff, size] () {
-            return device.read(off + count, buff, size - count).then([&count] (size_t ret) {
-                count += ret;
-                if (ret == 0 || ret % alignment != 0) {
-                    return stop_iteration::yes;
-                }
-                return stop_iteration::no;
-            });
-        }).then([&count] {
-            return count;
-        });
-    });
-}
-
-future<size_t> write_exactly(block_device& device, disk_offset_t off, const char* buff, size_t size) {
-    return do_with((size_t)0, [&device, off, buff, size] (size_t& count) {
-        return repeat([&count, &device, off, buff, size] () {
-            return device.write(off + count, buff, size - count).then([&count] (size_t ret) {
-                count += ret;
-                if (ret == 0 || ret % alignment != 0) {
-                    return stop_iteration::yes;
-                }
-                return stop_iteration::no;
-            });
-        }).then([&count] {
-            return count;
-        });
-    });
-}
-
 }
 
 future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) {
     auto bootstrap_record_buff = temporary_buffer<char>::aligned(alignment, aligned_bootstrap_record_size);
-    return read_exactly(device, bootstrap_record_offset, bootstrap_record_buff.get_write(), aligned_bootstrap_record_size)
+    return device.read(bootstrap_record_offset, bootstrap_record_buff.get_write(), aligned_bootstrap_record_size)
             .then([bootstrap_record_buff = std::move(bootstrap_record_buff)] (size_t ret) {
         if (ret != aligned_bootstrap_record_size) {
             return make_exception_future<bootstrap_record>(
@@ -195,7 +163,7 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
     std::memset(bootstrap_record_buff.get_write() + sizeof(bootstrap_record_disk), 0,
             aligned_bootstrap_record_size - sizeof(bootstrap_record_disk));
 
-    return write_exactly(device, bootstrap_record_offset, bootstrap_record_buff.get(), aligned_bootstrap_record_size)
+    return device.write(bootstrap_record_offset, bootstrap_record_buff.get(), aligned_bootstrap_record_size)
             .then([bootstrap_record_buff = std::move(bootstrap_record_buff)] (size_t ret) {
         if (ret != aligned_bootstrap_record_size) {
             return make_exception_future<>(
