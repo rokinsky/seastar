@@ -21,8 +21,8 @@
 
 #pragma once
 
-#include "cluster.hh"
-#include "inode.hh"
+#include "fs/cluster.hh"
+#include "fs/inode.hh"
 
 #include <seastar/core/reactor.hh>
 #include <seastar/fs/block_device.hh>
@@ -31,7 +31,8 @@ namespace seastar::fs {
 
 class invalid_bootstrap_record : public std::runtime_error {
 public:
-    invalid_bootstrap_record(const char* msg) : std::runtime_error(msg) {}
+    explicit invalid_bootstrap_record(const char* msg) : std::runtime_error(msg) {}
+    explicit invalid_bootstrap_record(const std::string& msg) : std::runtime_error(msg) {}
 };
 
 /// In-memory version of the record describing characteristics of the file system (~superblock).
@@ -41,32 +42,44 @@ public:
     static constexpr uint32_t max_shards_nb = 500;
 
     struct shard_info {
-        cluster_id_t metadata_cl; /// cluster id of the first metadata log cluster
-        cluster_range range_cl; /// range of clusters for data for this shard
-
-        bool operator==(const shard_info &) const noexcept;
-        bool operator!=(const shard_info &rhs) const noexcept { return !(*this == rhs); }
+        cluster_id_t metadata_cluster; /// cluster id of the first metadata log cluster
+        cluster_range available_clusters; /// range of clusters for data for this shard
+        friend bool operator==(const shard_info&, const shard_info&) noexcept;
+        friend bool operator!=(const shard_info&, const shard_info&) noexcept;
     };
 
     uint64_t version; /// file system version
     unit_size_t sector_size; /// sector size in bytes
     unit_size_t cluster_size; /// cluster size in bytes
-    inode_t root_directory; /// root inode number
-    uint32_t shards_nb; /// number of file system shards
+    inode_t root_directory; /// root dir inode number
     std::vector<shard_info> shards_info; /// basic informations about each file system shard
 
     bootstrap_record() = default;
-    bootstrap_record(uint64_t version, unit_size_t sector_size, unit_size_t cluster_size,
-            inode_t root_directory, uint32_t shards_nb, std::vector<shard_info> shards_info)
+    bootstrap_record(uint64_t version, unit_size_t sector_size, unit_size_t cluster_size, inode_t root_directory,
+            std::vector<shard_info> shards_info)
         : version(version), sector_size(sector_size), cluster_size(cluster_size) , root_directory(root_directory)
-        , shards_nb(shards_nb), shards_info(std::move(shards_info)) {}
+        , shards_info(std::move(shards_info)) {}
+
+    /// number of file system shards
+    uint32_t shards_nb() const noexcept {
+        return shards_info.size();
+    }
 
     static future<bootstrap_record> read_from_disk(block_device& device);
     future<> write_to_disk(block_device& device) const;
 
-    bool operator==(const bootstrap_record &) const noexcept;
-    bool operator!=(const bootstrap_record &rhs) const noexcept { return !(*this == rhs); }
+    friend bool operator==(const bootstrap_record&, const bootstrap_record&) noexcept;
+    friend bool operator!=(const bootstrap_record&, const bootstrap_record&) noexcept;
+
 };
+
+inline bool operator!=(const bootstrap_record::shard_info& lhs, const bootstrap_record::shard_info& rhs) noexcept {
+    return !(lhs == rhs);
+}
+
+inline bool operator!=(const bootstrap_record& lhs, const bootstrap_record& rhs) noexcept {
+    return !(lhs == rhs);
+}
 
 /// On-disk version of the record describing characteristics of the file system (~superblock).
 struct bootstrap_record_disk {
