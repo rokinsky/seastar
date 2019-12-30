@@ -27,26 +27,46 @@
 namespace seastar::fs {
 
 template<class T, std::enable_if_t<std::is_unsigned_v<T>, int> = 0>
-inline bool is_power_of_2(T x) noexcept {
+constexpr inline bool is_power_of_2(T x) noexcept {
 	return (x > 0 and (x & (x - 1)) == 0);
 }
 
+static_assert(not is_power_of_2(0u));
+static_assert(is_power_of_2(1u));
+static_assert(is_power_of_2(2u));
+static_assert(not is_power_of_2(3u));
+static_assert(is_power_of_2(4u));
+static_assert(not is_power_of_2(5u));
+static_assert(not is_power_of_2(6u));
+static_assert(not is_power_of_2(7u));
+static_assert(is_power_of_2(8u));
+
 template<class T, class U, std::enable_if_t<std::is_unsigned_v<T>, int> = 0, std::enable_if_t<std::is_unsigned_v<U>, int> = 0>
-inline T div_by_power_of_2(T a, U b) {
+constexpr inline T div_by_power_of_2(T a, U b) noexcept {
 	assert(is_power_of_2(b));
 	return (a >> __builtin_ctzll(b)); // should be 2 CPU cycles after inlining on modern x86_64
 }
 
+static_assert(div_by_power_of_2(13u, 1u) == 13);
+static_assert(div_by_power_of_2(12u, 4u) == 3);
+static_assert(div_by_power_of_2(42u, 32u) == 1);
+
 template<class T, class U, std::enable_if_t<std::is_unsigned_v<T>, int> = 0, std::enable_if_t<std::is_unsigned_v<U>, int> = 0>
-inline T mod_by_power_of_2(T a, U b) {
+constexpr inline T mod_by_power_of_2(T a, U b) noexcept {
 	assert(is_power_of_2(b));
 	return (a & (b - 1));
 }
 
+static_assert(mod_by_power_of_2(13u, 1u) == 0);
+static_assert(mod_by_power_of_2(42u, 32u) == 10);
+
 template<class T, class U, std::enable_if_t<std::is_unsigned_v<T>, int> = 0, std::enable_if_t<std::is_unsigned_v<U>, int> = 0>
-inline T mul_by_power_of_2(T a, U b) {
+constexpr inline T mul_by_power_of_2(T a, U b) noexcept {
 	assert(is_power_of_2(b));
-	return (a >> __builtin_ctzll(b)); // should be 2 CPU cycles after inlining on modern x86_64
+	return (a << __builtin_ctzll(b)); // should be 2 CPU cycles after inlining on modern x86_64
 }
+
+static_assert(mul_by_power_of_2(3u, 1u) == 3);
+static_assert(mul_by_power_of_2(3u, 4u) == 12);
 
 } // namespace seastar::fs
