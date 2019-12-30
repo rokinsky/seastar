@@ -30,13 +30,13 @@ using cluster_id_t = uint64_t;
 using cluster_range = range<cluster_id_t>;
 
 inline cluster_id_t offset_to_cluster_id(disk_offset_t offset, unit_size_t cluster_size) noexcept {
-	assert(is_power_of_2(cluster_size));
-	return div_by_power_of_2(offset, cluster_size);
+    assert(is_power_of_2(cluster_size));
+    return div_by_power_of_2(offset, cluster_size);
 }
 
 inline disk_offset_t cluster_id_to_offset(cluster_id_t cluster_id, unit_size_t cluster_size) noexcept {
-	assert(is_power_of_2(cluster_size));
-	return mul_by_power_of_2(cluster_id, cluster_size);
+    assert(is_power_of_2(cluster_size));
+    return mul_by_power_of_2(cluster_id, cluster_size);
 }
 
 } // namespace seastar::fs
