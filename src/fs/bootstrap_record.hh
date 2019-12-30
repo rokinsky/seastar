@@ -44,8 +44,6 @@ public:
     struct shard_info {
         cluster_id_t metadata_cluster; /// cluster id of the first metadata log cluster
         cluster_range available_clusters; /// range of clusters for data for this shard
-        friend bool operator==(const shard_info&, const shard_info&) noexcept;
-        friend bool operator!=(const shard_info&, const shard_info&) noexcept;
     };
 
     uint64_t version; /// file system version
@@ -70,8 +68,11 @@ public:
 
     friend bool operator==(const bootstrap_record&, const bootstrap_record&) noexcept;
     friend bool operator!=(const bootstrap_record&, const bootstrap_record&) noexcept;
-
 };
+
+inline bool operator==(const bootstrap_record::shard_info& lhs, const bootstrap_record::shard_info& rhs) noexcept {
+    return lhs.metadata_cluster == rhs.metadata_cluster && lhs.available_clusters == rhs.available_clusters;
+}
 
 inline bool operator!=(const bootstrap_record::shard_info& lhs, const bootstrap_record::shard_info& rhs) noexcept {
     return !(lhs == rhs);
