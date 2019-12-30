@@ -173,11 +173,6 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
     });
 }
 
-
-bool operator==(const bootstrap_record::shard_info& lhs, const bootstrap_record::shard_info& rhs) noexcept {
-    return lhs.metadata_cluster == rhs.metadata_cluster && lhs.available_clusters == rhs.available_clusters;
-}
-
 bool operator==(const bootstrap_record& lhs, const bootstrap_record& rhs) noexcept {
     return lhs.version == rhs.version && lhs.sector_size == rhs.sector_size &&
             lhs.cluster_size == rhs.cluster_size && lhs.root_directory == rhs.root_directory &&
