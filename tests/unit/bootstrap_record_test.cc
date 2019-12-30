@@ -154,7 +154,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_crc_read) {
     block_device dev(dev_impl);
     const bootstrap_record write_record = default_write_record;
 
-    size_t crc_offset = offsetof(bootstrap_record_disk, crc);
+    constexpr size_t crc_offset = offsetof(bootstrap_record_disk, crc);
 
     write_record.write_to_disk(dev).get();
     change_byte_at_offset(dev_impl, crc_offset);
@@ -167,7 +167,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_magic_read) {
     block_device dev(dev_impl);
     const bootstrap_record write_record = default_write_record;
 
-    size_t magic_offset = offsetof(bootstrap_record_disk, magic);
+    constexpr size_t magic_offset = offsetof(bootstrap_record_disk, magic);
 
     write_record.write_to_disk(dev).get();
     change_byte_at_offset(dev_impl, magic_offset);
@@ -181,8 +181,8 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     block_device dev(dev_impl);
     const bootstrap_record write_record = default_write_record;
 
-    size_t shards_nb_offset = offsetof(bootstrap_record_disk, shards_nb);
-    size_t shards_info_offset = offsetof(bootstrap_record_disk, shards_info);
+    constexpr size_t shards_nb_offset = offsetof(bootstrap_record_disk, shards_nb);
+    constexpr size_t shards_info_offset = offsetof(bootstrap_record_disk, shards_info);
 
     // shards_nb > max_shards_nb
     write_record.write_to_disk(dev).get();
@@ -275,7 +275,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_sector_size_read) {
     block_device dev(dev_impl);
     const bootstrap_record write_record = default_write_record;
 
-    size_t sector_size_offset = offsetof(bootstrap_record_disk, sector_size);
+    constexpr size_t sector_size_offset = offsetof(bootstrap_record_disk, sector_size);
 
     // sector_size not power of 2
     write_record.write_to_disk(dev).get();
@@ -301,7 +301,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_read) {
     block_device dev(dev_impl);
     const bootstrap_record write_record = default_write_record;
 
-    size_t cluster_size_offset = offsetof(bootstrap_record_disk, cluster_size);
+    constexpr size_t cluster_size_offset = offsetof(bootstrap_record_disk, cluster_size);
 
     // cluster_size not divisible by sector_size
     write_record.write_to_disk(dev).get();
