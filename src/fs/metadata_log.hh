@@ -35,6 +35,15 @@
 
 namespace seastar::fs {
 
+struct unix_metadata {
+    bool is_directory;
+    mode_t mode;
+    uid_t uid;
+    gid_t gid;
+    uint64_t mtime_ns;
+    uint64_t ctime_ns;
+};
+
 struct inode_data_vec {
     file_range data_range; // data spans [beg, end) range of the file
 
@@ -48,15 +57,6 @@ struct inode_data_vec {
     };
 
     std::variant<in_mem_data, on_disk_data> data_location;
-};
-
-struct unix_metadata {
-    bool is_directory;
-    mode_t mode;
-    uid_t uid;
-    gid_t gid;
-    uint64_t mtime_ns;
-    uint64_t ctime_ns;
 };
 
 struct inode_info {
@@ -122,5 +122,103 @@ public:
 
     future<> flush_log();
 };
+
+enum ondisk_type : uint8_t {
+    NEXT_METADATA_CLUSTER = 1,
+    CHECKPOINT = 2,
+    INODE = 3,
+    DELETE = 4,
+    SMALL_DATA = 5,
+    MEDIUM_DATA = 6,
+    LARGE_DATA = 7,
+    TRUNCATE = 8,
+    MTIME_UPDATE = 9,
+    ADD_DIR_ENTRY = 10,
+    RENAME_DIR_ENTRY = 11,
+    DELETE_DIR_ENTRY = 12,
+};
+
+struct ondisk_next_metadata_cluster {
+    cluster_id_t cluster_id; // metadata log contiues there
+} __attribute__((packed));
+
+struct ondisk_checkpoint {
+    uint32_t crc32_code; // crc of everything from this checkpoint (inclusive) to the next checkpoint
+    unit_size_t checkpointed_data_length;
+} __attribute__((packed));
+
+struct ondisk_unix_metadata {
+    uint8_t is_directory;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint64_t mtime_ns;
+    uint64_t ctime_ns;
+} __attribute__((packed));
+
+static_assert(sizeof(decltype(ondisk_unix_metadata::mode)) >= sizeof(decltype(unix_metadata::mode)));
+static_assert(sizeof(decltype(ondisk_unix_metadata::uid)) >= sizeof(decltype(unix_metadata::uid)));
+static_assert(sizeof(decltype(ondisk_unix_metadata::gid)) >= sizeof(decltype(unix_metadata::gid)));
+static_assert(sizeof(decltype(ondisk_unix_metadata::mtime_ns)) >= sizeof(decltype(unix_metadata::mtime_ns)));
+static_assert(sizeof(decltype(ondisk_unix_metadata::ctime_ns)) >= sizeof(decltype(unix_metadata::ctime_ns)));
+
+struct ondisk_inode {
+    inode_t inode;
+    ondisk_unix_metadata metadata;
+} __attribute__((packed));
+
+struct ondisk_delete {
+    inode_t inode;
+} __attribute__((packed));
+
+struct ondisk_small_data_header {
+    inode_t inode;
+    file_offset_t offset;
+    uint16_t length;
+    // After header comes data
+} __attribute__((packed));
+
+struct ondisk_medium_data {
+    inode_t inode;
+    file_offset_t offset;
+    disk_offset_t disk_offset;
+    uint32_t length;
+} __attribute__((packed));
+
+struct ondisk_large_data {
+    inode_t inode;
+    file_offset_t offset;
+    cluster_id_t data_cluster; // length == cluster_size
+} __attribute__((packed));
+
+struct ondisk_truncate {
+    inode_t inode;
+    file_offset_t size;
+} __attribute__((packed));
+
+struct ondisk_mtime_update {
+    inode_t inode;
+    decltype(unix_metadata::mtime_ns) mtime_ns;
+} __attribute__((packed));
+
+struct ondisk_add_dir_entry_header {
+    inode_t dir_inode;
+    inode_t entry_inode;
+    uint16_t entry_name_length;
+    // After header comes entry name
+} __attribute__((packed));
+
+struct ondisk_rename_dir_entry_header {
+    inode_t dir_inode;
+    uint16_t entry_old_name_length;
+    uint16_t entry_new_name_length;
+    // After header come: first old_name, then new_name
+} __attribute__((packed));
+
+struct ondisk_delete_dir_entry_header {
+    inode_t dir_inode;
+    uint16_t entry_name_length;
+    // After header comes entry name
+} __attribute__((packed));
 
 } // namespace seastar::fs
