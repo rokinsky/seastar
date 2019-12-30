@@ -31,6 +31,7 @@
 #include <seastar/core/file.hh>
 #include <seastar/core/sstring.hh>
 #include <type_traits>
+#include <variant>
 
 namespace seastar::fs {
 
@@ -38,7 +39,8 @@ struct inode_data_vec {
     file_range data_range; // data spans [beg, end) range of the file
 
     struct in_mem_data {
-        std::unique_ptr<uint8_t[]> data;
+        shared_ptr<std::unique_ptr<uint8_t[]>> data_store;
+        uint8_t* data;
     };
 
     struct on_disk_data {

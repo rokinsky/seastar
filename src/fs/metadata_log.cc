@@ -104,8 +104,7 @@ struct ondisk_medium_data {
 struct ondisk_large_data {
     inode_t inode;
     file_offset_t offset;
-    disk_offset_t disk_offset; // aligned to cluster size
-    uint32_t length; // aligned to cluster size
+    cluster_id_t data_cluster; // length == cluster_size
 } __attribute__((packed));
 
 struct ondisk_truncate {
@@ -155,7 +154,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
     return do_with(std::optional(first_metadata_cluster_id), std::unordered_set<cluster_id_t>{}, [this, available_clusters, &buff = _unwritten_metadata](auto& cluster_id, auto& taken_clusters) {
         return repeat([this, &cluster_id, &taken_clusters, &buff] {
             if (not cluster_id) {
-                return make_ready_future<stop_iteration_tag>(stop_iteration::yes);
+                return make_ready_future<stop_iteration>(stop_iteration::yes);
             }
 
             return _device.read(cluster_id_to_offset(*cluster_id, _cluster_size), buff.get(), _cluster_size).then([this](size_t bytes_read) {
@@ -178,7 +177,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                 };
 
                 auto invalid_entry_exception = [] {
-                    return make_exception_future<stop_iteration_tag>(std::runtime_error("Invalid metadata log entry"));
+                    return make_exception_future<stop_iteration>(std::runtime_error("Invalid metadata log entry"));
                 };
 
                 // Process cluster: the data layout format is:
@@ -220,7 +219,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                                 return invalid_entry_exception();
                             }
 
-                            cluster_id = entry.cluster_id;
+                            cluster_id = (cluster_id_t)entry.cluster_id;
                             break;
                         }
 
@@ -260,23 +259,23 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                                 return invalid_entry_exception();
                             }
 
-                            auto data = std::make_unique<uint8_t[]>(entry.length);
-                            memcpy(data.get(), &buff[pos], entry.length);
+                            auto data_store = make_shared<std::unique_ptr<uint8_t[]>>(std::make_unique<uint8_t[]>(entry.length));
+                            memcpy(data_store->get(), &buff[pos], entry.length);
 
                             inode_data_vec data_vec = {
                                 {entry.offset, entry.offset + entry.length},
-                                inode_data_vec::in_mem_data {std::move(data)}
+                                inode_data_vec::in_mem_data {data_store, data_store->get()}
                             };
                             write_update(entry.inode, std::move(data_vec));
                         }
 
                         case MTIME_UPDATE: // TODO: priority
-                        case MEDIUM_DATA:
-                        case LARGE_DATA:
                         case TRUNCATE: // TODO: priority
                         case ADD_DIR_ENTRY: // TODO: priority
-                        case RENAME_DIR_ENTRY:
                         case DELETE_DIR_ENTRY: // TODO: priority
+                        case RENAME_DIR_ENTRY:
+                        case MEDIUM_DATA: // TODO: will be very similar to SMALL_DATA
+                        case LARGE_DATA: // TODO: will be very similar to SMALL_DATA
                             // TODO:
                             throw std::runtime_error("Not implemented");
 
@@ -290,12 +289,14 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                     }
 
                     if (log_ended) {
+                        // Update _unwritten_metadata, as the place where metadata log continues may be unaligned
                         // TODO: update _unwritten_metadata to be correct
-                        return make_ready_future<stop_iteration_tag>(stop_iteration::yes);
+
+                        return make_ready_future<stop_iteration>(stop_iteration::yes);
                     }
                 }
 
-                return make_ready_future<stop_iteration_tag>(stop_iteration::no);
+                return make_ready_future<stop_iteration>(stop_iteration::no);
             });
         }).then([this, &available_clusters, &taken_clusters] {
             // Initialize _cluser_allocator
@@ -326,7 +327,7 @@ void metadata_log::cut_out_data_range(inode_t inode, file_range range) {
     while (it != inode_data.end() and are_intersecting(range, it->second.data_range)) {
         const auto data_vec = std::move(it->second);
         inode_data.erase(it++);
-        auto cap = intersection(range, data_vec.data_range);
+        const auto cap = intersection(range, data_vec.data_range);
         if (cap == data_vec.data_range) {
             continue; // Fully intersects => remove it
         }
@@ -338,13 +339,15 @@ void metadata_log::cut_out_data_range(inode_t inode, file_range range) {
         inode_data_vec left, right;
         left.data_range = {data_vec.data_range.beg, cap.beg};
         right.data_range = {cap.end, data_vec.data_range.end};
+        auto right_beg_shift = right.data_range.beg - data_vec.data_range.beg;
         std::visit(overloaded {
-            [&](inode_data_vec::in_mem_data& data) {
-                // TODO: how?
-            },
-            [&](inode_data_vec::on_disk_data& data) {
+            [&](const inode_data_vec::in_mem_data& data) {
                 left.data_location = data;
-                right.data_location = inode_data_vec::on_disk_data {data.device_offset + (right.data_range.beg - data_vec.data_range.beg)};
+                right.data_location = inode_data_vec::in_mem_data{data.data_store, data.data + right_beg_shift};
+            },
+            [&](const inode_data_vec::on_disk_data& data) {
+                left.data_location = data;
+                right.data_location = inode_data_vec::on_disk_data {data.device_offset + right_beg_shift};
             },
         }, data_vec.data_location);
 
