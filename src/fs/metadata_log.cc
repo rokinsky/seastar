@@ -259,4 +259,18 @@ void metadata_log::cut_out_data_range(inode_t inode, file_range range) {
     }
 }
 
+file_offset_t metadata_log::file_size(inode_t inode) const {
+    auto it = _inodes.find(inode);
+    if (it == _inodes.end()) {
+        throw invalid_inode_exception();
+    }
+
+    const auto& data = it->second.data;
+    if (data.empty()) {
+        return 0;
+    }
+
+    return (--data.end())->second.data_range.end;
+}
+
 } // namespace seastar::fs
