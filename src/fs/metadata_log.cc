@@ -179,15 +179,23 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
 
                         case TRUNCATE: {
                             ondisk_truncate entry;
-                            if (not load_entry(entry) or _inodes.count(entry.inode) != 1 or entry.size > file_size(entry.inode)) {
+                            // TODO: add checks for being directory
+                            if (not load_entry(entry) or _inodes.count(entry.inode) != 1) {
                                 return invalid_entry_exception();
                             }
 
-                            auto range = file_range {
-                                entry.size,
-                                std::numeric_limits<decltype(file_range::end)>::max()
-                            };
-                            cut_out_data_range(entry.inode, range);
+                            auto fsize = file_size(entry.inode);
+                            if (entry.size > fsize) {
+                                _inodes[entry.inode].data.emplace(fsize, inode_data_vec {
+                                    {fsize, entry.size},
+                                    inode_data_vec::hole_data {}
+                                });
+                            } else {
+                                cut_out_data_range(entry.inode, {
+                                    entry.size,
+                                    std::numeric_limits<decltype(file_range::end)>::max()
+                                });
+                            }
                         }
 
                         case ADD_DIR_ENTRY: // TODO: priority
@@ -262,11 +270,14 @@ void metadata_log::cut_out_data_range(inode_t inode, file_range range) {
         std::visit(overloaded {
             [&](const inode_data_vec::in_mem_data& data) {
                 left.data_location = data;
-                right.data_location = inode_data_vec::in_mem_data{data.data_store, data.data + right_beg_shift};
+                right.data_location = inode_data_vec::in_mem_data {data.data_store, data.data + right_beg_shift};
             },
             [&](const inode_data_vec::on_disk_data& data) {
                 left.data_location = data;
                 right.data_location = inode_data_vec::on_disk_data {data.device_offset + right_beg_shift};
+            },
+            [&](const inode_data_vec::hole_data&) {
+                left.data_location = right.data_location = inode_data_vec::hole_data {};
             },
         }, data_vec.data_location);
 

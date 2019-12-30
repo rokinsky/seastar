@@ -60,7 +60,9 @@ struct inode_data_vec {
         file_offset_t device_offset;
     };
 
-    std::variant<in_mem_data, on_disk_data> data_location;
+    struct hole_data { };
+
+    std::variant<in_mem_data, on_disk_data, hole_data> data_location;
 };
 
 struct inode_info {
