@@ -31,6 +31,7 @@
 #include <boost/crc.hpp>
 #include <boost/range/irange.hpp>
 #include <cstddef>
+#include <limits>
 #include <seastar/core/units.hh>
 #include <stdexcept>
 #include <unordered_set>
@@ -167,8 +168,28 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                             write_update(entry.inode, std::move(data_vec));
                         }
 
-                        case MTIME_UPDATE: // TODO: priority
-                        case TRUNCATE: // TODO: priority
+                        case MTIME_UPDATE: {
+                            ondisk_mtime_update entry;
+                            if (not load_entry(entry) or _inodes.count(entry.inode) != 1) {
+                                return invalid_entry_exception();
+                            }
+
+                            _inodes[entry.inode].metadata.mtime_ns = entry.mtime_ns;
+                        }
+
+                        case TRUNCATE: {
+                            ondisk_truncate entry;
+                            if (not load_entry(entry) or _inodes.count(entry.inode) != 1 or entry.size > file_size(entry.inode)) {
+                                return invalid_entry_exception();
+                            }
+
+                            auto range = file_range {
+                                entry.size,
+                                std::numeric_limits<decltype(file_range::end)>::max()
+                            };
+                            cut_out_data_range(entry.inode, range);
+                        }
+
                         case ADD_DIR_ENTRY: // TODO: priority
                         case DELETE_DIR_ENTRY: // TODO: priority
                         case RENAME_DIR_ENTRY:
