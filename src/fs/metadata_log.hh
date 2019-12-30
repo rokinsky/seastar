@@ -35,6 +35,10 @@
 
 namespace seastar::fs {
 
+struct invalid_inode_exception : public std::exception {
+    const char* what() const noexcept { return "Invalid inode"; }
+};
+
 struct unix_metadata {
     bool is_directory;
     mode_t mode;
@@ -103,6 +107,11 @@ private:
 
 public:
     // TODO: add some way of iterating over a directory
+    // TODO: add stat
+    // TODO: add link
+
+    // Returns file size or throws exception iff @p inode is invalid
+    file_offset_t file_size(inode_t inode) const;
 
     future<inode_t> create_file(sstring path, mode_t mode);
 
