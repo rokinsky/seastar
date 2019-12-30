@@ -27,30 +27,30 @@ namespace seastar::fs {
 
 template <class T>
 struct range {
-	T beg;
-	T end; // exclusive
+    T beg;
+    T end; // exclusive
 
-	constexpr bool is_emtpy() const noexcept { return beg >= end; }
+    constexpr bool is_emtpy() const noexcept { return beg >= end; }
 };
 
 template <class T>
 inline bool operator==(range<T> a, range<T> b) noexcept {
-	return (a.beg == b.beg and a.end == b.end);
+    return (a.beg == b.beg and a.end == b.end);
 }
 
 template <class T>
 inline bool operator!=(range<T> a, range<T> b) noexcept {
-	return not (a == b);
+    return not (a == b);
 }
 
 template <class T>
 inline range<T> intersection(range<T> a, range<T> b) noexcept {
-	return {std::max(a.beg, b.beg), std::min(a.end, b.end)};
+    return {std::max(a.beg, b.beg), std::min(a.end, b.end)};
 }
 
 template <class T>
 inline bool are_intersecting(range<T> a, range<T> b) noexcept {
-	return (std::max(a.beg, b.beg) < std::min(a.end, b.end));
+    return (std::max(a.beg, b.beg) < std::min(a.end, b.end));
 }
 
 } // namespace seastar::fs

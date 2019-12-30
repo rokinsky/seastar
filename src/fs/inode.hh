@@ -31,12 +31,12 @@ namespace seastar::fs {
 using inode_t = uint64_t;
 
 inline unsigned inode_to_shard_no(inode_t inode, unsigned shard_pool_size) noexcept {
-	assert(is_power_of_2(shard_pool_size));
-	return mod_by_power_of_2(inode, shard_pool_size);
+    assert(is_power_of_2(shard_pool_size));
+    return mod_by_power_of_2(inode, shard_pool_size);
 }
 
 inline unsigned next_shard_inode(inode_t last_shard_inode, unsigned shard_pool_size) noexcept {
-	return last_shard_inode + shard_pool_size;
+    return last_shard_inode + shard_pool_size;
 }
 
 } // namespace seastar::fs
