@@ -29,6 +29,8 @@ template <class T>
 struct range {
 	T beg;
 	T end; // exclusive
+
+	constexpr bool is_emtpy() const noexcept { return beg >= end; }
 };
 
 template <class T>
