@@ -40,7 +40,6 @@ struct invalid_inode_exception : public std::exception {
 };
 
 struct unix_metadata {
-    bool is_directory;
     mode_t mode;
     uid_t uid;
     gid_t gid;
@@ -52,7 +51,7 @@ struct inode_data_vec {
     file_range data_range; // data spans [beg, end) range of the file
 
     struct in_mem_data {
-        shared_ptr<std::unique_ptr<uint8_t[]>> data_store;
+        lw_shared_ptr<std::unique_ptr<uint8_t[]>> data_store;
         uint8_t* data;
     };
 
@@ -66,10 +65,23 @@ struct inode_data_vec {
 };
 
 struct inode_info {
-    uint32_t opened_files_count = 0; // Number of currently open files referencing to this inode
+    uint32_t opened_files_count = 0; // Number of open files referencing inode
     uint32_t directories_containing_file = 0;
     unix_metadata metadata;
-    std::map<file_offset_t, inode_data_vec> data; // file offset => data vector that begins there (data vectors do not overlap)
+
+    struct directory {
+        std::map<sstring, inode_t> entries; // entry name => inode
+    };
+
+    struct file {
+        std::map<file_offset_t, inode_data_vec> data; // file offset => data vector that begins there (data vectors do not overlap)
+
+        file_offset_t size() const noexcept {
+            return (data.empty() ? 0 : (--data.end())->second.data_range.end);
+        }
+    };
+
+    std::variant<directory, file> contents;
 };
 
 class metadata_log {
@@ -85,7 +97,7 @@ class metadata_log {
     // In memory metadata
     cluster_allocator _cluster_allocator;
     std::map<inode_t, inode_info> _inodes;
-    // TODO: add directory DAG (may not be tree because of hardlinks...)
+
     // TODO: for compaction: keep some set(?) of inode_data_vec, so that we can keep track of clusters that have lowest utilization (up-to-date data)
     // TODO: for compaction: keep estimated metadata log size (that would take when written to disk) and the real size of metadata log taken on disk to allow for detecting when compaction
 
@@ -98,10 +110,10 @@ public:
     future<> bootstrap(cluster_id_t first_metadata_cluster_id, cluster_range available_clusters);
 
 private:
-    void write_update(inode_t inode, inode_data_vec data_vec);
+    void write_update(inode_info::file& file, inode_data_vec data_vec);
 
     // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap
-    void cut_out_data_range(inode_t inode, file_range data_range);
+    void cut_out_data_range(inode_info::file& file, file_range range);
 
 private:
     future<> append_unwritten_metadata(char* data, uint32_t len);
@@ -110,20 +122,31 @@ private:
 public:
     // TODO: add some way of iterating over a directory
     // TODO: add stat
-    // TODO: add link
 
-    // Returns file size or throws exception iff @p inode is invalid
+    // Returns size of the file or throws exception iff @p inode is invalid
     file_offset_t file_size(inode_t inode) const;
 
+    // TODO: what about permissions, uid, gid etc.
     future<inode_t> create_file(sstring path, mode_t mode);
 
+    // TODO: what about permissions, uid, gid etc.
     future<inode_t> create_directory(sstring path, mode_t mode);
 
+    // TODO: what about permissions, uid, gid etc.
     future<inode_t> open_file(sstring path);
 
     future<> close_file(inode_t inode);
 
-    future<inode_t> delete_file(sstring path);
+    // Creates name (@p path) for a file (@p inode)
+    future<> link(inode_t inode, sstring path);
+
+    // Creates name (@p destination) for a file (not directory) @p source
+    future<> link(sstring source, sstring destination);
+
+    future<> unlink_file(inode_t inode);
+
+    // Removes empty directory or unlinks file
+    future<> remove(sstring path);
 
     future<size_t> read(inode_t inode, char* buffer, size_t len, const io_priority_class& pc = default_priority_class());
 
@@ -136,17 +159,19 @@ public:
 
 enum ondisk_type : uint8_t {
     NEXT_METADATA_CLUSTER = 1,
-    CHECKPOINT = 2,
-    INODE = 3,
-    DELETE = 4,
-    SMALL_DATA = 5,
-    MEDIUM_DATA = 6,
-    LARGE_DATA = 7,
-    TRUNCATE = 8,
-    MTIME_UPDATE = 9,
-    ADD_DIR_ENTRY = 10,
-    RENAME_DIR_ENTRY = 11,
-    DELETE_DIR_ENTRY = 12,
+    CHECKPOINT,
+    CREATE_INODE,
+    UPDATE_METADATA,
+    DELETE_INODE,
+    SMALL_WRITE,
+    MEDIUM_WRITE,
+    LARGE_WRITE,
+    LARGE_WRITE_WITHOUT_MTIME,
+    TRUNCATE,
+    MTIME_UPDATE,
+    ADD_DIR_ENTRY,
+    RENAME_DIR_ENTRY,
+    DELETE_DIR_ENTRY,
 };
 
 struct ondisk_next_metadata_cluster {
@@ -159,7 +184,6 @@ struct ondisk_checkpoint {
 } __attribute__((packed));
 
 struct ondisk_unix_metadata {
-    uint8_t is_directory;
     uint32_t mode;
     uint32_t uid;
     uint32_t gid;
@@ -173,30 +197,45 @@ static_assert(sizeof(decltype(ondisk_unix_metadata::gid)) >= sizeof(decltype(uni
 static_assert(sizeof(decltype(ondisk_unix_metadata::mtime_ns)) >= sizeof(decltype(unix_metadata::mtime_ns)));
 static_assert(sizeof(decltype(ondisk_unix_metadata::ctime_ns)) >= sizeof(decltype(unix_metadata::ctime_ns)));
 
-struct ondisk_inode {
+struct ondisk_create_inode {
+    inode_t inode;
+    uint8_t is_directory;
+    ondisk_unix_metadata metadata;
+} __attribute__((packed));
+
+struct ondisk_update_metadata {
     inode_t inode;
     ondisk_unix_metadata metadata;
 } __attribute__((packed));
 
-struct ondisk_delete {
+struct ondisk_delete_inode {
     inode_t inode;
 } __attribute__((packed));
 
-struct ondisk_small_data_header {
+struct ondisk_small_write_header {
     inode_t inode;
     file_offset_t offset;
     uint16_t length;
+    decltype(unix_metadata::mtime_ns) mtime_ns;
     // After header comes data
 } __attribute__((packed));
 
-struct ondisk_medium_data {
+struct ondisk_medium_write {
     inode_t inode;
     file_offset_t offset;
     disk_offset_t disk_offset;
     uint32_t length;
+    decltype(unix_metadata::mtime_ns) mtime_ns;
 } __attribute__((packed));
 
-struct ondisk_large_data {
+struct ondisk_large_write {
+    inode_t inode;
+    file_offset_t offset;
+    cluster_id_t data_cluster; // length == cluster_size
+    decltype(unix_metadata::mtime_ns) mtime_ns;
+} __attribute__((packed));
+
+struct ondisk_large_write_without_mtime {
     inode_t inode;
     file_offset_t offset;
     cluster_id_t data_cluster; // length == cluster_size
@@ -205,6 +244,7 @@ struct ondisk_large_data {
 struct ondisk_truncate {
     inode_t inode;
     file_offset_t size;
+    decltype(unix_metadata::mtime_ns) mtime_ns;
 } __attribute__((packed));
 
 struct ondisk_mtime_update {
