@@ -233,7 +233,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                                 inode_data_vec::in_mem_data {data_store, data_store->get()}
                             };
 
-                            auto& inode_info = it->second;
+                            inode_info& inode_info = it->second;
                             if (not std::holds_alternative<inode_info::file>(inode_info.contents)) {
                                 return invalid_entry_exception();
                             }
@@ -266,7 +266,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                                 return invalid_entry_exception();
                             }
 
-                            auto& inode_info = it->second;
+                            inode_info& inode_info = it->second;
                             if (not std::holds_alternative<inode_info::file>(inode_info.contents)) {
                                 return invalid_entry_exception();
                             }
@@ -298,8 +298,8 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                             sstring dir_entry_name((const char*)&buff[pos], entry.entry_name_length);
                             pos += entry.entry_name_length;
 
-                            auto& dir_inode_info = _inodes[entry.dir_inode];
-                            auto& dir_entry_inode_info = _inodes[entry.entry_inode];
+                            inode_info& dir_inode_info = _inodes[entry.dir_inode];
+                            inode_info& dir_entry_inode_info = _inodes[entry.entry_inode];
 
                             if (not std::holds_alternative<inode_info::directory>(dir_inode_info.contents)) {
                                 return invalid_entry_exception();
@@ -316,11 +316,44 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                         }
 
                         case DELETE_DIR_ENTRY: {
-                            // TODO: priority
+                            ondisk_delete_dir_entry_header entry;
+                            if (not load_entry(entry) or pos + entry.entry_name_length > checkpointed_data_beg or _inodes.count(entry.dir_inode) != 1) {
+                                return invalid_entry_exception();
+                            }
+
+                            sstring dir_entry_name((const char*)&buff[pos], entry.entry_name_length);
+                            pos += entry.entry_name_length;
+
+                            inode_info& dir_inode_info = _inodes[entry.dir_inode];
+                            if (not std::holds_alternative<inode_info::directory>(dir_inode_info.contents)) {
+                                return invalid_entry_exception();
+                            }
+                            auto& dir = std::get<inode_info::directory>(dir_inode_info.contents);
+
+                            auto it = dir.entries.find(dir_entry_name);
+                            if (it == dir.entries.end()) {
+                                return invalid_entry_exception();
+                            }
+
+                            inode_t inode = it->second;
+                            auto inode_it = _inodes.find(inode);
+                            if (inode_it == _inodes.end()) {
+                                return invalid_entry_exception();
+                            }
+
+                            inode_info& inode_info = inode_it->second;
+                            assert(inode_info.directories_containing_file > 0);
+                            --inode_info.directories_containing_file;
+
+                            dir.entries.erase(it);
                             continue;
                         }
 
-                        case RENAME_DIR_ENTRY:
+                        case RENAME_DIR_ENTRY: {
+                            // TODO: implement it
+                            continue;
+                        }
+
                         case MEDIUM_WRITE: // TODO: will be very similar to SMALL_WRITE
                         case LARGE_WRITE: // TODO: will be very similar to SMALL_WRITE
                         case LARGE_WRITE_WITHOUT_MTIME: // TODO: will be very similar to SMALL_WRITE
