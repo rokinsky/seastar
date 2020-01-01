@@ -31,6 +31,7 @@
 #include <boost/crc.hpp>
 #include <boost/range/irange.hpp>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <seastar/core/units.hh>
 #include <stdexcept>
@@ -56,11 +57,8 @@ static unix_metadata ondisk_metadata_to_metadata(const ondisk_unix_metadata& ond
 }
 
 future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster_range available_clusters) {
-    // Clear state of the metadata log
-    _next_write_offset = 0;
-    _bytes_left_in_current_cluster = _cluster_size;
+    // Clear the metadata log
     _inodes.clear();
-    // TODO: clear directory DAG
     // Bootstrap
     return do_with(std::optional(first_metadata_cluster_id), std::unordered_set<cluster_id_t>{}, [this, available_clusters, &buff = _unwritten_metadata](auto& cluster_id, auto& taken_clusters) {
         return repeat([this, &cluster_id, &taken_clusters, &buff] {
@@ -94,10 +92,11 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                 // Process cluster: the data layout format is:
                 // | checkpoint1 | data1... | checkpoint2 | data2... |
                 bool log_ended = false;
+                cluster_id_t current_cluster_id = *cluster_id;
                 cluster_id = std::nullopt;
                 for (;;) {
                     if (cluster_id) {
-                        break; // Committed block with next cluster id marks the end of the current metadata log cluster
+                        break; // Committed block with next cluster_id marks the end of the current metadata log cluster
                     }
 
                     ondisk_type entry_type;
@@ -147,7 +146,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
 
                             auto [it, was_inserted] = _inodes.emplace((inode_t)entry.inode, inode_info {
                                 0,
-                                0, // TODO: maybe creating dangling inode (not attached to any directory is invalid)
+                                0, // TODO: maybe creating dangling inode (not attached to any directory is invalid), if not then we have to drop them after finishing bootstraping, because at that point dangling inodes are invaild (that's how I see it now)
                                 ondisk_metadata_to_metadata(entry.metadata),
                                 [&]() -> decltype(inode_info::contents) {
                                     if (entry.is_directory) {
@@ -373,7 +372,14 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
 
                     if (log_ended) {
                         // Update _unwritten_metadata, as the place where metadata log continues may be unaligned
-                        // TODO: update _unwritten_metadata to be correct
+                        range<size_t> pos_range = {
+                            pos - (pos % _alignment),
+                            pos
+                        };
+
+                        _unwritten_metadata_len = pos_range.end - pos_range.beg;
+                        memmove(_unwritten_metadata.get(), &buff[pos_range.beg], _unwritten_metadata_len);
+                        _next_write_offset = cluster_id_to_offset(current_cluster_id, _cluster_size) + pos_range.beg;
 
                         return make_ready_future<stop_iteration>(stop_iteration::yes);
                     }

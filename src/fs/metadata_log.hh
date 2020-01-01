@@ -21,8 +21,9 @@
 
 #pragma once
 
-#include "cluster_allocator.hh"
+#include "bitwise.hh"
 #include "cluster.hh"
+#include "cluster_allocator.hh"
 #include "inode.hh"
 #include "seastar/core/aligned_buffer.hh"
 #include "seastar/core/future.hh"
@@ -86,13 +87,13 @@ struct inode_info {
 
 class metadata_log {
     block_device _device;
-    const uint32_t _cluster_size;
-    const uint32_t _alignment;
+    const unit_size_t _cluster_size;
+    const unit_size_t _alignment;
     // To-disk metadata buffer
     using AlignedBuff = std::invoke_result_t<decltype(allocate_aligned_buffer<uint8_t>), size_t, size_t>;
     AlignedBuff _unwritten_metadata;
+    size_t _unwritten_metadata_len;
     disk_offset_t _next_write_offset;
-    disk_offset_t _bytes_left_in_current_cluster;
 
     // In memory metadata
     cluster_allocator _cluster_allocator;
@@ -102,7 +103,7 @@ class metadata_log {
     // TODO: for compaction: keep estimated metadata log size (that would take when written to disk) and the real size of metadata log taken on disk to allow for detecting when compaction
 
 public:
-    metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment);
+    metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment);
 
     metadata_log(const metadata_log&) = delete;
     metadata_log& operator=(const metadata_log&) = delete;
@@ -110,13 +111,17 @@ public:
     future<> bootstrap(cluster_id_t first_metadata_cluster_id, cluster_range available_clusters);
 
 private:
+    disk_offset_t bytes_left_in_current_cluster() const noexcept {
+        return _cluster_size - (_next_write_offset % _cluster_size) - _unwritten_metadata_len;
+    }
+
     void write_update(inode_info::file& file, inode_data_vec data_vec);
 
     // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap
     void cut_out_data_range(inode_info::file& file, file_range range);
 
 private:
-    future<> append_unwritten_metadata(char* data, uint32_t len);
+    future<> append_unwritten_metadata(char* data, size_t len);
 
 
 public:
