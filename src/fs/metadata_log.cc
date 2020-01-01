@@ -182,12 +182,33 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                         case DELETE_INODE: {
                             // TODO: for compaction: update used inode_data_vec
                             ondisk_delete_inode entry;
-                            if (not load_entry(entry) or _inodes.erase(entry.inode) != 1) {
+                            if (not load_entry(entry)) {
                                 return invalid_entry_exception();
                             }
 
-                            // TODO: add checks for directories_containing_file
-                            // TODO: there is more to do when deleting a directory
+                            auto it = _inodes.find(entry.inode);
+                            if (it == _inodes.end()) {
+                                return invalid_entry_exception();
+                            }
+
+                            inode_info& inode_info = it->second;
+                            if (inode_info.directories_containing_file > 0) {
+                                return invalid_entry_exception();
+                            }
+
+                            bool failed = std::visit(overloaded {
+                                [](const inode_info::directory& dir) {
+                                    return (not dir.entries.empty());
+                                },
+                                [](const inode_info::file&) {
+                                    return false;
+                                }
+                            }, inode_info.contents);
+                            if (failed) {
+                                return invalid_entry_exception();
+                            }
+
+                            _inodes.erase(it);
                             continue;
                         }
 
