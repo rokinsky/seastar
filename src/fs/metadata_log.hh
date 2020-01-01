@@ -261,6 +261,7 @@ struct ondisk_add_dir_entry_header {
 
 struct ondisk_rename_dir_entry_header {
     inode_t dir_inode;
+    inode_t new_dir_inode;
     uint16_t entry_old_name_length;
     uint16_t entry_new_name_length;
     // After header come: first old_name, then new_name
