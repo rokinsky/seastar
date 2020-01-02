@@ -24,6 +24,7 @@
 
 #include <boost/crc.hpp>
 #include <cstring>
+#include <seastar/core/print.hh>
 #include <seastar/core/thread.hh>
 #include <seastar/core/units.hh>
 #include <seastar/fs/block_device.hh>
@@ -83,8 +84,8 @@ inline void repair_crc32(shared_ptr<mock_block_device_impl> dev_impl) noexcept {
     };
 
     mock_block_device_impl::buf_type& buff = dev_impl.get()->buf;
-    size_t crc_pos = offsetof(bootstrap_record_disk, crc);
-    uint32_t crc_new = crc32(buff.data(), crc_pos);
+    constexpr size_t crc_pos = offsetof(bootstrap_record_disk, crc);
+    const uint32_t crc_new = crc32(buff.data(), crc_pos);
     std::memcpy(buff.data() + crc_pos, &crc_new, sizeof(crc_new));
 }
 
@@ -159,7 +160,9 @@ SEASTAR_THREAD_TEST_CASE(invalid_crc_read) {
     write_record.write_to_disk(dev).get();
     change_byte_at_offset(dev_impl, crc_offset);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
-            [] (const invalid_bootstrap_record& ex) { return sstring(ex.what()) == "CRC is invalid"; });
+            [] (const invalid_bootstrap_record& ex) {
+                return ex.general() == "Invalid CRC";
+            });
 }
 
 SEASTAR_THREAD_TEST_CASE(invalid_magic_read) {
@@ -173,7 +176,9 @@ SEASTAR_THREAD_TEST_CASE(invalid_magic_read) {
     change_byte_at_offset(dev_impl, magic_offset);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
-            [] (const invalid_bootstrap_record& ex) { return sstring(ex.what()) == "Magic Number is invalid"; });
+            [] (const invalid_bootstrap_record& ex) {
+                return ex.general() == "Invalid magic number";
+            });
 }
 
 SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
@@ -190,7 +195,8 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards number is invalid";
+                return ex.general() == fmt::format("Shards number should be smaller or equal to {}",
+                        bootstrap_record::max_shards_nb);
             });
 
     // shards_nb == 0
@@ -199,7 +205,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards number is invalid";
+                return ex.general() == "Shards number should be greater than 0";
             });
 
     std::vector<bootstrap_record::shard_info> shards_info;
@@ -212,7 +218,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Cluster with metadata should be inside available cluster range";
             });
 
     write_record.write_to_disk(dev).get();
@@ -222,7 +228,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Cluster with metadata should be inside available cluster range";
             });
 
     // available_clusters.beg > available_clusters.end
@@ -233,7 +239,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Invalid cluster range";
             });
 
     // available_clusters.beg == available_clusters.end
@@ -244,7 +250,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Invalid cluster range";
             });
 
     // available_clusters contains cluster 0
@@ -255,7 +261,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Range of available clusters should not contain cluster 0";
             });
 
     // available_clusters overlap
@@ -266,7 +272,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Cluster ranges should not overlap";
             });
 }
 
@@ -283,7 +289,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_sector_size_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
+                return ex.general() == "Sector size should be a power of 2";
             });
 
     // sector_size smaller than 512
@@ -292,7 +298,8 @@ SEASTAR_THREAD_TEST_CASE(invalid_sector_size_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
+                return ex.general() == fmt::format("Sector size should be greater or equal to {}",
+                        bootstrap_record::min_sector_size);
             });
 }
 
@@ -309,7 +316,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Cluster size should be a power of 2 and be divisible by sector size";
+                return ex.general() == "Cluster size should be divisible by sector size";
             });
 
     // cluster_size not power of 2
@@ -318,7 +325,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_read) {
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Cluster size should be a power of 2 and be divisible by sector size";
+                return ex.general() == "Cluster size should be a power of 2";
             });
 }
 
@@ -334,7 +341,8 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
     write_record.shards_info = prepare_valid_shards_info(bootstrap_record::max_shards_nb + 1);
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards number is invalid";
+                return ex.general() == fmt::format("Shards number should be smaller or equal to {}",
+                        bootstrap_record::max_shards_nb);
             });
 
     // shards_nb == 0
@@ -342,7 +350,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
     write_record.shards_info.clear();
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards number is invalid";
+                return ex.general() == "Shards number should be greater than 0";
             });
 
     // metadata_cluster not in available_clusters range
@@ -350,7 +358,14 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
     write_record.shards_info = {{1, {2, 3}}};
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Cluster with metadata should be inside available cluster range";
+            });
+
+    write_record = default_write_record;
+    write_record.shards_info = {{3, {2, 3}}};
+    BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
+            [] (const invalid_bootstrap_record& ex) {
+                return ex.general() == "Cluster with metadata should be inside available cluster range";
             });
 
     // available_clusters.beg > available_clusters.end
@@ -358,7 +373,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
     write_record.shards_info = {{3, {4, 2}}};
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Invalid cluster range";
             });
 
     // available_clusters.beg == available_clusters.end
@@ -366,7 +381,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
     write_record.shards_info = {{2, {2, 2}}};
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Invalid cluster range";
             });
 
     // available_clusters contains cluster 0
@@ -374,7 +389,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
     write_record.shards_info = {{1, {0, 5}}};
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Range of available clusters should not contain cluster 0";
             });
 
     // available_clusters overlap
@@ -382,7 +397,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
     write_record.shards_info = {{1, {1, 3}}, {2, {2, 4}}};
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Shards info is invalid";
+                return ex.general() == "Cluster ranges should not overlap";
             });
 }
 
@@ -396,7 +411,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_sector_size_write) {
     write_record.sector_size = 1234;
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
+                return ex.general() == "Sector size should be a power of 2";
             });
 
     // sector_size smaller than 512
@@ -404,7 +419,8 @@ SEASTAR_THREAD_TEST_CASE(invalid_sector_size_write) {
     write_record.sector_size = 256;
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Sector size should be a power of 2 and greater than 512";
+                return ex.general() == fmt::format("Sector size should be greater or equal to {}",
+                        bootstrap_record::min_sector_size);
             });
 }
 
@@ -418,7 +434,7 @@ SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_write) {
     write_record.cluster_size = 512;
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Cluster size should be a power of 2 and be divisible by sector size";
+                return ex.general() == "Cluster size should be divisible by sector size";
             });
 
     // cluster_size not power of 2
@@ -426,6 +442,6 @@ SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_write) {
     write_record.cluster_size = 3072;
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return sstring(ex.what()) == "Cluster size should be a power of 2 and be divisible by sector size";
+                return ex.general() == "Cluster size should be a power of 2";
             });
 }
