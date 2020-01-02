@@ -52,8 +52,7 @@ struct inode_data_vec {
     file_range data_range; // data spans [beg, end) range of the file
 
     struct in_mem_data {
-        lw_shared_ptr<std::unique_ptr<uint8_t[]>> data_store;
-        uint8_t* data;
+        temporary_buffer<uint8_t> data;
     };
 
     struct on_disk_data {
