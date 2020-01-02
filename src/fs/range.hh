@@ -31,6 +31,8 @@ struct range {
     T end; // exclusive
 
     constexpr bool is_empty() const noexcept { return beg >= end; }
+
+    constexpr T size() const noexcept { return end - beg; }
 };
 
 template <class T>
