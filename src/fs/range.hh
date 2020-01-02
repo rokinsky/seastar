@@ -36,6 +36,9 @@ struct range {
 };
 
 template <class T>
+range(T beg, T end) -> range<T>;
+
+template <class T>
 inline bool operator==(range<T> a, range<T> b) noexcept {
     return (a.beg == b.beg and a.end == b.end);
 }
