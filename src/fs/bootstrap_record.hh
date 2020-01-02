@@ -24,15 +24,31 @@
 #include "fs/cluster.hh"
 #include "fs/inode.hh"
 
+#include <exception>
 #include <seastar/core/reactor.hh>
 #include <seastar/fs/block_device.hh>
 
 namespace seastar::fs {
 
-class invalid_bootstrap_record : public std::runtime_error {
+class invalid_bootstrap_record : public std::exception {
+    std::string _general;
+    std::string _detailed;
 public:
-    explicit invalid_bootstrap_record(const char* msg) : std::runtime_error(msg) {}
-    explicit invalid_bootstrap_record(const std::string& msg) : std::runtime_error(msg) {}
+    explicit invalid_bootstrap_record(std::string general, std::optional<std::string> details = std::nullopt)
+        : _general(std::move(general))
+        , _detailed(details.has_value() ? _general + ", " + std::move(details.value()) : _general) {}
+
+    const std::string& detailed() const noexcept {
+        return _detailed;
+    }
+
+    const std::string& general() const noexcept {
+        return _general;
+    }
+
+    const char* what() const noexcept override {
+        return detailed().c_str();
+    }
 };
 
 /// In-memory version of the record describing characteristics of the file system (~superblock).
@@ -40,6 +56,7 @@ class bootstrap_record {
 public:
     static constexpr uint64_t magic_number = 0x5343594c4c414653; // SCYLLAFS
     static constexpr uint32_t max_shards_nb = 500;
+    static constexpr unit_size_t min_sector_size = 512;
 
     struct shard_info {
         cluster_id_t metadata_cluster; /// cluster id of the first metadata log cluster
