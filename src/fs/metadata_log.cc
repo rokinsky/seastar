@@ -223,13 +223,12 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                                 return invalid_entry_exception();
                             }
 
-                            auto data_store = make_lw_shared<std::unique_ptr<uint8_t[]>>(std::make_unique<uint8_t[]>(entry.length));
-                            memcpy(data_store->get(), &buff[pos], entry.length);
+                            temporary_buffer<uint8_t> data(&buff[pos], entry.length);
                             pos += entry.length;
 
                             inode_data_vec data_vec = {
                                 {entry.offset, entry.offset + entry.length},
-                                inode_data_vec::in_mem_data {data_store, data_store->get()}
+                                inode_data_vec::in_mem_data {std::move(data)}
                             };
 
                             inode_info& inode_info = it->second;
@@ -377,7 +376,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                             pos
                         };
 
-                        _unwritten_metadata_len = pos_range.end - pos_range.beg;
+                        _unwritten_metadata_len = pos_range.size();
                         memmove(_unwritten_metadata.get(), &buff[pos_range.beg], _unwritten_metadata_len);
                         _next_write_offset = cluster_id_to_offset(current_cluster_id, _cluster_size) + pos_range.beg;
 
@@ -415,7 +414,7 @@ void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) 
     }
 
     while (it != file.data.end() and are_intersecting(range, it->second.data_range)) {
-        const auto data_vec = std::move(it->second);
+        auto data_vec = std::move(it->second);
         file.data.erase(it++);
         const auto cap = intersection(range, data_vec.data_range);
         if (cap == data_vec.data_range) {
@@ -431,16 +430,17 @@ void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) 
         right.data_range = {cap.end, data_vec.data_range.end};
         auto right_beg_shift = right.data_range.beg - data_vec.data_range.beg;
         std::visit(overloaded {
-            [&](const inode_data_vec::in_mem_data& data) {
-                left.data_location = data;
-                right.data_location = inode_data_vec::in_mem_data {data.data_store, data.data + right_beg_shift};
+            [&](inode_data_vec::in_mem_data& mem) {
+                left.data_location = inode_data_vec::in_mem_data {mem.data.share(0, left.data_range.size())};
+                right.data_location = inode_data_vec::in_mem_data {mem.data.share(right_beg_shift, right.data_range.size())};
             },
-            [&](const inode_data_vec::on_disk_data& data) {
+            [&](inode_data_vec::on_disk_data& data) {
                 left.data_location = data;
                 right.data_location = inode_data_vec::on_disk_data {data.device_offset + right_beg_shift};
             },
-            [&](const inode_data_vec::hole_data&) {
-                left.data_location = right.data_location = inode_data_vec::hole_data {};
+            [&](inode_data_vec::hole_data&) {
+                left.data_location = inode_data_vec::hole_data {};
+                right.data_location = inode_data_vec::hole_data {};
             },
         }, data_vec.data_location);
 
