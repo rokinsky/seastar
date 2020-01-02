@@ -162,24 +162,19 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
     check_shards_number(shards_nb());
     check_shards_info(shards_info);
 
-    bootstrap_record_disk bootstrap_record_disk;
-    // using memset to zero out the whole memory used by bootstrap_record_disk including paddings
-    std::memset(&bootstrap_record_disk, 0, sizeof(bootstrap_record_disk));
+    auto bootstrap_record_buff = temporary_buffer<char>::aligned(alignment, aligned_bootstrap_record_size);
+    std::memset(bootstrap_record_buff.get_write(), 0, aligned_bootstrap_record_size);
+    bootstrap_record_disk* bootstrap_record_disk = (struct bootstrap_record_disk*)bootstrap_record_buff.get_write();
 
     // prepare bootstrap_record_disk records
-    bootstrap_record_disk.magic = bootstrap_record::magic_number;
-    bootstrap_record_disk.version = version;
-    bootstrap_record_disk.sector_size = sector_size;
-    bootstrap_record_disk.cluster_size = cluster_size;
-    bootstrap_record_disk.root_directory = root_directory;
-    bootstrap_record_disk.shards_nb = shards_nb();
-    std::copy(shards_info.begin(), shards_info.end(), bootstrap_record_disk.shards_info);
-    bootstrap_record_disk.crc = crc32(&bootstrap_record_disk, crc_offset);
-
-    auto bootstrap_record_buff = temporary_buffer<char>::aligned(alignment, aligned_bootstrap_record_size);
-    std::memcpy(bootstrap_record_buff.get_write(), &bootstrap_record_disk, sizeof(bootstrap_record_disk));
-    std::memset(bootstrap_record_buff.get_write() + sizeof(bootstrap_record_disk), 0,
-            aligned_bootstrap_record_size - sizeof(bootstrap_record_disk));
+    bootstrap_record_disk->magic = bootstrap_record::magic_number;
+    bootstrap_record_disk->version = version;
+    bootstrap_record_disk->sector_size = sector_size;
+    bootstrap_record_disk->cluster_size = cluster_size;
+    bootstrap_record_disk->root_directory = root_directory;
+    bootstrap_record_disk->shards_nb = shards_nb();
+    std::copy(shards_info.begin(), shards_info.end(), bootstrap_record_disk->shards_info);
+    bootstrap_record_disk->crc = crc32(bootstrap_record_disk, crc_offset);
 
     return device.write(bootstrap_record_offset, bootstrap_record_buff.get(), aligned_bootstrap_record_size)
             .then([bootstrap_record_buff = std::move(bootstrap_record_buff)] (size_t ret) {
