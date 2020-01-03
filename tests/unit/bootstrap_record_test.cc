@@ -25,10 +25,7 @@
 #include <boost/crc.hpp>
 #include <cstring>
 #include <seastar/core/print.hh>
-#include <seastar/core/thread.hh>
-#include <seastar/core/units.hh>
 #include <seastar/fs/block_device.hh>
-#include <seastar/fs/temporary_file.hh>
 #include <seastar/testing/test_case.hh>
 #include <seastar/testing/test_runner.hh>
 #include <seastar/testing/thread_test_case.hh>
