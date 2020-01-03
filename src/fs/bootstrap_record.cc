@@ -20,7 +20,6 @@
  */
 
 #include "fs/bootstrap_record.hh"
-#include "seastar/core/smp.hh"
 
 #include <boost/crc.hpp>
 #include <seastar/core/units.hh>
