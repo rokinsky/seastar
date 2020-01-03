@@ -25,7 +25,6 @@
 #include "fs/inode.hh"
 
 #include <exception>
-#include <seastar/core/reactor.hh>
 #include <seastar/fs/block_device.hh>
 
 namespace seastar::fs {
