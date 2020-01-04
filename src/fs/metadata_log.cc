@@ -40,7 +40,12 @@
 
 namespace seastar::fs {
 
-metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment) : _device(std::move(device)), _cluster_size(cluster_size), _alignment(alignment), _unwritten_metadata(allocate_aligned_buffer<uint8_t>(cluster_size, alignment)), _cluster_allocator({}, {}) {
+metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment)
+: _device(std::move(device))
+, _cluster_size(cluster_size)
+, _alignment(alignment)
+, _curr_cluster_buff(cluster_size, alignment, 0)
+, _cluster_allocator({}, {}) {
     assert(is_power_of_2(alignment));
     assert(cluster_size > 0 and cluster_size % alignment == 0);
 }
@@ -60,19 +65,20 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
     // Clear the metadata log
     _inodes.clear();
     // Bootstrap
-    return do_with(std::optional(first_metadata_cluster_id), std::unordered_set<cluster_id_t>{}, [this, available_clusters, &buff = _unwritten_metadata](auto& cluster_id, auto& taken_clusters) {
+    return do_with(std::optional(first_metadata_cluster_id), temporary_buffer<uint8_t>::aligned(_alignment, _cluster_size), std::unordered_set<cluster_id_t>{}, [this, available_clusters](auto& cluster_id, auto& buff, auto& taken_clusters) {
         return repeat([this, &cluster_id, &taken_clusters, &buff] {
             if (not cluster_id) {
                 return make_ready_future<stop_iteration>(stop_iteration::yes);
             }
 
-            return _device.read(cluster_id_to_offset(*cluster_id, _cluster_size), buff.get(), _cluster_size).then([this](size_t bytes_read) {
+            disk_offset_t curr_cluster_offset = cluster_id_to_offset(*cluster_id, _cluster_size);
+            return _device.read(curr_cluster_offset, buff.get_write(), _cluster_size).then([this](size_t bytes_read) {
                 if (bytes_read != _cluster_size) {
                     return make_exception_future(std::runtime_error("Failed to read whole metadata log cluster"));
                 }
                 return now();
 
-            }).then([this, &cluster_id, &taken_clusters, &buff] {
+            }).then([this, &cluster_id, &taken_clusters, &buff, curr_cluster_offset] {
                 taken_clusters.emplace(*cluster_id);
                 size_t pos = 0;
                 auto load_entry = [this, &buff, &pos](auto& entry) {
@@ -80,7 +86,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                         return false;
                     }
 
-                    memcpy(&entry, &buff[pos], sizeof(entry));
+                    memcpy(&entry, buff.get() + pos, sizeof(entry));
                     pos += sizeof(entry);
                     return true;
                 };
@@ -92,7 +98,6 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                 // Process cluster: the data layout format is:
                 // | checkpoint1 | data1... | checkpoint2 | data2... |
                 bool log_ended = false;
-                cluster_id_t current_cluster_id = *cluster_id;
                 cluster_id = std::nullopt;
                 for (;;) {
                     if (cluster_id) {
@@ -106,23 +111,26 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                     }
 
                     ondisk_checkpoint checkpoint;
-                    static_assert(offsetof(decltype(checkpoint), crc32_code) == 0);
-                    auto checkpointed_data_beg = pos + sizeof(checkpoint.crc32_code);
-                    if (not load_entry(checkpoint) or checkpointed_data_beg + checkpoint.checkpointed_data_length > _cluster_size) {
+                    if (not load_entry(checkpoint) or pos + checkpoint.checkpointed_data_length > _cluster_size) {
                         log_ended = true; // Invalid checkpoint
                         break;
                     }
 
                     boost::crc_32_type crc;
-                    crc.process_bytes(&buff[checkpointed_data_beg], checkpoint.checkpointed_data_length);
+                    crc.process_bytes(buff.get() + pos, checkpoint.checkpointed_data_length);
+                    crc.process_bytes(&checkpoint.checkpointed_data_length, sizeof(checkpoint.checkpointed_data_length));
                     if (crc.checksum() != checkpoint.crc32_code) {
                         log_ended = true; // Invalid CRC code
                         break;
                     }
 
-                    auto checkpointed_data_end = checkpointed_data_beg + checkpoint.checkpointed_data_length;
+                    auto checkpointed_data_end = pos + checkpoint.checkpointed_data_length;
                     while (pos < checkpointed_data_end) {
                         switch (entry_type) {
+                        case INVALID: {
+                            return invalid_entry_exception();
+                        }
+
                         case NEXT_METADATA_CLUSTER: {
                             ondisk_next_metadata_cluster entry;
                             if (not load_entry(entry)) {
@@ -223,7 +231,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                                 return invalid_entry_exception();
                             }
 
-                            temporary_buffer<uint8_t> data(&buff[pos], entry.length);
+                            temporary_buffer<uint8_t> data(buff.get() + pos, entry.length);
                             pos += entry.length;
 
                             inode_data_vec data_vec = {
@@ -293,7 +301,7 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                                 return invalid_entry_exception();
                             }
 
-                            sstring dir_entry_name((const char*)&buff[pos], entry.entry_name_length);
+                            sstring dir_entry_name((const char*)buff.get() + pos, entry.entry_name_length);
                             pos += entry.entry_name_length;
 
                             inode_info& dir_inode_info = _inodes[entry.dir_inode];
@@ -315,11 +323,11 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
 
                         case DELETE_DIR_ENTRY: {
                             ondisk_delete_dir_entry_header entry;
-                            if (not load_entry(entry) or pos + entry.entry_name_length > checkpointed_data_beg or _inodes.count(entry.dir_inode) != 1) {
+                            if (not load_entry(entry) or pos + entry.entry_name_length > checkpointed_data_end or _inodes.count(entry.dir_inode) != 1) {
                                 return invalid_entry_exception();
                             }
 
-                            sstring dir_entry_name((const char*)&buff[pos], entry.entry_name_length);
+                            sstring dir_entry_name((const char*)buff.get() + pos, entry.entry_name_length);
                             pos += entry.entry_name_length;
 
                             inode_info& dir_inode_info = _inodes[entry.dir_inode];
@@ -370,16 +378,8 @@ future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster
                     }
 
                     if (log_ended) {
-                        // Update _unwritten_metadata, as the place where metadata log continues may be unaligned
-                        range<size_t> pos_range = {
-                            pos - (pos % _alignment),
-                            pos
-                        };
-
-                        _unwritten_metadata_len = pos_range.size();
-                        memmove(_unwritten_metadata.get(), &buff[pos_range.beg], _unwritten_metadata_len);
-                        _next_write_offset = cluster_id_to_offset(current_cluster_id, _cluster_size) + pos_range.beg;
-
+                        // Bootstrap _curr_cluster_buff
+                        _curr_cluster_buff.reset_from_bootstraped_cluster(curr_cluster_offset, buff.get(), pos);
                         return make_ready_future<stop_iteration>(stop_iteration::yes);
                     }
                 }
