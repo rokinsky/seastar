@@ -454,6 +454,63 @@ void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) 
     }
 }
 
+std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup(const sstring& path) const noexcept {
+    if (path.empty() or path[0] != '/') {
+        return path_lookup_error::NOT_ABSOLUTE;
+    }
+
+    std::vector<inode_t> components_stack = {_root_dir};
+    size_t beg = 0;
+    while (beg < path.size()) {
+        range component_range = {beg, path.find('/', beg)};
+        bool check_if_dir = false;
+        if (component_range.end == path.npos) {
+            component_range.end = path.size();
+            beg = path.size();
+        } else {
+            check_if_dir = true;
+            beg = component_range.end + 1; // Jump over '/'
+        }
+
+        // TODO: I don't like that we make a copy here -- it is totally redundant
+        sstring component = path.substr(component_range.beg, component_range.size());
+        // Process the component
+        if (component == "") {
+            continue;
+        } else if (component == ".") {
+            assert(component_range.beg > 0 and path[component_range.beg - 1] == '/' and "Since path is absolute we do not have to check if the current component is a directory");
+            continue;
+        } else if (component == "..") {
+            if (components_stack.size() > 1) { // Root dir cannot be popped
+                components_stack.pop_back();
+            }
+        } else {
+            auto dir_it = _inodes.find(components_stack.back());
+            assert(dir_it != _inodes.end() and "inode comes from some previous lookup (or is a root directory) hence dir_it has to be valid");
+            assert(std::holds_alternative<inode_info::directory>(dir_it->second.contents) and "every previous component is a directory and it was checked when they were processed");
+            auto& curr_dir = std::get<inode_info::directory>(dir_it->second.contents);
+
+            auto it = curr_dir.entries.find(component);
+            if (it == curr_dir.entries.end()) {
+                return path_lookup_error::NO_ENTRY;
+            }
+
+            inode_t entry_inode = it->second;
+            if (check_if_dir) {
+                auto entry_it = _inodes.find(entry_inode);
+                assert(entry_it != _inodes.end() and "dir entries have to exist");
+                if (not std::holds_alternative<inode_info::directory>(entry_it->second.contents)) {
+                    return path_lookup_error::NOT_DIR;
+                }
+            }
+
+            components_stack.emplace_back(entry_inode);
+        }
+    }
+
+    return components_stack.back();
+}
+
 file_offset_t metadata_log::file_size(inode_t inode) const {
     auto it = _inodes.find(inode);
     if (it == _inodes.end()) {
