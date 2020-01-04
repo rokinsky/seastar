@@ -494,6 +494,7 @@ add_library (seastar STATIC
   include/seastar/fs/block_device.hh
   include/seastar/fs/file.hh
   include/seastar/fs/overloaded.hh
+  include/seastar/fs/path.hh
   include/seastar/fs/temporary_file.hh
   include/seastar/http/api_docs.hh
   include/seastar/http/common.hh
