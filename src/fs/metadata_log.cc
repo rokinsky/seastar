@@ -454,7 +454,7 @@ void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) 
     }
 }
 
-std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup(const sstring& path) const noexcept {
+std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup(const sstring& path) const {
     if (path.empty() or path[0] != '/') {
         return path_lookup_error::NOT_ABSOLUTE;
     }
@@ -472,7 +472,7 @@ std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup
             beg = component_range.end + 1; // Jump over '/'
         }
 
-        // TODO: I don't like that we make a copy here -- it is totally redundant
+        // TODO: I don't like that we make a copy here -- it is totally redundant and inhibits adding noexcept
         sstring component = path.substr(component_range.beg, component_range.size());
         // Process the component
         if (component == "") {
