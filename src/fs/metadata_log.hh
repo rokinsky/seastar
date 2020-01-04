@@ -208,7 +208,7 @@ public:
     }
 
     // Clears buffer, leaving it in state as if it was just constructed
-    void reset_from_bootstraped_cluster(disk_offset_t cluster_offset, const uint8_t* cluster_contents, size_t metadata_end_pos) {
+    void reset_from_bootstraped_cluster(disk_offset_t cluster_offset, const uint8_t* cluster_contents, size_t metadata_end_pos) noexcept {
         assert(mod_by_power_of_2(cluster_offset, _alignment) == 0);
         _disk_write_offset = cluster_offset;
         _next_write = {
@@ -254,8 +254,11 @@ private:
         ondisk_type type = INVALID;
         ondisk_checkpoint checkpoint;
         memset(&checkpoint, 0, sizeof(checkpoint));
+
+        assert(bytes_left() >= sizeof(type) + sizeof(checkpoint));
         append_bytes(&type, sizeof(type));
         append_bytes(&checkpoint, sizeof(checkpoint));
+
         _crc.reset();
     }
 
@@ -289,10 +292,12 @@ public:
     };
 
     append_result append(const ondisk_next_metadata_cluster& next_metadata_cluster) noexcept {
-        if (bytes_left() < sizeof(next_metadata_cluster)) {
+        ondisk_type type = NEXT_METADATA_CLUSTER;
+        if (bytes_left() < sizeof(type) + sizeof(next_metadata_cluster)) {
             return TOO_BIG;
         }
 
+        append_bytes(&type, sizeof(type));
         append_bytes(&next_metadata_cluster, sizeof(next_metadata_cluster));
         return APPENDED;
     }
@@ -302,108 +307,86 @@ private:
         return (bytes_left() >= bytes_no + sizeof(ondisk_next_metadata_cluster)); // We need to reserve space for the next metadata cluster entry
     }
 
-public:
-    // TODO: almost all below append's are copy paste
-    append_result append(const ondisk_create_inode& create_inode) noexcept {
-        if (not fits_for_append(sizeof(create_inode))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&create_inode, sizeof(create_inode));
-        return APPENDED;
-    }
-
-    append_result append(const ondisk_update_metadata& update_metadata) noexcept {
-        if (not fits_for_append(sizeof(update_metadata))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&update_metadata, sizeof(update_metadata));
-        return APPENDED;
-    }
-
-    append_result append(const ondisk_delete_inode& delete_inode) noexcept {
-        if (not fits_for_append(sizeof(delete_inode))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&delete_inode, sizeof(delete_inode));
-        return APPENDED;
-    }
-
-    append_result append(const ondisk_small_write_header& small_write, const void* data) noexcept {
-        size_t total_size = sizeof(small_write) + small_write.length;
+    template<class T>
+    append_result append_simple(ondisk_type type, const T& entry) noexcept {
+        size_t total_size = sizeof(type) + sizeof(entry);
         if (not fits_for_append(total_size)) {
             return TOO_BIG;
         }
 
+        append_bytes(&type, sizeof(type));
+        append_bytes(&entry, sizeof(entry));
+        return APPENDED;
+    }
+
+public:
+    append_result append(const ondisk_create_inode& create_inode) noexcept {
+        // TODO: maybe add a constexpr static field to each ondisk_* entry specifying what type it is?
+        return append_simple(CREATE_INODE, create_inode);
+    }
+
+    append_result append(const ondisk_update_metadata& update_metadata) noexcept {
+        return append_simple(UPDATE_METADATA, update_metadata);
+    }
+
+    append_result append(const ondisk_delete_inode& delete_inode) noexcept {
+        return append_simple(DELETE_INODE, delete_inode);
+    }
+
+    append_result append(const ondisk_medium_write& medium_write) noexcept {
+        return append_simple(MEDIUM_WRITE, medium_write);
+    }
+
+    append_result append(const ondisk_large_write& large_write) noexcept {
+        return append_simple(LARGE_WRITE, large_write);
+    }
+
+    append_result append(const ondisk_large_write_without_mtime& large_write_without_mtime) noexcept {
+        return append_simple(LARGE_WRITE_WITHOUT_MTIME, large_write_without_mtime);
+    }
+
+    append_result append(const ondisk_truncate& truncate) noexcept {
+        return append_simple(TRUNCATE, truncate);
+    }
+
+    append_result append(const ondisk_mtime_update& mtime_update) noexcept {
+        return append_simple(MTIME_UPDATE, mtime_update);
+    }
+
+    append_result append(const ondisk_small_write_header& small_write, const void* data) noexcept {
+        ondisk_type type = SMALL_WRITE;
+        size_t total_size = sizeof(type) + sizeof(small_write) + small_write.length;
+        if (not fits_for_append(total_size)) {
+            return TOO_BIG;
+        }
+
+        append_bytes(&type, sizeof(type));
         append_bytes(&small_write, sizeof(small_write));
         append_bytes(data, small_write.length);
         return APPENDED;
     }
 
-    append_result append(const ondisk_medium_write& medium_write) noexcept {
-        if (not fits_for_append(sizeof(medium_write))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&medium_write, sizeof(medium_write));
-        return APPENDED;
-    }
-
-    append_result append(const ondisk_large_write& large_write) noexcept {
-        if (not fits_for_append(sizeof(large_write))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&large_write, sizeof(large_write));
-        return APPENDED;
-    }
-
-    append_result append(const ondisk_large_write_without_mtime& large_write_without_mtime) noexcept {
-        if (not fits_for_append(sizeof(large_write_without_mtime))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&large_write_without_mtime, sizeof(large_write_without_mtime));
-        return APPENDED;
-    }
-
-    append_result append(const ondisk_truncate& truncate) noexcept {
-        if (not fits_for_append(sizeof(truncate))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&truncate, sizeof(truncate));
-        return APPENDED;
-    }
-
-    append_result append(const ondisk_mtime_update& mtime_update) noexcept {
-        if (not fits_for_append(sizeof(mtime_update))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&mtime_update, sizeof(mtime_update));
-        return APPENDED;
-    }
-
     append_result append(const ondisk_add_dir_entry_header& add_dir_entry, const void* entry_name) noexcept {
-        size_t total_size = sizeof(add_dir_entry) + add_dir_entry.entry_name_length;
+        ondisk_type type = ADD_DIR_ENTRY;
+        size_t total_size = sizeof(type) + sizeof(add_dir_entry) + add_dir_entry.entry_name_length;
         if (not fits_for_append(total_size)) {
             return TOO_BIG;
         }
 
+        append_bytes(&type, sizeof(type));
         append_bytes(&add_dir_entry, sizeof(add_dir_entry));
         append_bytes(entry_name, add_dir_entry.entry_name_length);
         return APPENDED;
     }
 
     append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name, const void* new_name) noexcept {
-        size_t total_size = sizeof(rename_dir_entry) + rename_dir_entry.entry_old_name_length + rename_dir_entry.entry_new_name_length;
+        ondisk_type type = RENAME_DIR_ENTRY;
+        size_t total_size = sizeof(type) + sizeof(rename_dir_entry) + rename_dir_entry.entry_old_name_length + rename_dir_entry.entry_new_name_length;
         if (not fits_for_append(total_size)) {
             return TOO_BIG;
         }
 
+        append_bytes(&type, sizeof(type));
         append_bytes(&rename_dir_entry, sizeof(rename_dir_entry));
         append_bytes(old_name, rename_dir_entry.entry_old_name_length);
         append_bytes(new_name, rename_dir_entry.entry_new_name_length);
@@ -411,11 +394,13 @@ public:
     }
 
     append_result append(const ondisk_delete_dir_entry_header& delete_dir_entry, const void* entry_name) noexcept {
-        size_t total_size = sizeof(delete_dir_entry) + delete_dir_entry.entry_name_length;
+        ondisk_type type = DELETE_DIR_ENTRY;
+        size_t total_size = sizeof(type) + sizeof(delete_dir_entry) + delete_dir_entry.entry_name_length;
         if (not fits_for_append(total_size)) {
             return TOO_BIG;
         }
 
+        append_bytes(&type, sizeof(type));
         append_bytes(&delete_dir_entry, sizeof(delete_dir_entry));
         append_bytes(entry_name, delete_dir_entry.entry_name_length);
         return APPENDED;
