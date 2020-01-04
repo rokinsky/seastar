@@ -433,6 +433,7 @@ struct inode_info {
     unix_metadata metadata;
 
     struct directory {
+        // TODO: directory entry cannot contain '/' character --> add checks for that
         std::map<sstring, inode_t> entries; // entry name => inode
     };
 
@@ -456,6 +457,7 @@ class metadata_log {
     // In memory metadata
     cluster_allocator _cluster_allocator;
     std::map<inode_t, inode_info> _inodes;
+    inode_t _root_dir;
 
     // TODO: for compaction: keep some set(?) of inode_data_vec, so that we can keep track of clusters that have lowest utilization (up-to-date data)
     // TODO: for compaction: keep estimated metadata log size (that would take when written to disk) and the real size of metadata log taken on disk to allow for detecting when compaction
@@ -475,6 +477,14 @@ public:
 
 private:
     future<> append_unwritten_metadata(uint8_t* data, size_t len);
+
+    enum class path_lookup_error {
+        NOT_ABSOLUTE, // a path is not absolute
+        NO_ENTRY, // no such file or directory
+        NOT_DIR, // a component used as a directory in path is not, in fact, a directory
+    };
+
+    std::variant<inode_t, path_lookup_error> path_lookup(const sstring& path) const noexcept;
 
 public:
     // TODO: add some way of iterating over a directory
