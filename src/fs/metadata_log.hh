@@ -484,7 +484,7 @@ private:
         NOT_DIR, // a component used as a directory in path is not, in fact, a directory
     };
 
-    std::variant<inode_t, path_lookup_error> path_lookup(const sstring& path) const noexcept;
+    std::variant<inode_t, path_lookup_error> path_lookup(const sstring& path) const;
 
 public:
     // TODO: add some way of iterating over a directory
