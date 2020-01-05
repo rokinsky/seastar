@@ -21,6 +21,7 @@
 
 #include "fs/bootstrap_record.hh"
 #include "fs/cluster.hh"
+#include "fs/crc.hh"
 
 #include <boost/crc.hpp>
 #include <cstring>
@@ -74,12 +75,6 @@ inline std::vector<bootstrap_record::shard_info> prepare_valid_shards_info(uint3
 };
 
 inline void repair_crc32(shared_ptr<mock_block_device_impl> dev_impl) noexcept {
-    auto crc32 = [](const uint8_t* buff, size_t len) {
-        boost::crc_32_type result;
-        result.process_bytes(buff, len);
-        return result.checksum();
-    };
-
     mock_block_device_impl::buf_type& buff = dev_impl.get()->buf;
     constexpr size_t crc_pos = offsetof(bootstrap_record_disk, crc);
     const uint32_t crc_new = crc32(buff.data(), crc_pos);
