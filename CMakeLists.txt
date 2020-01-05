@@ -602,6 +602,7 @@ add_library (seastar STATIC
   src/fs/cluster.hh
   src/fs/cluster_allocator.cc
   src/fs/cluster_allocator.hh
+  src/fs/crc.hh
   src/fs/file.cc
   src/fs/inode.hh
   src/fs/range.hh
