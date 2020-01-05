@@ -20,8 +20,8 @@
  */
 
 #include "fs/bootstrap_record.hh"
+#include "fs/crc.hh"
 
-#include <boost/crc.hpp>
 #include <seastar/core/units.hh>
 #include <seastar/core/print.hh>
 
@@ -35,12 +35,6 @@ constexpr disk_offset_t bootstrap_record_offset = 0;
 constexpr size_t aligned_bootstrap_record_size =
         (1 + (sizeof(bootstrap_record_disk) - 1) / write_alignment) * write_alignment;
 constexpr size_t crc_offset = offsetof(bootstrap_record_disk, crc);
-
-inline uint32_t crc32(const void* buff, size_t len) noexcept {
-    boost::crc_32_type result;
-    result.process_bytes(buff, len);
-    return result.checksum();
-}
 
 inline std::optional<invalid_bootstrap_record> check_alignment(unit_size_t alignment) {
     if (!is_power_of_2(alignment)) {
