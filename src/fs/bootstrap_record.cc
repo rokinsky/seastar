@@ -29,10 +29,10 @@ namespace seastar::fs {
 
 namespace {
 
-constexpr unit_size_t alignment = 4 * KB;
+constexpr unit_size_t write_alignment = 4 * KB;
 constexpr disk_offset_t bootstrap_record_offset = 0;
 
-constexpr size_t aligned_bootstrap_record_size = (1 + (sizeof(bootstrap_record_disk) - 1) / alignment) * alignment;
+constexpr size_t aligned_bootstrap_record_size = (1 + (sizeof(bootstrap_record_disk) - 1) / write_alignment) * write_alignment;
 constexpr size_t crc_offset = offsetof(bootstrap_record_disk, crc);
 
 inline uint32_t crc32(const void* buff, size_t len) noexcept {
@@ -41,26 +41,26 @@ inline uint32_t crc32(const void* buff, size_t len) noexcept {
     return result.checksum();
 }
 
-inline std::optional<invalid_bootstrap_record> check_sector_size(unit_size_t sector_size) {
-    if (!is_power_of_2(sector_size)) {
-        return invalid_bootstrap_record("Sector size should be a power of 2",
-                fmt::format("read sector size '{}'", sector_size));
+inline std::optional<invalid_bootstrap_record> check_alignment(unit_size_t alignment) {
+    if (!is_power_of_2(alignment)) {
+        return invalid_bootstrap_record("Alignment should be a power of 2",
+                fmt::format("read alignment '{}'", alignment));
     }
-    if (sector_size < bootstrap_record::min_sector_size) {
-        return invalid_bootstrap_record(fmt::format("Sector size should be greater or equal to {}",
-                bootstrap_record::min_sector_size), fmt::format("read sector size '{}'", sector_size));
+    if (alignment < bootstrap_record::min_alignment) {
+        return invalid_bootstrap_record(fmt::format("Alignment should be greater or equal to {}",
+                bootstrap_record::min_alignment), fmt::format("read alignment '{}'", alignment));
     }
     return std::nullopt;
 }
 
-inline std::optional<invalid_bootstrap_record> check_cluster_size(unit_size_t cluster_size, unit_size_t sector_size) {
+inline std::optional<invalid_bootstrap_record> check_cluster_size(unit_size_t cluster_size, unit_size_t alignment) {
     if (!is_power_of_2(cluster_size)) {
         return invalid_bootstrap_record("Cluster size should be a power of 2",
                 fmt::format("read cluster size '{}'", cluster_size));
     }
-    if (cluster_size % sector_size != 0) {
-        return invalid_bootstrap_record("Cluster size should be divisible by sector size",
-                fmt::format("read sector size '{}', read cluster size '{}'", sector_size, cluster_size));
+    if (cluster_size % alignment != 0) {
+        return invalid_bootstrap_record("Cluster size should be divisible by alignment",
+                fmt::format("read alignment '{}', read cluster size '{}'", alignment, cluster_size));
     }
     return std::nullopt;
 }
@@ -118,7 +118,7 @@ std::optional<invalid_bootstrap_record> check_shards_info(std::vector<bootstrap_
 }
 
 future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) {
-    auto bootstrap_record_buff = temporary_buffer<char>::aligned(alignment, aligned_bootstrap_record_size);
+    auto bootstrap_record_buff = temporary_buffer<char>::aligned(write_alignment, aligned_bootstrap_record_size);
     return device.read(bootstrap_record_offset, bootstrap_record_buff.get_write(), aligned_bootstrap_record_size)
             .then([bootstrap_record_buff = std::move(bootstrap_record_buff)] (size_t ret) {
         if (ret != aligned_bootstrap_record_size) {
@@ -140,8 +140,8 @@ future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) 
                     fmt::format("expected magic '{}', read magic '{}'", magic_number, bootstrap_record_disk.magic)));
         }
         if (std::optional<invalid_bootstrap_record> ret_check;
-                (ret_check = check_sector_size(bootstrap_record_disk.sector_size)) ||
-                (ret_check = check_cluster_size(bootstrap_record_disk.cluster_size, bootstrap_record_disk.sector_size)) ||
+                (ret_check = check_alignment(bootstrap_record_disk.alignment)) ||
+                (ret_check = check_cluster_size(bootstrap_record_disk.cluster_size, bootstrap_record_disk.alignment)) ||
                 (ret_check = check_shards_number(bootstrap_record_disk.shards_nb))) {
             return make_exception_future<bootstrap_record>(ret_check.value());
         }
@@ -155,7 +155,7 @@ future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) 
         }
 
         bootstrap_record bootstrap_record_mem(bootstrap_record_disk.version,
-                bootstrap_record_disk.sector_size,
+                bootstrap_record_disk.alignment,
                 bootstrap_record_disk.cluster_size,
                 bootstrap_record_disk.root_directory,
                 std::move(tmp_shards_info));
@@ -167,21 +167,21 @@ future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) 
 future<> bootstrap_record::write_to_disk(block_device& device) const {
     // initial checks
     if (std::optional<invalid_bootstrap_record> ret_check;
-            (ret_check = check_sector_size(sector_size)) ||
-            (ret_check = check_cluster_size(cluster_size, sector_size)) ||
+            (ret_check = check_alignment(alignment)) ||
+            (ret_check = check_cluster_size(cluster_size, alignment)) ||
             (ret_check = check_shards_number(shards_nb())) ||
             (ret_check = check_shards_info(shards_info))) {
         return make_exception_future<>(ret_check.value());
     }
 
-    auto bootstrap_record_buff = temporary_buffer<char>::aligned(alignment, aligned_bootstrap_record_size);
+    auto bootstrap_record_buff = temporary_buffer<char>::aligned(write_alignment, aligned_bootstrap_record_size);
     std::memset(bootstrap_record_buff.get_write(), 0, aligned_bootstrap_record_size);
     bootstrap_record_disk* bootstrap_record_disk = (struct bootstrap_record_disk*)bootstrap_record_buff.get_write();
 
     // prepare bootstrap_record_disk records
     bootstrap_record_disk->magic = bootstrap_record::magic_number;
     bootstrap_record_disk->version = version;
-    bootstrap_record_disk->sector_size = sector_size;
+    bootstrap_record_disk->alignment = alignment;
     bootstrap_record_disk->cluster_size = cluster_size;
     bootstrap_record_disk->root_directory = root_directory;
     bootstrap_record_disk->shards_nb = shards_nb();
@@ -200,7 +200,7 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
 }
 
 bool operator==(const bootstrap_record& lhs, const bootstrap_record& rhs) noexcept {
-    return lhs.version == rhs.version && lhs.sector_size == rhs.sector_size &&
+    return lhs.version == rhs.version && lhs.alignment == rhs.alignment &&
             lhs.cluster_size == rhs.cluster_size && lhs.root_directory == rhs.root_directory &&
             lhs.shards_info == rhs.shards_info;
 }
