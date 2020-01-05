@@ -32,7 +32,8 @@ namespace {
 constexpr unit_size_t write_alignment = 4 * KB;
 constexpr disk_offset_t bootstrap_record_offset = 0;
 
-constexpr size_t aligned_bootstrap_record_size = (1 + (sizeof(bootstrap_record_disk) - 1) / write_alignment) * write_alignment;
+constexpr size_t aligned_bootstrap_record_size =
+        (1 + (sizeof(bootstrap_record_disk) - 1) / write_alignment) * write_alignment;
 constexpr size_t crc_offset = offsetof(bootstrap_record_disk, crc);
 
 inline uint32_t crc32(const void* buff, size_t len) noexcept {
@@ -43,36 +44,37 @@ inline uint32_t crc32(const void* buff, size_t len) noexcept {
 
 inline std::optional<invalid_bootstrap_record> check_alignment(unit_size_t alignment) {
     if (!is_power_of_2(alignment)) {
-        return invalid_bootstrap_record("Alignment should be a power of 2",
-                fmt::format("read alignment '{}'", alignment));
+        return invalid_bootstrap_record(fmt::format("Alignment should be a power of 2, read alignment '{}'",
+                alignment));
     }
     if (alignment < bootstrap_record::min_alignment) {
-        return invalid_bootstrap_record(fmt::format("Alignment should be greater or equal to {}",
-                bootstrap_record::min_alignment), fmt::format("read alignment '{}'", alignment));
+        return invalid_bootstrap_record(fmt::format("Alignment should be greater or equal to {}, read alignment '{}'",
+                bootstrap_record::min_alignment, alignment));
     }
     return std::nullopt;
 }
 
 inline std::optional<invalid_bootstrap_record> check_cluster_size(unit_size_t cluster_size, unit_size_t alignment) {
     if (!is_power_of_2(cluster_size)) {
-        return invalid_bootstrap_record("Cluster size should be a power of 2",
-                fmt::format("read cluster size '{}'", cluster_size));
+        return invalid_bootstrap_record(fmt::format("Cluster size should be a power of 2, read cluster size '{}'", cluster_size));
     }
     if (cluster_size % alignment != 0) {
-        return invalid_bootstrap_record("Cluster size should be divisible by alignment",
-                fmt::format("read alignment '{}', read cluster size '{}'", alignment, cluster_size));
+        return invalid_bootstrap_record(fmt::format(
+                "Cluster size should be divisible by alignment, read alignment '{}', read cluster size '{}'",
+                alignment, cluster_size));
     }
     return std::nullopt;
 }
 
 inline std::optional<invalid_bootstrap_record> check_shards_number(uint32_t shards_nb) {
     if (shards_nb == 0) {
-        return invalid_bootstrap_record("Shards number should be greater than 0",
-                fmt::format("read shards number '{}'", shards_nb));
+        return invalid_bootstrap_record(fmt::format("Shards number should be greater than 0, read shards number '{}'",
+                shards_nb));
     }
     if (shards_nb > bootstrap_record::max_shards_nb) {
-        return invalid_bootstrap_record(fmt::format("Shards number should be smaller or equal to {}",
-                bootstrap_record::max_shards_nb), fmt::format("read shards number '{}'", shards_nb));
+        return invalid_bootstrap_record(fmt::format(
+                "Shards number should be smaller or equal to {}, read shards number '{}'",
+                bootstrap_record::max_shards_nb, shards_nb));
     }
     return std::nullopt;
 }
@@ -81,20 +83,19 @@ std::optional<invalid_bootstrap_record> check_shards_info(std::vector<bootstrap_
     // check 1 <= beg <= metadata_cluster < end
     for (const bootstrap_record::shard_info& info : shards_info) {
         if (info.available_clusters.beg >= info.available_clusters.end) {
-            return invalid_bootstrap_record("Invalid cluster range",
-                    fmt::format("read cluster range [{}, {})", info.available_clusters.beg,
-                    info.available_clusters.end));
+            return invalid_bootstrap_record(fmt::format("Invalid cluster range, read cluster range [{}, {})",
+                    info.available_clusters.beg, info.available_clusters.end));
         }
         if (info.available_clusters.beg == 0) {
-            return invalid_bootstrap_record("Range of available clusters should not contain cluster 0",
-                    fmt::format("read cluster range [{}, {})", info.available_clusters.beg,
-                    info.available_clusters.end));
+            return invalid_bootstrap_record(fmt::format(
+                    "Range of available clusters should not contain cluster 0, read cluster range [{}, {})",
+                    info.available_clusters.beg, info.available_clusters.end));
         }
         if (info.available_clusters.beg > info.metadata_cluster ||
                 info.available_clusters.end <= info.metadata_cluster) {
-            return invalid_bootstrap_record("Cluster with metadata should be inside available cluster range",
-                    fmt::format("read cluster range [{}, {}), read metadata cluster '{}'", info.available_clusters.beg,
-                    info.available_clusters.end, info.metadata_cluster));
+            return invalid_bootstrap_record(fmt::format(
+                    "Cluster with metadata should be inside available cluster range, read cluster range [{}, {}), read metadata cluster '{}'",
+                    info.available_clusters.beg, info.available_clusters.end, info.metadata_cluster));
         }
     }
 
@@ -106,10 +107,10 @@ std::optional<invalid_bootstrap_record> check_shards_info(std::vector<bootstrap_
         });
     for (size_t i = 1; i < shards_info.size(); i++) {
         if (shards_info[i - 1].available_clusters.end > shards_info[i].available_clusters.beg) {
-            return invalid_bootstrap_record("Cluster ranges should not overlap",
-                    fmt::format("overlaping ranges [{}, {}), [{}, {})", shards_info[i - 1].available_clusters.beg,
-                    shards_info[i - 1].available_clusters.end, shards_info[i].available_clusters.beg,
-                    shards_info[i].available_clusters.end));
+            return invalid_bootstrap_record(fmt::format(
+                    "Cluster ranges should not overlap, overlaping ranges [{}, {}), [{}, {})",
+                    shards_info[i - 1].available_clusters.beg, shards_info[i - 1].available_clusters.end,
+                    shards_info[i].available_clusters.beg, shards_info[i].available_clusters.end));
         }
     }
     return std::nullopt;
@@ -123,8 +124,9 @@ future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) 
             .then([bootstrap_record_buff = std::move(bootstrap_record_buff)] (size_t ret) {
         if (ret != aligned_bootstrap_record_size) {
             return make_exception_future<bootstrap_record>(
-                    invalid_bootstrap_record("Error while reading bootstrap record block",
-                    fmt::format("{} bytes read instead of {}", ret, aligned_bootstrap_record_size)));
+                    invalid_bootstrap_record(fmt::format(
+                            "Error while reading bootstrap record block, {} bytes read instead of {}",
+                            ret, aligned_bootstrap_record_size)));
         }
 
         bootstrap_record_disk bootstrap_record_disk;
@@ -132,12 +134,14 @@ future<bootstrap_record> bootstrap_record::read_from_disk(block_device& device) 
 
         const uint32_t crc_calc = crc32(bootstrap_record_buff.get(), crc_offset);
         if (crc_calc != bootstrap_record_disk.crc) {
-            return make_exception_future<bootstrap_record>(invalid_bootstrap_record("Invalid CRC",
-                    fmt::format("expected crc '{}', read crc '{}'", crc_calc, bootstrap_record_disk.crc)));
+            return make_exception_future<bootstrap_record>(
+                    invalid_bootstrap_record(fmt::format("Invalid CRC, expected crc '{}', read crc '{}'",
+                            crc_calc, bootstrap_record_disk.crc)));
         }
         if (magic_number != bootstrap_record_disk.magic) {
-            return make_exception_future<bootstrap_record>(invalid_bootstrap_record("Invalid magic number",
-                    fmt::format("expected magic '{}', read magic '{}'", magic_number, bootstrap_record_disk.magic)));
+            return make_exception_future<bootstrap_record>(
+                    invalid_bootstrap_record(fmt::format("Invalid magic number, expected magic '{}', read magic '{}'",
+                            magic_number, bootstrap_record_disk.magic)));
         }
         if (std::optional<invalid_bootstrap_record> ret_check;
                 (ret_check = check_alignment(bootstrap_record_disk.alignment)) ||
@@ -192,8 +196,9 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
             .then([bootstrap_record_buff = std::move(bootstrap_record_buff)] (size_t ret) {
         if (ret != aligned_bootstrap_record_size) {
             return make_exception_future<>(
-                    invalid_bootstrap_record("Error while writing bootstrap record block to disk",
-                    fmt::format("{} bytes written instead of {}", ret, aligned_bootstrap_record_size)));
+                    invalid_bootstrap_record(fmt::format(
+                            "Error while writing bootstrap record block to disk, {} bytes written instead of {}",
+                            ret, aligned_bootstrap_record_size)));
         }
         return make_ready_future<>();
     });
