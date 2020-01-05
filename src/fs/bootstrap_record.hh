@@ -29,25 +29,10 @@
 
 namespace seastar::fs {
 
-class invalid_bootstrap_record : public std::exception {
-    std::string _general;
-    std::string _detailed;
+class invalid_bootstrap_record : public std::runtime_error {
 public:
-    explicit invalid_bootstrap_record(std::string general, std::optional<std::string> details = std::nullopt)
-        : _general(std::move(general))
-        , _detailed(details.has_value() ? _general + ", " + std::move(details.value()) : _general) {}
-
-    const std::string& detailed() const noexcept {
-        return _detailed;
-    }
-
-    const std::string& general() const noexcept {
-        return _general;
-    }
-
-    const char* what() const noexcept override {
-        return detailed().c_str();
-    }
+    explicit invalid_bootstrap_record(const std::string& msg) : std::runtime_error(msg) {}
+    explicit invalid_bootstrap_record(const char* msg) : std::runtime_error(msg) {}
 };
 
 /// In-memory version of the record describing characteristics of the file system (~superblock).
