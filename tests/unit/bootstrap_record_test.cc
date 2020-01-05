@@ -105,7 +105,8 @@ inline void place_at_offset(shared_ptr<mock_block_device_impl> dev_impl, size_t 
     std::memcpy(dev_impl.get()->buf.data() + offset, shards_info_disk, sizeof(shards_info_disk));
 }
 
-const bootstrap_record default_write_record(1, 1024, 1024, 1, {{6, {6, 9}}, {9, {9, 12}}, {12, {12, 15}}});
+const bootstrap_record default_write_record(1, bootstrap_record::min_alignment * 4,
+        bootstrap_record::min_alignment * 8, 1, {{6, {6, 9}}, {9, {9, 12}}, {12, {12, 15}}});
 
 }
 
@@ -273,30 +274,30 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_read) {
             });
 }
 
-SEASTAR_THREAD_TEST_CASE(invalid_sector_size_read) {
+SEASTAR_THREAD_TEST_CASE(invalid_alignment_read) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     const bootstrap_record write_record = default_write_record;
 
-    constexpr size_t sector_size_offset = offsetof(bootstrap_record_disk, sector_size);
+    constexpr size_t alignment_offset = offsetof(bootstrap_record_disk, alignment);
 
-    // sector_size not power of 2
+    // alignment not power of 2
     write_record.write_to_disk(dev).get();
-    place_at_offset(dev_impl, sector_size_offset, 1234);
+    place_at_offset(dev_impl, alignment_offset, bootstrap_record::min_alignment + 1);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return ex.general() == "Sector size should be a power of 2";
+                return ex.general() == "Alignment should be a power of 2";
             });
 
-    // sector_size smaller than 512
+    // alignment smaller than 512
     write_record.write_to_disk(dev).get();
-    place_at_offset(dev_impl, sector_size_offset, 256);
+    place_at_offset(dev_impl, alignment_offset, bootstrap_record::min_alignment / 2);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return ex.general() == fmt::format("Sector size should be greater or equal to {}",
-                        bootstrap_record::min_sector_size);
+                return ex.general() == fmt::format("Alignment should be greater or equal to {}",
+                        bootstrap_record::min_alignment);
             });
 }
 
@@ -307,18 +308,18 @@ SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_read) {
 
     constexpr size_t cluster_size_offset = offsetof(bootstrap_record_disk, cluster_size);
 
-    // cluster_size not divisible by sector_size
+    // cluster_size not divisible by alignment
     write_record.write_to_disk(dev).get();
-    place_at_offset(dev_impl, cluster_size_offset, 512);
+    place_at_offset(dev_impl, cluster_size_offset, write_record.alignment / 2);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return ex.general() == "Cluster size should be divisible by sector size";
+                return ex.general() == "Cluster size should be divisible by alignment";
             });
 
     // cluster_size not power of 2
     write_record.write_to_disk(dev).get();
-    place_at_offset(dev_impl, cluster_size_offset, 3072);
+    place_at_offset(dev_impl, cluster_size_offset, write_record.alignment * 3);
     repair_crc32(dev_impl);
     BOOST_CHECK_EXCEPTION(bootstrap_record::read_from_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
@@ -398,26 +399,26 @@ SEASTAR_THREAD_TEST_CASE(invalid_shards_info_write) {
             });
 }
 
-SEASTAR_THREAD_TEST_CASE(invalid_sector_size_write) {
+SEASTAR_THREAD_TEST_CASE(invalid_alignment_write) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     bootstrap_record write_record = default_write_record;
 
-    // sector_size not power of 2
+    // alignment not power of 2
     write_record = default_write_record;
-    write_record.sector_size = 1234;
+    write_record.alignment = bootstrap_record::min_alignment + 1;
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return ex.general() == "Sector size should be a power of 2";
+                return ex.general() == "Alignment should be a power of 2";
             });
 
-    // sector_size smaller than 512
+    // alignment smaller than bootstrap_record::min_alignment
     write_record = default_write_record;
-    write_record.sector_size = 256;
+    write_record.alignment = bootstrap_record::min_alignment / 2;
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return ex.general() == fmt::format("Sector size should be greater or equal to {}",
-                        bootstrap_record::min_sector_size);
+                return ex.general() == fmt::format("Alignment should be greater or equal to {}",
+                        bootstrap_record::min_alignment);
             });
 }
 
@@ -426,17 +427,17 @@ SEASTAR_THREAD_TEST_CASE(invalid_cluster_size_write) {
     block_device dev(dev_impl);
     bootstrap_record write_record = default_write_record;
 
-    // cluster_size not divisible by sector_size
+    // cluster_size not divisible by alignment
     write_record = default_write_record;
-    write_record.cluster_size = 512;
+    write_record.cluster_size = write_record.alignment / 2;
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
-                return ex.general() == "Cluster size should be divisible by sector size";
+                return ex.general() == "Cluster size should be divisible by alignment";
             });
 
     // cluster_size not power of 2
     write_record = default_write_record;
-    write_record.cluster_size = 3072;
+    write_record.cluster_size = write_record.alignment * 3;
     BOOST_CHECK_EXCEPTION(write_record.write_to_disk(dev).get(), invalid_bootstrap_record,
             [] (const invalid_bootstrap_record& ex) {
                 return ex.general() == "Cluster size should be a power of 2";

@@ -55,7 +55,7 @@ class bootstrap_record {
 public:
     static constexpr uint64_t magic_number = 0x5343594c4c414653; // SCYLLAFS
     static constexpr uint32_t max_shards_nb = 500;
-    static constexpr unit_size_t min_sector_size = 512;
+    static constexpr unit_size_t min_alignment = 4096;
 
     struct shard_info {
         cluster_id_t metadata_cluster; /// cluster id of the first metadata log cluster
@@ -63,15 +63,15 @@ public:
     };
 
     uint64_t version; /// file system version
-    unit_size_t sector_size; /// sector size in bytes
+    unit_size_t alignment; /// write alignment in bytes
     unit_size_t cluster_size; /// cluster size in bytes
     inode_t root_directory; /// root dir inode number
     std::vector<shard_info> shards_info; /// basic informations about each file system shard
 
     bootstrap_record() = default;
-    bootstrap_record(uint64_t version, unit_size_t sector_size, unit_size_t cluster_size, inode_t root_directory,
+    bootstrap_record(uint64_t version, unit_size_t alignment, unit_size_t cluster_size, inode_t root_directory,
             std::vector<shard_info> shards_info)
-        : version(version), sector_size(sector_size), cluster_size(cluster_size) , root_directory(root_directory)
+        : version(version), alignment(alignment), cluster_size(cluster_size) , root_directory(root_directory)
         , shards_info(std::move(shards_info)) {}
 
     /// number of file system shards
@@ -102,7 +102,7 @@ inline bool operator!=(const bootstrap_record& lhs, const bootstrap_record& rhs)
 struct bootstrap_record_disk {
     uint64_t magic;
     uint64_t version;
-    unit_size_t sector_size;
+    unit_size_t alignment;
     unit_size_t cluster_size;
     inode_t root_directory;
     uint32_t shards_nb;
