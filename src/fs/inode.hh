@@ -35,8 +35,15 @@ inline unsigned inode_to_shard_no(inode_t inode, unsigned shard_pool_size) noexc
     return mod_by_power_of_2(inode, shard_pool_size);
 }
 
-inline unsigned next_shard_inode(inode_t last_shard_inode, unsigned shard_pool_size) noexcept {
-    return last_shard_inode + shard_pool_size;
+// Returns inode belonging to the shard owning @p shard_previous_inode that is next after @p shard_previous_inode
+// (i.e. the lowest inode greater than @p shard_previous_inode belonging to the same shard)
+inline unsigned shard_next_inode(inode_t shard_previous_inode, unsigned shard_pool_size) noexcept {
+    return shard_previous_inode + shard_pool_size;
+}
+
+// Returns first inode (lowest by value) belonging to the shard @p shard_id
+inline unsigned shard_first_inode(unsigned shard_id) noexcept {
+    return shard_id;
 }
 
 } // namespace seastar::fs
