@@ -411,6 +411,14 @@ struct invalid_inode_exception : public std::exception {
     const char* what() const noexcept { return "Invalid inode"; }
 };
 
+struct operation_became_invalid_exception : public std::exception {
+    const char* what() const noexcept { return "Operation became invalid"; }
+};
+
+struct no_more_space_exception : public std::exception {
+    const char* what() const noexcept { return "No more space on device"; }
+};
+
 struct inode_data_vec {
     file_range data_range; // data spans [beg, end) range of the file
 
@@ -468,7 +476,7 @@ public:
     metadata_log(const metadata_log&) = delete;
     metadata_log& operator=(const metadata_log&) = delete;
 
-    future<> bootstrap(cluster_id_t first_metadata_cluster_id, cluster_range available_clusters);
+    future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters);
 
     void write_update(inode_info::file& file, inode_data_vec data_vec);
 
@@ -485,6 +493,8 @@ private:
     };
 
     std::variant<inode_t, path_lookup_error> path_lookup(const sstring& path) const;
+
+    future<inode_t> futurized_path_lookup(const sstring& path) const;
 
 public:
     // TODO: add some way of iterating over a directory
@@ -521,6 +531,7 @@ public:
 
     future<> truncate_file(inode_t inode, file_offset_t new_size);
 
+    // All disk-related errors will be exposed here // TODO: related to flush, but earlier may be exposed through other methods e.g. create_file()
     future<> flush_log();
 };
 

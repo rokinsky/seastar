@@ -27,6 +27,7 @@
 #include "seastar/core/future-util.hh"
 #include "seastar/core/future.hh"
 #include "seastar/fs/overloaded.hh"
+#include "seastar/fs/path.hh"
 
 #include <boost/crc.hpp>
 #include <boost/range/irange.hpp>
@@ -61,8 +62,9 @@ static unix_metadata ondisk_metadata_to_metadata(const ondisk_unix_metadata& ond
     return res;
 }
 
-future<> metadata_log::bootstrap(cluster_id_t first_metadata_cluster_id, cluster_range available_clusters) {
+future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters) {
     // Clear the metadata log
+    _root_dir = root_dir;
     _inodes.clear();
     // Bootstrap
     return do_with(std::optional(first_metadata_cluster_id), temporary_buffer<uint8_t>::aligned(_alignment, _cluster_size), std::unordered_set<cluster_id_t>{}, [this, available_clusters](auto& cluster_id, auto& buff, auto& taken_clusters) {
@@ -511,6 +513,26 @@ std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup
     return components_stack.back();
 }
 
+future<inode_t> metadata_log::futurized_path_lookup(const sstring& path) const {
+    auto lookup_res = path_lookup(path);
+    return std::visit(overloaded {
+        [](path_lookup_error error) {
+            switch (error) {
+            case path_lookup_error::NOT_ABSOLUTE:
+                return make_exception_future<inode_t>(std::runtime_error("Path is not absolute"));
+            case path_lookup_error::NO_ENTRY:
+                return make_exception_future<inode_t>(std::runtime_error("No such file or directory"));
+            case path_lookup_error::NOT_DIR:
+                return make_exception_future<inode_t>(std::runtime_error("A component used as directory is not a directory"));
+            }
+            __builtin_unreachable();
+        },
+        [](inode_t inode) {
+            return make_ready_future<inode_t>(inode);
+        }
+    }, lookup_res);
+}
+
 file_offset_t metadata_log::file_size(inode_t inode) const {
     auto it = _inodes.find(inode);
     if (it == _inodes.end()) {
@@ -526,5 +548,28 @@ file_offset_t metadata_log::file_size(inode_t inode) const {
         }
     }, it->second.contents);
 }
+
+future<inode_t> metadata_log::create_file(sstring path, mode_t mode) {
+    return now().then([this, path = std::move(path), mode]() mutable {
+        // TODO: checking permissions...
+        sstring entry = last_component(path);
+        if (entry.empty()) {
+            return make_exception_future<inode_t>(std::runtime_error("Path has to end with character different than '/'"));
+        }
+        path.erase(path.end() - entry.size(), path.end());
+
+        return futurized_path_lookup(path).then([this, entry = std::move(entry)](auto dir_inode) {
+            auto dir_it = _inodes.find(dir_inode);
+            if (dir_it == _inodes.end()) {
+                return make_exception_future<inode_t>(operation_became_invalid_exception());
+            }
+
+            // TODO: continue here
+            return make_ready_future<inode_t>();
+        });
+    });
+}
+
+// TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE, then it should be possible to compact some data (e.g. by truncating a file) via top-level interface and retrying the flush() without a ENOSPACE error. In particular if we delete all files after ENOSPACE it should be successful. It becomes especially hard if we write metadata to the last cluster and there is no enough room to write these delete operations. We have to guarantee that the filesystem is in a recoverable state then.
 
 } // namespace seastar::fs
