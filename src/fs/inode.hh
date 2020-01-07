@@ -27,18 +27,21 @@
 
 namespace seastar::fs {
 
-// Inode has bitwise format: `in_shard_inode | shard_no` where a constant number of bits are reserved for shard_no
+// Last log2(fs_shards_pool_size bits) of inode number contain the id of shard that owns the inode
 using inode_t = uint64_t;
 
-inline unsigned inode_to_shard_no(inode_t inode, unsigned shard_pool_size) noexcept {
-    assert(is_power_of_2(shard_pool_size));
-    return mod_by_power_of_2(inode, shard_pool_size);
+// Obtains shard id of the shard owning @p inode.
+//@p fs_shards_pool_size is the number of file system shards rounded up to a power of 2
+inline unsigned inode_to_shard_no(inode_t inode, unsigned fs_shards_pool_size) noexcept {
+    assert(is_power_of_2(fs_shards_pool_size));
+    return mod_by_power_of_2(inode, fs_shards_pool_size);
 }
 
 // Returns inode belonging to the shard owning @p shard_previous_inode that is next after @p shard_previous_inode
 // (i.e. the lowest inode greater than @p shard_previous_inode belonging to the same shard)
-inline unsigned shard_next_inode(inode_t shard_previous_inode, unsigned shard_pool_size) noexcept {
-    return shard_previous_inode + shard_pool_size;
+//@p fs_shards_pool_size is the number of file system shards rounded up to a power of 2
+inline unsigned shard_next_inode(inode_t shard_previous_inode, unsigned fs_shards_pool_size) noexcept {
+    return shard_previous_inode + fs_shards_pool_size;
 }
 
 // Returns first inode (lowest by value) belonging to the shard @p shard_id
