@@ -27,7 +27,7 @@
 
 namespace seastar::fs {
 
-// Last log2(fs_shards_pool_size bits) of inode number contain the id of shard that owns the inode
+// Last log2(fs_shards_pool_size bits) of the inode number contain the id of shard that owns the inode
 using inode_t = uint64_t;
 
 // Obtains shard id of the shard owning @p inode.
