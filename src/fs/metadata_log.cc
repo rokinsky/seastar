@@ -51,17 +51,6 @@ metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t 
     assert(cluster_size > 0 and cluster_size % alignment == 0);
 }
 
-static unix_metadata ondisk_metadata_to_metadata(const ondisk_unix_metadata& ondisk_metadata) noexcept {
-    unix_metadata res;
-    static_assert(sizeof(ondisk_metadata) == 28, "metadata size changed: check if below assignments needs update");
-    res.mode = ondisk_metadata.mode;
-    res.uid = ondisk_metadata.uid;
-    res.gid = ondisk_metadata.gid;
-    res.mtime_ns = ondisk_metadata.mtime_ns;
-    res.ctime_ns = ondisk_metadata.ctime_ns;
-    return res;
-}
-
 future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters) {
     // Clear the metadata log
     _root_dir = root_dir;
