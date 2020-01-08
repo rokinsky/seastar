@@ -613,6 +613,7 @@ add_library (seastar STATIC
   src/fs/metadata_to_disk_buffer.hh
   src/fs/range.hh
   src/fs/units.hh
+  src/fs/unix_metadata.hh
   src/http/api_docs.cc
   src/http/common.cc
   src/http/file_handler.cc
