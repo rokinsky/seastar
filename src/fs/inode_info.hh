@@ -64,6 +64,69 @@ struct inode_info {
         file_offset_t size() const noexcept {
             return (data.empty() ? 0 : (--data.end())->second.data_range.end);
         }
+
+        // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap.
+        // @p cut_data_vec_processor is called on each inode_data_vec (including parts of overlapped data vectors) that will be deleted
+        template<class Func>
+        void cut_out_data_range(file_range range, Func&& cut_data_vec_processor) {
+            static_assert(std::is_invocable_v<Func, const inode_data_vec&>);
+            // Cut all vectors intersecting with range
+            auto it = data.lower_bound(range.beg);
+            if (it != data.begin() and are_intersecting(range, prev(it)->second.data_range)) {
+                --it;
+            }
+
+            while (it != data.end() and are_intersecting(range, it->second.data_range)) {
+                auto data_vec = std::move(it->second);
+                data.erase(it++);
+                const auto cap = intersection(range, data_vec.data_range);
+                if (cap == data_vec.data_range) {
+                    // Fully intersects => remove it
+                    cut_data_vec_processor(data_vec);
+                    continue;
+                }
+
+                // Overlaps => cut it, possibly into two parts:
+                // |       data_vec      |
+                //         | cap |
+                // | left  | mid | right |
+                // left and right remain, but mid is deleted
+                inode_data_vec left, mid, right;
+                left.data_range = {data_vec.data_range.beg, cap.beg};
+                mid.data_range = cap;
+                right.data_range = {cap.end, data_vec.data_range.end};
+                auto right_beg_shift = right.data_range.beg - data_vec.data_range.beg;
+                auto mid_beg_shift = mid.data_range.beg - data_vec.data_range.beg;
+                std::visit(overloaded {
+                    [&](inode_data_vec::in_mem_data& mem) {
+                        left.data_location = inode_data_vec::in_mem_data {mem.data.share(0, left.data_range.size())};
+                        mid.data_location = inode_data_vec::in_mem_data {mem.data.share(mid_beg_shift, mid.data_range.size())};
+                        right.data_location = inode_data_vec::in_mem_data {mem.data.share(right_beg_shift, right.data_range.size())};
+                    },
+                    [&](inode_data_vec::on_disk_data& data) {
+                        left.data_location = data;
+                        mid.data_location = inode_data_vec::on_disk_data {data.device_offset + mid_beg_shift};
+                        right.data_location = inode_data_vec::on_disk_data {data.device_offset + right_beg_shift};
+                    },
+                    [&](inode_data_vec::hole_data&) {
+                        left.data_location = inode_data_vec::hole_data {};
+                        mid.data_location = inode_data_vec::hole_data {};
+                        right.data_location = inode_data_vec::hole_data {};
+                    },
+                }, data_vec.data_location);
+
+                // Save new data vectors
+                if (not left.data_range.is_empty()) {
+                    data.emplace(left.data_range.beg, std::move(left));
+                }
+                if (not right.data_range.is_empty()) {
+                    data.emplace(right.data_range.beg, std::move(right));
+                }
+
+                // Process deleted vector
+                cut_data_vec_processor(mid);
+            }
+        }
     };
 
     std::variant<directory, file> contents;

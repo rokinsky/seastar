@@ -390,59 +390,16 @@ future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_c
     });
 }
 
-void metadata_log::write_update(inode_info::file& file, inode_data_vec data_vec) {
+void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_vec) {
     // TODO: for compaction: update used inode_data_vec
-    cut_out_data_range(file, data_vec.data_range);
-    file.data.emplace(data_vec.data_range.beg, std::move(data_vec));
+    cut_out_data_range(file, new_data_vec.data_range);
+    file.data.emplace(new_data_vec.data_range.beg, std::move(new_data_vec));
 }
 
 void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) {
-    // TODO: for compaction: update used inode_data_vec
-    // Cut all vectors intersecting with range
-    auto it = file.data.lower_bound(range.beg);
-    if (it != file.data.begin() and are_intersecting(range, prev(it)->second.data_range)) {
-        --it;
-    }
-
-    while (it != file.data.end() and are_intersecting(range, it->second.data_range)) {
-        auto data_vec = std::move(it->second);
-        file.data.erase(it++);
-        const auto cap = intersection(range, data_vec.data_range);
-        if (cap == data_vec.data_range) {
-            continue; // Fully intersects => remove it
-        }
-
-        // Overlaps => cut it, possibly into two parts:
-        // |       data_vec      |
-        //         | cap |
-        // | left  |     | right |
-        inode_data_vec left, right;
-        left.data_range = {data_vec.data_range.beg, cap.beg};
-        right.data_range = {cap.end, data_vec.data_range.end};
-        auto right_beg_shift = right.data_range.beg - data_vec.data_range.beg;
-        std::visit(overloaded {
-            [&](inode_data_vec::in_mem_data& mem) {
-                left.data_location = inode_data_vec::in_mem_data {mem.data.share(0, left.data_range.size())};
-                right.data_location = inode_data_vec::in_mem_data {mem.data.share(right_beg_shift, right.data_range.size())};
-            },
-            [&](inode_data_vec::on_disk_data& data) {
-                left.data_location = data;
-                right.data_location = inode_data_vec::on_disk_data {data.device_offset + right_beg_shift};
-            },
-            [&](inode_data_vec::hole_data&) {
-                left.data_location = inode_data_vec::hole_data {};
-                right.data_location = inode_data_vec::hole_data {};
-            },
-        }, data_vec.data_location);
-
-        // Save new data vectors
-        if (not left.data_range.is_empty()) {
-            file.data.emplace(left.data_range.beg, std::move(left));
-        }
-        if (not right.data_range.is_empty()) {
-            file.data.emplace(right.data_range.beg, std::move(right));
-        }
-    }
+    file.cut_out_data_range(range, [](const inode_data_vec& data_vec) {
+        (void)data_vec; // TODO: for compaction: update used inode_data_vec
+    });
 }
 
 std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup(const sstring& path) const {
