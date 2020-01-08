@@ -23,16 +23,9 @@
 
 #include "cluster.hh"
 #include "inode.hh"
+#include "unix_metadata.hh"
 
 namespace seastar::fs {
-
-struct unix_metadata {
-    mode_t mode;
-    uid_t uid;
-    gid_t gid;
-    uint64_t mtime_ns;
-    uint64_t ctime_ns;
-};
 
 enum ondisk_type : uint8_t {
     INVALID = 0,
