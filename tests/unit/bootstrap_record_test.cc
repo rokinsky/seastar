@@ -22,6 +22,7 @@
 #include "fs/bootstrap_record.hh"
 #include "fs/cluster.hh"
 #include "fs/crc.hh"
+#include "mock_block_device.hh"
 
 #include <boost/crc.hpp>
 #include <cstring>
@@ -35,33 +36,6 @@ using namespace seastar;
 using namespace seastar::fs;
 
 namespace {
-
-class mock_block_device_impl : public block_device_impl {
-public:
-    using buf_type = basic_sstring<uint8_t, size_t, 32, false>;
-    buf_type buf;
-    ~mock_block_device_impl() override = default;
-
-    future<size_t> write(uint64_t pos, const void* buffer, size_t len, const io_priority_class&) override {
-        if (buf.size() < pos + len)
-            buf.resize(pos + len);
-        std::memcpy(buf.data() + pos, buffer, len);
-        return make_ready_future<size_t>(len);
-    }
-
-    future<size_t> read(uint64_t pos, void* buffer, size_t len, const io_priority_class&) noexcept override {
-        std::memcpy(buffer, buf.c_str() + pos, len);
-        return make_ready_future<size_t>(len);
-    }
-
-    future<> flush() noexcept override {
-        return make_ready_future<>();
-    }
-
-    future<> close() noexcept override {
-        return make_ready_future<>();
-    }
-};
 
 inline std::vector<bootstrap_record::shard_info> prepare_valid_shards_info(uint32_t size) {
     std::vector<bootstrap_record::shard_info> ret(size);
