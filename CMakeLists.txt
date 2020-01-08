@@ -607,6 +607,7 @@ add_library (seastar STATIC
   src/fs/crc.hh
   src/fs/file.cc
   src/fs/inode.hh
+  src/fs/inode_info.hh
   src/fs/metadata_disk_entries.hh
   src/fs/metadata_log.cc
   src/fs/metadata_log.hh

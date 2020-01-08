@@ -21,18 +21,10 @@
 
 #pragma once
 
-#include "bitwise.hh"
 #include "cluster_allocator.hh"
+#include "inode_info.hh"
 #include "metadata_disk_entries.hh"
 #include "metadata_to_disk_buffer.hh"
-#include "seastar/core/future.hh"
-#include "seastar/fs/block_device.hh"
-
-#include <seastar/core/file.hh>
-#include <seastar/core/sstring.hh>
-#include <stdexcept>
-#include <type_traits>
-#include <variant>
 
 namespace seastar::fs {
 
@@ -48,42 +40,6 @@ struct no_more_space_exception : public std::exception {
     const char* what() const noexcept { return "No more space on device"; }
 };
 
-struct inode_data_vec {
-    file_range data_range; // data spans [beg, end) range of the file
-
-    struct in_mem_data {
-        temporary_buffer<uint8_t> data;
-    };
-
-    struct on_disk_data {
-        file_offset_t device_offset;
-    };
-
-    struct hole_data { };
-
-    std::variant<in_mem_data, on_disk_data, hole_data> data_location;
-};
-
-struct inode_info {
-    uint32_t opened_files_count = 0; // Number of open files referencing inode
-    uint32_t directories_containing_file = 0;
-    unix_metadata metadata;
-
-    struct directory {
-        // TODO: directory entry cannot contain '/' character --> add checks for that
-        std::map<sstring, inode_t> entries; // entry name => inode
-    };
-
-    struct file {
-        std::map<file_offset_t, inode_data_vec> data; // file offset => data vector that begins there (data vectors do not overlap)
-
-        file_offset_t size() const noexcept {
-            return (data.empty() ? 0 : (--data.end())->second.data_range.end);
-        }
-    };
-
-    std::variant<directory, file> contents;
-};
 
 class metadata_log {
     block_device _device;
