@@ -63,7 +63,7 @@ public:
 
     future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters);
 
-    void write_update(inode_info::file& file, inode_data_vec data_vec);
+    void write_update(inode_info::file& file, inode_data_vec new_data_vec);
 
     // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap
     void cut_out_data_range(inode_info::file& file, file_range range);
