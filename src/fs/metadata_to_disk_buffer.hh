@@ -22,46 +22,21 @@
 #pragma once
 
 #include "metadata_disk_entries.hh"
-#include "seastar/core/future.hh"
-#include "seastar/core/temporary_buffer.hh"
-#include "seastar/fs/block_device.hh"
+#include "to_disk_buffer.hh"
 
 #include <boost/crc.hpp>
-#include <cstring>
 
 namespace seastar::fs {
 
-class metadata_to_disk_buffer {
-    temporary_buffer<uint8_t> _buff;
-    const unit_size_t _alignment;
-    disk_offset_t _disk_write_offset; // disk offset that corresponds to _buff.begin()
-    range<size_t> _next_write; // range of unflushed bytes in _buff, beg is aligned to _alignment
-    size_t _zero_padded_end; // Optimization to skip padding before write if it is already done
+class metadata_to_disk_buffer : protected to_disk_buffer {
     boost::crc_32_type _crc;
 
 public:
     // Represents buffer that will be written to a block_device at offset @p disk_alligned_write_offset. Total number of bytes appended cannot exceed @p aligned_max_size.
     metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
-    : _buff(decltype(_buff)::aligned(alignment, aligned_max_size))
-    , _alignment(alignment)
-    , _disk_write_offset(disk_aligned_write_offset)
-    , _next_write {0, 0}
-    , _zero_padded_end(0) {
-        assert(is_power_of_2(alignment));
-        assert(mod_by_power_of_2(disk_aligned_write_offset, alignment) == 0);
-        assert(aligned_max_size % alignment == 0);
-        assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
-        start_new_write();
-    }
+    : to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset) {}
 
-    // Clears buffer, leaving it in state as if it was just constructed
-    void reset(disk_offset_t new_disk_aligned_write_offset) noexcept {
-        assert(mod_by_power_of_2(new_disk_aligned_write_offset, _alignment) == 0);
-        _disk_write_offset = new_disk_aligned_write_offset;
-        _next_write = {0, 0};
-        _zero_padded_end = 0;
-        start_new_write();
-    }
+    using to_disk_buffer::reset;
 
     // Clears buffer, leaving it in state as if it was just constructed
     void reset_from_bootstraped_cluster(disk_offset_t cluster_offset, const uint8_t* cluster_contents, size_t metadata_end_pos) noexcept {
@@ -76,37 +51,8 @@ public:
         start_new_write();
     }
 
-    // Writes buffered data to disk
-    // IMPORTANT: using this buffer before call completes is UB
-    future<> flush_to_disk(block_device device) {
-        make_checkpoint_vaild();
-        // Pad buffer with zeros till alignment. Layout overview:
-        // | .....................|....................|00000000000000000000|
-        // ^ _next_write.beg      ^ new_next_write_beg ^ _next_write.end    ^ aligned_end
-        //      (aligned)               (aligned)       (maybe unaligned)      (aligned)
-        //                        |<-------------- _alignment ------------->|
-        size_t new_next_write_beg = _next_write.end - mod_by_power_of_2(_next_write.end, _alignment);
-        size_t aligned_end = new_next_write_beg + _alignment;
-        if (_zero_padded_end != aligned_end) {
-            range padding = {_next_write.end, aligned_end};
-            memset(_buff.get_write() + padding.beg, 0, padding.size());
-            _zero_padded_end = padding.end;
-        }
-        range true_write = {_next_write.beg, aligned_end};
-
-        return device.write(_disk_write_offset + true_write.beg, _buff.get_write() + true_write.beg, true_write.size()).then([this, true_write, new_next_write_beg](size_t written_bytes) {
-            if (written_bytes != true_write.size()) {
-                return make_exception_future<>(std::runtime_error("Partial write"));
-            }
-
-            _next_write = {new_next_write_beg, new_next_write_beg};
-            start_new_write();
-            return now();
-        });
-    }
-
 private:
-    void start_new_write() noexcept {
+    void start_new_write() noexcept override {
         ondisk_type type = INVALID;
         ondisk_checkpoint checkpoint;
         memset(&checkpoint, 0, sizeof(checkpoint));
@@ -118,7 +64,7 @@ private:
         _crc.reset();
     }
 
-    void make_checkpoint_vaild() noexcept {
+    void prepare_new_write_for_flush() noexcept override {
         // Make checkpoint valid
         ondisk_type checkpoint_type = CHECKPOINT;
         size_t checkpoint_pos = _next_write.beg + sizeof(checkpoint_type);
@@ -131,16 +77,13 @@ private:
         memcpy(_buff.get_write() + checkpoint_pos, &checkpoint, sizeof(checkpoint));
     }
 
-    void append_bytes(const void* data, size_t len) noexcept {
-        assert(len <= bytes_left());
+    void append_bytes(const void* data, size_t len) noexcept override {
+        to_disk_buffer::append_bytes(data, len);
         _crc.process_bytes(data, len);
-        memcpy(_buff.get_write() + _next_write.end, data, len);
-        _next_write.end += len;
     }
 
 public:
-    // Returns maximum number of bytes that may be written to buffer without calling reset()
-    size_t bytes_left() const noexcept { return _buff.size() - _next_write.end; }
+    using to_disk_buffer::bytes_left;
 
     enum append_result {
         APPENDED,
