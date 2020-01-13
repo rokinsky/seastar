@@ -34,7 +34,9 @@ class metadata_to_disk_buffer : protected to_disk_buffer {
 public:
     // Represents buffer that will be written to a block_device at offset @p disk_alligned_write_offset. Total number of bytes appended cannot exceed @p aligned_max_size.
     metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
-    : to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset) {}
+    : to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset) {
+        assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
+    }
 
     using to_disk_buffer::reset;
 

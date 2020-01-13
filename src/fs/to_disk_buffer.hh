@@ -21,9 +21,11 @@
 
 #pragma once
 
+#include "bitwise.hh"
 #include "seastar/core/future.hh"
 #include "seastar/core/temporary_buffer.hh"
 #include "seastar/fs/block_device.hh"
+#include "units.hh"
 
 #include <cstring>
 
@@ -48,7 +50,6 @@ public:
         assert(is_power_of_2(alignment));
         assert(mod_by_power_of_2(disk_aligned_write_offset, alignment) == 0);
         assert(aligned_max_size % alignment == 0);
-        assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
         start_new_write();
     }
 
