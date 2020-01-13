@@ -104,10 +104,10 @@ struct inode_info {
                         mid.data_location = inode_data_vec::in_mem_data {mem.data.share(mid_beg_shift, mid.data_range.size())};
                         right.data_location = inode_data_vec::in_mem_data {mem.data.share(right_beg_shift, right.data_range.size())};
                     },
-                    [&](inode_data_vec::on_disk_data& data) {
-                        left.data_location = data;
-                        mid.data_location = inode_data_vec::on_disk_data {data.device_offset + mid_beg_shift};
-                        right.data_location = inode_data_vec::on_disk_data {data.device_offset + right_beg_shift};
+                    [&](inode_data_vec::on_disk_data& disk_data) {
+                        left.data_location = disk_data;
+                        mid.data_location = inode_data_vec::on_disk_data {disk_data.device_offset + mid_beg_shift};
+                        right.data_location = inode_data_vec::on_disk_data {disk_data.device_offset + right_beg_shift};
                     },
                     [&](inode_data_vec::hole_data&) {
                         left.data_location = inode_data_vec::hole_data {};
