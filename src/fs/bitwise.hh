@@ -69,4 +69,57 @@ constexpr inline T mul_by_power_of_2(T a, U b) noexcept {
 static_assert(mul_by_power_of_2(3u, 1u) == 3);
 static_assert(mul_by_power_of_2(3u, 4u) == 12);
 
+template<class T, class U, std::enable_if_t<std::is_unsigned_v<T>, int> = 0, std::enable_if_t<std::is_unsigned_v<U>, int> = 0>
+constexpr inline T round_down_to_multiple_of_power_of_2(T a, U b) noexcept {
+    return a - mod_by_power_of_2(a, b);
+}
+
+static_assert(round_down_to_multiple_of_power_of_2(0u, 1u) == 0);
+static_assert(round_down_to_multiple_of_power_of_2(1u, 1u) == 1);
+static_assert(round_down_to_multiple_of_power_of_2(19u, 1u) == 19);
+
+static_assert(round_down_to_multiple_of_power_of_2(0u, 2u) == 0);
+static_assert(round_down_to_multiple_of_power_of_2(1u, 2u) == 0);
+static_assert(round_down_to_multiple_of_power_of_2(2u, 2u) == 2);
+static_assert(round_down_to_multiple_of_power_of_2(3u, 2u) == 2);
+static_assert(round_down_to_multiple_of_power_of_2(4u, 2u) == 4);
+static_assert(round_down_to_multiple_of_power_of_2(5u, 2u) == 4);
+
+static_assert(round_down_to_multiple_of_power_of_2(31u, 16u) == 16);
+static_assert(round_down_to_multiple_of_power_of_2(32u, 16u) == 32);
+static_assert(round_down_to_multiple_of_power_of_2(33u, 16u) == 32);
+static_assert(round_down_to_multiple_of_power_of_2(37u, 16u) == 32);
+static_assert(round_down_to_multiple_of_power_of_2(39u, 16u) == 32);
+static_assert(round_down_to_multiple_of_power_of_2(45u, 16u) == 32);
+static_assert(round_down_to_multiple_of_power_of_2(47u, 16u) == 32);
+static_assert(round_down_to_multiple_of_power_of_2(48u, 16u) == 48);
+static_assert(round_down_to_multiple_of_power_of_2(49u, 16u) == 48);
+
+template<class T, class U, std::enable_if_t<std::is_unsigned_v<T>, int> = 0, std::enable_if_t<std::is_unsigned_v<U>, int> = 0>
+constexpr inline T round_up_to_multiple_of_power_of_2(T a, U b) noexcept {
+    auto mod = mod_by_power_of_2(a, b);
+    return (mod == 0 ? a : a - mod + b);
+}
+
+static_assert(round_up_to_multiple_of_power_of_2(0u, 1u) == 0);
+static_assert(round_up_to_multiple_of_power_of_2(1u, 1u) == 1);
+static_assert(round_up_to_multiple_of_power_of_2(19u, 1u) == 19);
+
+static_assert(round_up_to_multiple_of_power_of_2(0u, 2u) == 0);
+static_assert(round_up_to_multiple_of_power_of_2(1u, 2u) == 2);
+static_assert(round_up_to_multiple_of_power_of_2(2u, 2u) == 2);
+static_assert(round_up_to_multiple_of_power_of_2(3u, 2u) == 4);
+static_assert(round_up_to_multiple_of_power_of_2(4u, 2u) == 4);
+static_assert(round_up_to_multiple_of_power_of_2(5u, 2u) == 6);
+
+static_assert(round_up_to_multiple_of_power_of_2(31u, 16u) == 32);
+static_assert(round_up_to_multiple_of_power_of_2(32u, 16u) == 32);
+static_assert(round_up_to_multiple_of_power_of_2(33u, 16u) == 48);
+static_assert(round_up_to_multiple_of_power_of_2(37u, 16u) == 48);
+static_assert(round_up_to_multiple_of_power_of_2(39u, 16u) == 48);
+static_assert(round_up_to_multiple_of_power_of_2(45u, 16u) == 48);
+static_assert(round_up_to_multiple_of_power_of_2(47u, 16u) == 48);
+static_assert(round_up_to_multiple_of_power_of_2(48u, 16u) == 48);
+static_assert(round_up_to_multiple_of_power_of_2(49u, 16u) == 64);
+
 } // namespace seastar::fs
