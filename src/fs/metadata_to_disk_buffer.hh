@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include "bitwise.hh"
 #include "metadata_disk_entries.hh"
 #include "to_disk_buffer.hh"
 
@@ -40,21 +41,39 @@ public:
 
     using to_disk_buffer::reset;
 
-    // Clears buffer, leaving it in state as if it was just constructed
-    void reset_from_bootstraped_cluster(disk_offset_t cluster_offset, const uint8_t* cluster_contents, size_t metadata_end_pos) noexcept {
-        assert(mod_by_power_of_2(cluster_offset, _alignment) == 0);
-        _disk_write_offset = cluster_offset;
-        _next_write = {
-            metadata_end_pos - mod_by_power_of_2(metadata_end_pos, _alignment),
-            metadata_end_pos
-        };
-        memcpy(_buff.get_write() + _next_write.beg, cluster_contents + _next_write.beg, _next_write.size());
+    /**
+     * @brief Clears buffer, leaving it in state as if it was just constructed
+     *
+     * @param cluster_beg_offset disk offset of the beginning of the cluster
+     * @param cluster_contents pointer to contents of the cluster
+     * @param metadata_end_pos position at which valid metadata ends: valid metadata range: [0, @p metadata_end_pos)
+     * @param align_before_buffering whether to align to beginning of the next unflushed data or set it to @p metadata_end_pos
+     */
+    void reset_from_bootstraped_cluster(disk_offset_t cluster_beg_offset, const uint8_t* cluster_contents, size_t metadata_end_pos, bool align_before_buffering) noexcept {
+        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
+        _disk_write_offset = cluster_beg_offset;
         _zero_padded_end = 0;
-        start_new_write();
+
+        if (align_before_buffering) {
+            auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
+            _unflushed_data = {aligned_pos, aligned_pos};
+        } else {
+            _unflushed_data = {metadata_end_pos, metadata_end_pos};
+            // to_disk_buffer::flush_to_disk() has to align down the begin offset before write, so we need to prepare data at this offset
+            range<size_t> to_copy = {
+                round_down_to_multiple_of_power_of_2(_unflushed_data.beg, _alignment),
+                _unflushed_data.beg,
+            };
+            memcpy(_buff.get_write() + to_copy.beg, cluster_contents + to_copy.beg, to_copy.size());
+        }
+
+        if (bytes_left() > 0) {
+            start_new_unflushed_data();
+        }
     }
 
 private:
-    void start_new_write() noexcept override {
+    void start_new_unflushed_data() noexcept override {
         ondisk_type type = INVALID;
         ondisk_checkpoint checkpoint;
         memset(&checkpoint, 0, sizeof(checkpoint));
@@ -66,16 +85,16 @@ private:
         _crc.reset();
     }
 
-    void prepare_new_write_for_flush() noexcept override {
+    void prepare_unflushed_data_for_flush() noexcept override {
         // Make checkpoint valid
-        ondisk_type checkpoint_type = CHECKPOINT;
-        size_t checkpoint_pos = _next_write.beg + sizeof(checkpoint_type);
+        constexpr ondisk_type checkpoint_type = CHECKPOINT;
+        size_t checkpoint_pos = _unflushed_data.beg + sizeof(checkpoint_type); // TODO: check
         ondisk_checkpoint checkpoint;
-        checkpoint.checkpointed_data_length = _next_write.end - checkpoint_pos - sizeof(checkpoint);
+        checkpoint.checkpointed_data_length = _unflushed_data.end - checkpoint_pos - sizeof(checkpoint);
         _crc.process_bytes(&checkpoint.checkpointed_data_length, sizeof(checkpoint.checkpointed_data_length));
         checkpoint.crc32_code = _crc.checksum();
 
-        memcpy(_buff.get_write() + _next_write.beg, &checkpoint_type, sizeof(checkpoint_type));
+        memcpy(_buff.get_write() + _unflushed_data.beg, &checkpoint_type, sizeof(checkpoint_type));
         memcpy(_buff.get_write() + checkpoint_pos, &checkpoint, sizeof(checkpoint));
     }
 
@@ -206,6 +225,8 @@ public:
         append_bytes(entry_name, delete_dir_entry.entry_name_length);
         return APPENDED;
     }
+
+    using to_disk_buffer::flush_to_disk;
 };
 
 } // namespace seastar::fs

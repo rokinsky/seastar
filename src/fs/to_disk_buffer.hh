@@ -36,7 +36,7 @@ protected:
     temporary_buffer<uint8_t> _buff;
     const unit_size_t _alignment;
     disk_offset_t _disk_write_offset; // disk offset that corresponds to _buff.begin()
-    range<size_t> _next_write; // range of unflushed bytes in _buff, beg is aligned to _alignment
+    range<size_t> _unflushed_data; // range of unflushed bytes in _buff
     size_t _zero_padded_end; // Optimization to skip padding before write if it is already done
 
 public:
@@ -45,12 +45,12 @@ public:
     : _buff(decltype(_buff)::aligned(alignment, aligned_max_size))
     , _alignment(alignment)
     , _disk_write_offset(disk_aligned_write_offset)
-    , _next_write {0, 0}
+    , _unflushed_data {0, 0}
     , _zero_padded_end(0) {
         assert(is_power_of_2(alignment));
         assert(mod_by_power_of_2(disk_aligned_write_offset, alignment) == 0);
-        assert(aligned_max_size % alignment == 0);
-        start_new_write();
+        assert(mod_by_power_of_2(aligned_max_size, alignment) == 0);
+        start_new_unflushed_data();
     }
 
     virtual ~to_disk_buffer() = default;
@@ -59,54 +59,72 @@ public:
     void reset(disk_offset_t new_disk_aligned_write_offset) noexcept {
         assert(mod_by_power_of_2(new_disk_aligned_write_offset, _alignment) == 0);
         _disk_write_offset = new_disk_aligned_write_offset;
-        _next_write = {0, 0};
+        _unflushed_data = {0, 0};
         _zero_padded_end = 0;
-        start_new_write();
+        start_new_unflushed_data();
     }
 
-    // Writes buffered data to disk
-    // IMPORTANT: using this buffer before call completes is UB
-    future<> flush_to_disk(block_device device) {
-        prepare_new_write_for_flush();
-        // Pad buffer with zeros till alignment. Layout overview:
-        // | .....................|....................|00000000000000000000|
-        // ^ _next_write.beg      ^ new_next_write_beg ^ _next_write.end    ^ aligned_end
-        //      (aligned)               (aligned)       (maybe unaligned)      (aligned)
-        //                        |<-------------- _alignment ------------->|
-        size_t new_next_write_beg = _next_write.end - mod_by_power_of_2(_next_write.end, _alignment);
-        size_t aligned_end = new_next_write_beg + _alignment;
-        if (_zero_padded_end != aligned_end) {
-            range padding = {_next_write.end, aligned_end};
+protected:
+    /**
+     * @brief Writes buffered (unflushed) data to disk
+     *   IMPORTANT: using this buffer before call co flush_to_disk() completes is UB
+     *
+     * @param device output device
+     * @param align_after_flush whether to align to beginning of the next unflushed data or set it to where
+     *   the current unflushed data ends
+     */
+    future<> flush_to_disk(block_device device, bool align_after_flush) {
+        prepare_unflushed_data_for_flush();
+        // Data layout overview:
+        // |.................|.........................|00000000000000000000000|
+        // ^ real_write.beg  ^ _unflushed_data.beg     ^ _unflushed_data.end   ^ real_write.end
+        //      (aligned)       (maybe unaligned)         (maybe unaligned)         (aligned)
+        //                                             |<------ padding ------>|
+        range real_write = {
+            round_down_to_multiple_of_power_of_2(_unflushed_data.beg, _alignment),
+            round_up_to_multiple_of_power_of_2(_unflushed_data.end, _alignment),
+        };
+        // Pad buffer with zeros till alignment
+        if (_zero_padded_end != real_write.end) {
+            range padding = {_unflushed_data.end, real_write.end};
             memset(_buff.get_write() + padding.beg, 0, padding.size());
             _zero_padded_end = padding.end;
         }
-        range true_write = {_next_write.beg, aligned_end};
 
-        return device.write(_disk_write_offset + true_write.beg, _buff.get_write() + true_write.beg, true_write.size()).then([this, true_write, new_next_write_beg](size_t written_bytes) {
-            if (written_bytes != true_write.size()) {
+        decltype(_unflushed_data) next_unflushed_data;
+        if (align_after_flush) {
+            next_unflushed_data = {real_write.end, real_write.end};
+        } else {
+            next_unflushed_data = {_unflushed_data.end, _unflushed_data.end};
+        }
+
+        return device.write(_disk_write_offset + real_write.beg, _buff.get_write() + real_write.beg, real_write.size()).then([this, real_write, next_unflushed_data](size_t written_bytes) {
+            if (written_bytes != real_write.size()) {
                 return make_exception_future<>(std::runtime_error("Partial write"));
             }
 
-            _next_write = {new_next_write_beg, new_next_write_beg};
-            start_new_write();
+            _unflushed_data = next_unflushed_data;
+            if (bytes_left() > 0) {
+                start_new_unflushed_data();
+            }
+
             return now();
         });
     }
 
-protected:
-    virtual void start_new_write() noexcept {}
+    virtual void start_new_unflushed_data() noexcept {}
 
-    virtual void prepare_new_write_for_flush() noexcept {}
+    virtual void prepare_unflushed_data_for_flush() noexcept {}
 
 public:
     virtual void append_bytes(const void* data, size_t len) noexcept {
         assert(len <= bytes_left());
-        memcpy(_buff.get_write() + _next_write.end, data, len);
-        _next_write.end += len;
+        memcpy(_buff.get_write() + _unflushed_data.end, data, len);
+        _unflushed_data.end += len;
     }
 
     // Returns maximum number of bytes that may be written to buffer without calling reset()
-    size_t bytes_left() const noexcept { return _buff.size() - _next_write.end; }
+    size_t bytes_left() const noexcept { return _buff.size() - _unflushed_data.end; }
 };
 
 } // namespace seastar::fs
