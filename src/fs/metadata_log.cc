@@ -370,7 +370,7 @@ future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_c
 
                     if (log_ended) {
                         // Bootstrap _curr_cluster_buff
-                        _curr_cluster_buff.reset_from_bootstraped_cluster(curr_cluster_offset, buff.get(), pos);
+                        _curr_cluster_buff.reset_from_bootstraped_cluster(curr_cluster_offset, buff.get(), pos, true);
                         return make_ready_future<stop_iteration>(stop_iteration::yes);
                     }
                 }
