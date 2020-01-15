@@ -64,7 +64,6 @@ public:
         start_new_unflushed_data();
     }
 
-protected:
     /**
      * @brief Writes buffered (unflushed) data to disk
      *   IMPORTANT: using this buffer before call co flush_to_disk() completes is UB
@@ -112,6 +111,7 @@ protected:
         });
     }
 
+protected:
     virtual void start_new_unflushed_data() noexcept {}
 
     virtual void prepare_unflushed_data_for_flush() noexcept {}
