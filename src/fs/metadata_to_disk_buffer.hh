@@ -104,8 +104,6 @@ private:
     }
 
 public:
-    using to_disk_buffer::bytes_left;
-
     enum append_result {
         APPENDED,
         TOO_BIG,
@@ -121,6 +119,8 @@ public:
         append_bytes(&next_metadata_cluster, sizeof(next_metadata_cluster));
         return APPENDED;
     }
+
+    using to_disk_buffer::bytes_left;
 
 private:
     bool fits_for_append(size_t bytes_no) const noexcept {
