@@ -22,6 +22,7 @@
 #pragma once
 
 #include <cstring>
+#include <fs/units.hh>
 #include <seastar/fs/block_device.hh>
 #include <seastar/testing/test_case.hh>
 
@@ -47,6 +48,10 @@ public:
 
     future<> flush() noexcept override {
         return make_ready_future<>();
+    }
+
+    future<disk_offset_t> size() noexcept override {
+        return make_ready_future<disk_offset_t>(0);
     }
 
     future<> close() noexcept override {
