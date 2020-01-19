@@ -25,6 +25,7 @@
 #include "inode_info.hh"
 #include "metadata_disk_entries.hh"
 #include "metadata_to_disk_buffer.hh"
+#include "units.hh"
 
 namespace seastar::fs {
 
@@ -95,9 +96,9 @@ public:
     future<inode_t> create_directory(sstring path, mode_t mode);
 
     // TODO: what about permissions, uid, gid etc.
-    future<inode_t> open_file(sstring path);
+    future<inode_t> open_file(sstring path) { return make_ready_future<inode_t>(0); }
 
-    future<> close_file(inode_t inode);
+    future<> close_file(inode_t inode) { return make_ready_future(); }
 
     // Creates name (@p path) for a file (@p inode)
     future<> link(inode_t inode, sstring path);
@@ -110,14 +111,14 @@ public:
     // Removes empty directory or unlinks file
     future<> remove(sstring path);
 
-    future<size_t> read(inode_t inode, char* buffer, size_t len, const io_priority_class& pc = default_priority_class());
+    future<size_t> read(inode_t inode, file_offset_t pos, void* buffer, size_t len, const io_priority_class& pc = default_priority_class ()) { return make_ready_future<size_t>(0); }
 
-    future<> small_write(inode_t inode, const char* buffer, size_t len, const io_priority_class& pc = default_priority_class());
+    future<> small_write(inode_t inode, file_offset_t pos, const void* buffer, size_t len, const io_priority_class& pc = default_priority_class()) { return make_ready_future<>(); }
 
-    future<> truncate_file(inode_t inode, file_offset_t new_size);
+    future<> truncate_file(inode_t inode, file_offset_t new_size) { return make_ready_future(); }
 
     // All disk-related errors will be exposed here // TODO: related to flush, but earlier may be exposed through other methods e.g. create_file()
-    future<> flush_log();
+    future<> flush_log() { return make_ready_future(); }
 };
 
 } // namespace seastar::fs
