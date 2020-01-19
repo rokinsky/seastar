@@ -28,14 +28,14 @@
 namespace seastar::fs {
 
 struct ondisk_unix_metadata {
-    uint32_t mode;
+    uint32_t perms;
     uint32_t uid;
     uint32_t gid;
     uint64_t mtime_ns;
     uint64_t ctime_ns;
 } __attribute__((packed));
 
-static_assert(sizeof(decltype(ondisk_unix_metadata::mode)) >= sizeof(decltype(unix_metadata::mode)));
+static_assert(sizeof(decltype(ondisk_unix_metadata::perms)) >= sizeof(decltype(unix_metadata::perms)));
 static_assert(sizeof(decltype(ondisk_unix_metadata::uid)) >= sizeof(decltype(unix_metadata::uid)));
 static_assert(sizeof(decltype(ondisk_unix_metadata::gid)) >= sizeof(decltype(unix_metadata::gid)));
 static_assert(sizeof(decltype(ondisk_unix_metadata::mtime_ns)) >= sizeof(decltype(unix_metadata::mtime_ns)));
@@ -44,7 +44,7 @@ static_assert(sizeof(decltype(ondisk_unix_metadata::ctime_ns)) >= sizeof(decltyp
 inline unix_metadata ondisk_metadata_to_metadata(const ondisk_unix_metadata& ondisk_metadata) noexcept {
     unix_metadata res;
     static_assert(sizeof(ondisk_metadata) == 28, "metadata size changed: check if below assignments need update");
-    res.mode = ondisk_metadata.mode;
+    res.perms = static_cast<file_permissions>(ondisk_metadata.perms);
     res.uid = ondisk_metadata.uid;
     res.gid = ondisk_metadata.gid;
     res.mtime_ns = ondisk_metadata.mtime_ns;
