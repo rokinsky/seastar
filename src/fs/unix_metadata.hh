@@ -21,13 +21,15 @@
 
 #pragma once
 
+#include "seastar/core/file-types.hh"
+
 #include <cstdint>
 #include <sys/types.h>
 
 namespace seastar::fs {
 
 struct unix_metadata {
-    mode_t mode;
+    file_permissions perms;
     uid_t uid;
     gid_t gid;
     uint64_t mtime_ns;

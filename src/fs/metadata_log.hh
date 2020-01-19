@@ -25,6 +25,7 @@
 #include "inode_info.hh"
 #include "metadata_disk_entries.hh"
 #include "metadata_to_disk_buffer.hh"
+#include "seastar/core/file-types.hh"
 #include "units.hh"
 
 namespace seastar::fs {
@@ -90,10 +91,10 @@ public:
     file_offset_t file_size(inode_t inode) const;
 
     // TODO: what about permissions, uid, gid etc.
-    future<inode_t> create_file(sstring path, mode_t mode);
+    future<inode_t> create_file(sstring path, file_permissions perms);
 
     // TODO: what about permissions, uid, gid etc.
-    future<inode_t> create_directory(sstring path, mode_t mode);
+    future<inode_t> create_directory(sstring path, file_permissions perms);
 
     // TODO: what about permissions, uid, gid etc.
     future<inode_t> open_file(sstring path) { return make_ready_future<inode_t>(0); }

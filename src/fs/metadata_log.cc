@@ -24,6 +24,7 @@
 #include "fs/metadata_log.hh"
 #include "seastar/core/aligned_buffer.hh"
 #include "seastar/core/do_with.hh"
+#include "seastar/core/file-types.hh"
 #include "seastar/core/future-util.hh"
 #include "seastar/core/future.hh"
 #include "seastar/fs/overloaded.hh"
@@ -495,8 +496,8 @@ file_offset_t metadata_log::file_size(inode_t inode) const {
     }, it->second.contents);
 }
 
-future<inode_t> metadata_log::create_file(sstring path, mode_t mode) {
-    return now().then([this, path = std::move(path), mode]() mutable {
+future<inode_t> metadata_log::create_file(sstring path, file_permissions perms) {
+    return now().then([this, path = std::move(path), perms]() mutable {
         // TODO: checking permissions...
         sstring entry = last_component(path);
         if (entry.empty()) {
