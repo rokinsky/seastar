@@ -23,9 +23,7 @@
 #include <seastar/fs/block_device.hh>
 #include <seastar/fs/file.hh>
 
-namespace seastar {
-
-namespace fs {
+namespace seastar::fs {
 
 seastarfs_file_impl::seastarfs_file_impl(block_device dev, open_flags flags)
     : _block_device(std::move(dev))
@@ -105,8 +103,6 @@ future<file> open_file_dma(sstring name, open_flags flags) {
     return open_block_device(name).then([flags] (block_device bd) {
         return file(make_shared<seastarfs_file_impl>(std::move(bd), flags));
     });
-}
-
 }
 
 }
