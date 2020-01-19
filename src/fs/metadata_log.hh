@@ -113,7 +113,7 @@ public:
 
     future<size_t> read(inode_t inode, file_offset_t pos, void* buffer, size_t len, const io_priority_class& pc = default_priority_class ()) { return make_ready_future<size_t>(0); }
 
-    future<> small_write(inode_t inode, file_offset_t pos, const void* buffer, size_t len, const io_priority_class& pc = default_priority_class()) { return make_ready_future<>(); }
+    future<size_t> write(inode_t inode, file_offset_t pos, const void* buffer, size_t len, const io_priority_class& pc = default_priority_class()) { return make_ready_future<size_t>(0); }
 
     future<> truncate_file(inode_t inode, file_offset_t new_size) { return make_ready_future(); }
 
