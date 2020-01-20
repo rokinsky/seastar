@@ -455,6 +455,11 @@ seastar_add_test (tls
   SOURCES tls_test.cc
   WORKING_DIRECTORY ${Seastar_BINARY_DIR})
 
+seastar_add_test (to_disk_buffer
+  SOURCES
+    to_disk_buffer_test.cc
+    mock_block_device.hh)
+
 seastar_add_test (tuple_utils
   KIND BOOST
   SOURCES tuple_utils_test.cc)
