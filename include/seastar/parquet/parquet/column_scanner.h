@@ -101,100 +101,100 @@ class PARQUET_TEMPLATE_CLASS_EXPORT TypedScanner : public Scanner {
     values_ = reinterpret_cast<T*>(value_buffer_->mutable_data());
   }
 
-virtual ~TypedScanner() {}
+  virtual ~TypedScanner() {}
 
-bool NextLevels(int16_t* def_level, int16_t* rep_level) {
-  if (level_offset_ == levels_buffered_) {
-    levels_buffered_ = static_cast<int>(
-      typed_reader_->ReadBatch(static_cast<int>(batch_size_), def_levels_.data(),
-                               rep_levels_.data(), values_, &values_buffered_));
+  bool NextLevels(int16_t* def_level, int16_t* rep_level) {
+    if (level_offset_ == levels_buffered_) {
+      levels_buffered_ = static_cast<int>(
+        typed_reader_->ReadBatch(static_cast<int>(batch_size_), def_levels_.data(),
+                                 rep_levels_.data(), values_, &values_buffered_));
 
-    value_offset_ = 0;
-    level_offset_ = 0;
-    if (!levels_buffered_) {
-      return false;
+      value_offset_ = 0;
+      level_offset_ = 0;
+      if (!levels_buffered_) {
+        return false;
+      }
     }
-  }
-  *def_level = descr()->max_definition_level() > 0 ? def_levels_[level_offset_] : 0;
-  *rep_level = descr()->max_repetition_level() > 0 ? rep_levels_[level_offset_] : 0;
-  level_offset_++;
-  return true;
-}
-
-bool Next(T* val, int16_t* def_level, int16_t* rep_level, bool* is_null) {
-  if (level_offset_ == levels_buffered_) {
-    if (!HasNext()) {
-      // Out of data pages
-      return false;
-    }
-  }
-
-  NextLevels(def_level, rep_level);
-  *is_null = *def_level < descr()->max_definition_level();
-
-  if (*is_null) {
+    *def_level = descr()->max_definition_level() > 0 ? def_levels_[level_offset_] : 0;
+    *rep_level = descr()->max_repetition_level() > 0 ? rep_levels_[level_offset_] : 0;
+    level_offset_++;
     return true;
   }
 
-  if (value_offset_ == values_buffered_) {
-    throw ParquetException("Value was non-null, but has not been buffered");
-  }
-  *val = values_[value_offset_++];
-  return true;
-}
-
-// Returns true if there is a next value
-bool NextValue(T* val, bool* is_null) {
-  if (level_offset_ == levels_buffered_) {
-    if (!HasNext()) {
-      // Out of data pages
-      return false;
+  bool Next(T* val, int16_t* def_level, int16_t* rep_level, bool* is_null) {
+    if (level_offset_ == levels_buffered_) {
+      if (!HasNext()) {
+        // Out of data pages
+        return false;
+      }
     }
-  }
 
-  // Out of values
-  int16_t def_level = -1;
-  int16_t rep_level = -1;
-  NextLevels(&def_level, &rep_level);
-  *is_null = def_level < descr()->max_definition_level();
+    NextLevels(def_level, rep_level);
+    *is_null = *def_level < descr()->max_definition_level();
 
-  if (*is_null) {
+    if (*is_null) {
+      return true;
+    }
+
+    if (value_offset_ == values_buffered_) {
+      throw ParquetException("Value was non-null, but has not been buffered");
+    }
+    *val = values_[value_offset_++];
     return true;
   }
 
-  if (value_offset_ == values_buffered_) {
-    throw ParquetException("Value was non-null, but has not been buffered");
-  }
-  *val = values_[value_offset_++];
-  return true;
-}
-
-virtual void PrintNext(std::ostream& out, int width, bool with_levels = false) {
-  T val;
-  int16_t def_level = -1;
-  int16_t rep_level = -1;
-  bool is_null = false;
-  char buffer[80];
-
-  if (!Next(&val, &def_level, &rep_level, &is_null)) {
-    throw ParquetException("No more values buffered");
-  }
-
-  if (with_levels) {
-    out << "  D:" << def_level << " R:" << rep_level << " ";
-    if (!is_null) {
-      out << "V:";
+  // Returns true if there is a next value
+  bool NextValue(T* val, bool* is_null) {
+    if (level_offset_ == levels_buffered_) {
+      if (!HasNext()) {
+        // Out of data pages
+        return false;
+      }
     }
+
+    // Out of values
+    int16_t def_level = -1;
+    int16_t rep_level = -1;
+    NextLevels(&def_level, &rep_level);
+    *is_null = def_level < descr()->max_definition_level();
+
+    if (*is_null) {
+      return true;
+    }
+
+    if (value_offset_ == values_buffered_) {
+      throw ParquetException("Value was non-null, but has not been buffered");
+    }
+    *val = values_[value_offset_++];
+    return true;
   }
 
-  if (is_null) {
-    std::string null_fmt = format_fwf<ByteArrayType>(width);
-    snprintf(buffer, sizeof(buffer), null_fmt.c_str(), "NULL");
-  } else {
-    FormatValue(&val, buffer, sizeof(buffer), width);
+  virtual void PrintNext(std::ostream& out, int width, bool with_levels = false) {
+    T val;
+    int16_t def_level = -1;
+    int16_t rep_level = -1;
+    bool is_null = false;
+    char buffer[80];
+
+    if (!Next(&val, &def_level, &rep_level, &is_null)) {
+      throw ParquetException("No more values buffered");
+    }
+
+    if (with_levels) {
+      out << "  D:" << def_level << " R:" << rep_level << " ";
+      if (!is_null) {
+        out << "V:";
+      }
+    }
+
+    if (is_null) {
+      std::string null_fmt = format_fwf<ByteArrayType>(width);
+      snprintf(buffer, sizeof(buffer), null_fmt.c_str(), "NULL");
+    } else {
+      FormatValue(&val, buffer, sizeof(buffer), width);
+    }
+    out << buffer;
   }
-  out << buffer;
-}
 
  private:
   // The ownership of this object is expressed through the reader_ variable in the base

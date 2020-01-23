@@ -28,20 +28,20 @@ namespace parquet {
 class ParquetFileReader;
 
 class PARQUET_EXPORT ParquetFilePrinter {
-  private:
+ private:
   ParquetFileReader* fileReader;
 
-  public:
+ public:
   explicit ParquetFilePrinter(ParquetFileReader* reader) : fileReader(reader) {}
   ~ParquetFilePrinter() {}
 
   void DebugPrint(std::ostream& stream, std::list<int> selected_columns,
-  bool print_values = false, bool format_dump = false,
-  bool print_key_value_metadata = false,
-  const char* filename = "No Name");
+      bool print_values = false, bool format_dump = false,
+      bool print_key_value_metadata = false,
+      const char* filename = "No Name");
 
   void JSONPrint(std::ostream& stream, std::list<int> selected_columns,
-  const char* filename = "No Name");
+      const char* filename = "No Name");
 };
 
 namespace seastarized {
@@ -49,20 +49,20 @@ namespace seastarized {
 class ParquetFileReader;
 
 class PARQUET_EXPORT ParquetFilePrinter {
-  private:
+ private:
   ParquetFileReader* fileReader;
 
-  public:
+ public:
   explicit ParquetFilePrinter(ParquetFileReader* reader) : fileReader(reader) {}
   ~ParquetFilePrinter() {}
 
   void DebugPrint(std::ostream& stream, std::list<int> selected_columns,
-  bool print_values = false, bool format_dump = false,
-  bool print_key_value_metadata = false,
-  const char* filename = "No Name");
+      bool print_values = false, bool format_dump = false,
+      bool print_key_value_metadata = false,
+      const char* filename = "No Name");
 
   void JSONPrint(std::ostream& stream, std::list<int> selected_columns,
-  const char* filename = "No Name");
+      const char* filename = "No Name");
 };
 
 } // namespace seastarized
