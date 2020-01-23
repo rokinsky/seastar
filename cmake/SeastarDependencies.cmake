@@ -55,6 +55,9 @@ macro (seastar_find_dependencies)
     dpdk # No version information published.
     fmt
     lz4
+    Thrift
+    Snappy
+    OpenSSL
     # Private and private/public dependencies.
     Concepts
     GnuTLS

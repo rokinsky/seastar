@@ -389,13 +389,14 @@ endif ()
 include(FindPythonInterp)
 include(ExternalProject)
 #TODO [PQ] Below definitions have nothing to do with macros in the code, this is only for ArrowBuild.cmake to work somewhat properly
-set(ARROW_WITH_SNAPPY ON)
-set(ARROW_WITH_THRIFT ON)
+#set(ARROW_WITH_SNAPPY ON)
+#set(ARROW_WITH_THRIFT ON)
 set(ARROW_USE_OPENSSL ON)
 set(PARQUET_REQUIRE_ENCRYPTION ON)
 set(THIRDPARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake/arrow_build)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/ArrowBuild.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindThrift.cmake)
+message(${THRIFT_INCLUDE_DIR})
+include_directories(SYSTEM ${THRIFT_INCLUDE_DIR})
 # -----------------------------------------------
 
 add_library (seastar STATIC
@@ -808,6 +809,9 @@ target_link_libraries (seastar
     cryptopp::cryptopp
     fmt::fmt
     lz4::lz4
+    Snappy::snappy
+    Thrift::thrift
+    OpenSSL::Crypto
   PRIVATE
     ${CMAKE_DL_LIBS}
     Boost::filesystem
@@ -817,10 +821,7 @@ target_link_libraries (seastar
     lksctp-tools::lksctp-tools
     protobuf::libprotobuf
     rt::rt
-    yaml-cpp::yaml-cpp
-    Snappy::snappy
-    OpenSSL::Crypto
-    Thrift::thrift)
+    yaml-cpp::yaml-cpp)
 
 if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "Sanitize"))
   set (Seastar_Sanitizers_OPTIONS ${Sanitizers_COMPILER_OPTIONS})
@@ -1247,6 +1248,7 @@ if (Seastar_INSTALL)
     FILES
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindConcepts.cmake
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindGnuTLS.cmake
+      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindThrift.cmake
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindLinuxMembarrier.cmake
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindProtobuf.cmake
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindSanitizers.cmake
