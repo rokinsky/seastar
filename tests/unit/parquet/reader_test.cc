@@ -37,6 +37,8 @@
 #include <seastar/parquet/parquet/metadata.h>
 #include <seastar/parquet/parquet/platform.h>
 #include <seastar/parquet/parquet/printer.h>
+#include <seastar/parquet/parquet/logical_schema.h>
+#include <seastar/parquet/parquet/cql_schema.h>
 
 namespace parquet {
 
@@ -485,6 +487,5 @@ TEST(TestFileReader, BufferedReads) {
       scratch_space[col_index]->Equals(*column_data[col_index]->data()->buffers[1]));
   }
 }
-
 
 }  // namespace parquet

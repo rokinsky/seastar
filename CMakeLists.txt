@@ -427,6 +427,9 @@ src/parquet/parquet/properties.cc
 src/parquet/parquet/schema.cc
 src/parquet/parquet/statistics.cc
 src/parquet/parquet/types.cc
+src/parquet/parquet/cql_reader.cc
+src/parquet/parquet/logical_schema.cc
+src/parquet/parquet/cql_schema.cc
 src/parquet/arrow/array.cc
 src/parquet/arrow/array/builder_base.cc
 src/parquet/arrow/array/builder_binary.cc
@@ -480,6 +483,9 @@ include/seastar/parquet/parquet/schema_internal.h
 include/seastar/parquet/parquet/statistics.h
 include/seastar/parquet/parquet/thrift_internal.h
 include/seastar/parquet/parquet/types.h
+include/seastar/parquet/parquet/cql_reader.h
+include/seastar/parquet/parquet/logical_schema.h
+include/seastar/parquet/parquet/cql_schema.h
 include/seastar/parquet/arrow/array.h
 include/seastar/parquet/arrow/array/builder_base.h
 include/seastar/parquet/arrow/array/builder_binary.h

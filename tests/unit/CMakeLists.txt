@@ -429,6 +429,7 @@ parquet_add_test(parquet_reader parquet/reader_test.cc)
 parquet_add_test(parquet_schema parquet/schema_test.cc)
 parquet_add_test(parquet_statistics parquet/statistics_test.cc)
 parquet_add_test(parquet_types parquet/types_test.cc)
+parquet_add_test(parquet_cql parquet/cql_test.cc)
 
 set (tls_certificate_files
   catest.key
