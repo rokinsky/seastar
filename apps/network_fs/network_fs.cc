@@ -1,9 +1,15 @@
+#include "seastar/core/do_with.hh"
+#include "seastar/core/file-types.hh"
+#include "seastar/core/future.hh"
+#include <array>
 #include <iostream>
 #include <seastar/core/app-template.hh>
 #include <seastar/core/reactor.hh>
 #include <seastar/core/sstring.hh>
 #include <seastar/core/sleep.hh>
 #include <seastar/core/gate.hh>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 using namespace seastar;
@@ -17,106 +23,101 @@ namespace {
 
 constexpr uint32_t alignment = 4096;
 
+template<typename... Cont>
+future<> then_seq(Cont&&... conts) {
+    auto fut = make_ready_future<>();
+    ((fut = std::move(fut).then(std::forward<Cont>(conts))), ...);
+    return fut;
+}
+
 template<typename T>
-future<std::optional<T>> read_object(input_stream<char>& input) {
-    return input.read_exactly(sizeof(T)).then([] (temporary_buffer<char> buff) {
+future<> read_object(input_stream<char>& input, T& obj) {
+    return input.read_exactly(sizeof(T)).then([&obj] (temporary_buffer<char> buff) {
         if (buff.size() != sizeof(T)) {
-            return make_ready_future<std::optional<T>>(std::nullopt);
+            return make_exception_future<>(std::runtime_error("Couldn't read object"));
         }
-        T value;
-        std::memcpy(&value, buff.get(), sizeof(value));
-        return make_ready_future<std::optional<T>>(std::move(value)); // TODO: add htons etc?
+        std::memcpy(&obj, buff.get(), sizeof(T));
+        return make_ready_future<>(); // TODO: add htons etc?
     });
 }
 
-// string format - length:size_t string:char[]
+// sstring format - length:size_t string:char[]
 template <>
-future<std::optional<sstring>> read_object(input_stream<char>& input) {
-    return read_object<size_t>(input).then([&input] (std::optional<size_t> size) {
-        if (size.has_value()) {
-            return input.read_exactly(size.value()).then([] (temporary_buffer<char> buff) {
-                return make_ready_future<std::optional<sstring>>(
-                    std::optional<sstring>(sstring(buff.begin(), buff.end())));
-            });
-        }
-        return make_ready_future<std::optional<sstring>>(std::nullopt);
+future<> read_object(input_stream<char>& input, sstring& str) {
+    return do_with((size_t)0, [&input, &str] (size_t& size) {
+        return read_object(input, size).then([&input, &size] () {
+            return input.read_exactly(size);
+        }).then([&str] (temporary_buffer<char> buff) {
+            str = sstring(buff.begin(), buff.end());
+        });
     });
 }
-
-future<> read_objects(input_stream<char>&) {
-    return make_ready_future<>();
-}
-
-template<typename T1, typename... T>
-future<> read_objects(input_stream<char>& input, T1 &head, T&... ts){
-    return read_object<T1>(input).then([&input, &head, &ts...] (std::optional<T1> ret) {
-        if (!ret.has_value()) {
-            return make_exception_future<>(std::runtime_error("Couldn't read all expected objects"));
-        }
-        head = ret.value();
-        return read_objects(input, ts...);
-    });
+template<typename... T>
+future<> read_objects(input_stream<char>& input, T&... objects) {
+    return then_seq([&input, &objects] {
+        return read_object(input, objects);
+    }...);
 }
 
 template<typename T>
-future<> write_object(output_stream<char>& output, T&& obj) {
-    char buff[sizeof(obj)]; // TODO: make buff's life longer
-    std::memcpy(buff, &obj, sizeof(obj));
-    return output.write(buff, sizeof(obj));
+future<> write_object(output_stream<char>& output, const T& obj) {
+    return output.write(reinterpret_cast<const char*>(&obj), sizeof(obj));
 }
 
+// sstring format - length:size_t string:char[]
 template<>
-future<> write_object(output_stream<char>& output, sstring&& str) {
-    return write_object(output, str.size()).then([&output, str = std::move(str)] () {
-        return output.write(std::move(str)).then([str = std::move(str)] {});
+future<> write_object(output_stream<char>& output, const sstring& str) {
+    return write_object(output, str.size()).then([&output, &str] {
+        return output.write(str);
     });
 }
 
+// temporary_buffer format - length:size_t string:char[]
 template<>
-future<> write_object(output_stream<char>& output, temporary_buffer<char>&& buff) {
-    return write_object(output, buff.size()).then([&output, buff = std::move(buff)] () mutable {
-        return output.write(buff.get(), buff.size()).then([buff = std::move(buff)] {});
+future<> write_object(output_stream<char>& output, const temporary_buffer<char>& buff) {
+    return write_object(output, buff.size()).then([&output, &buff] {
+        return output.write(buff.get(), buff.size());
     });
 }
 
+// vector format - length:size_t elem1:sstring elem2:sstring ...
 template<>
-future<> write_object(output_stream<char>& output, vector<sstring>&& vec) { // TODO: partial specialization?
-    return write_object(output, vec.size()).then([&output, vec = std::move(vec)] () {
-        return seastar::do_for_each(vec, [&output] (sstring obj) { // TODO: solve copying
-            return write_object<sstring>(output, std::move(obj));
+future<> write_object(output_stream<char>& output, const vector<sstring>& vec) {
+    return write_object(output, vec.size()).then([&output, &vec] {
+        return seastar::do_for_each(vec, [&output] (const sstring& obj) {
+            return write_object<sstring>(output, obj);
         });
     });
 }
 
-future<> write_objects(output_stream<char>&) {
-    return make_ready_future<>();
-}
-
-template<typename T1, typename... T>
-future<> write_objects(output_stream<char>& output, T1&& head, T&&... ts){
-    return write_object<T1>(output, std::forward<T1>(head)).then([&output, &ts...] () {
-        return write_objects(output, std::forward<T>(ts)...);
+template<typename... T>
+future<> write_objects(output_stream<char>& output, T&&... objects) {
+    return do_with(std::forward<T>(objects)..., [&output] (auto&... args) {
+        return then_seq([&output, &args] {
+            return write_object(output, std::move(args));
+        }...);
     });
 }
 
-struct Files {
-    std::unordered_map<int, file> fd_map;
-    int curr_fd = 0;
-} files;
-
 // input format  - path:str flags:int
-// output format - retopen err:int [fd:int]
-future<> handle_open(input_stream<char>& input, output_stream<char>& output) {
-    return do_with(sstring(), 0, 0, [&input, &output] (sstring& path, int& flags, int& fd) {
-        return read_objects(input, path, flags).then([&path/*, &flags*/, &fd] { // TODO: use flags
-            return open_file_dma(path, open_flags::rw).then([&fd] (auto file) {
-                fd = files.curr_fd++;
-                files.fd_map[fd] = std::move(file);
+// output format - retopen err:int
+future<> handle_open(input_stream<char>& input, output_stream<char>& output, file& file) {
+    return now().then([&input, &output, &file] {
+        if (file) {
+            return make_exception_future(std::runtime_error("file already initialized"));
+        }
+        return do_with(sstring(), 0, [&input, &output, &file] (sstring& path, int& flags) {
+            return read_objects(input, path, flags).then([&file, &path, &flags] {
+                return open_file_dma(path, open_flags(flags)).then([&file] (auto new_file) {
+                    file = std::move(new_file);
+                });
+            }).then([&output] {
+                return write_objects(output, sstring("retopen"), 0);
+            }).then([&output] {
+                return output.flush();
+            }).then([] {
+                cerr << "Sent reply for open operation" << endl;
             });
-        }).then([&output, &fd] {
-            return write_objects(output, sstring("retopen"), 0, fd);
-        }).then([&output] {
-            return output.flush();
         });
     }).handle_exception([&output] (std::exception_ptr e) {
         cerr << "An error occurred in handle_open" << endl;
@@ -128,23 +129,21 @@ future<> handle_open(input_stream<char>& input, output_stream<char>& output) {
     });
 }
 
-// input format  - fd:int
+// input format  - empty
 // output format - retclose err:int
-future<> handle_close(input_stream<char>& input, output_stream<char>& output) {
-    return do_with(0, [&input, &output] (int& fd) {
-        return read_objects(input, fd).then([&fd] () {
-            auto it = files.fd_map.find(fd);
-            if (it == files.fd_map.end()) {
-                return make_exception_future<>(std::runtime_error("Couldn't find given fd"));
-            }
-            file file = it->second;
-            return file.close().then([it = std::move(it)] {
-                files.fd_map.erase(it);
-            });
-        }).then([&output] {
+future<> handle_close(output_stream<char>& output, file& file) {
+    return now().then([&output, &file] {
+        if (!file) {
+            return make_exception_future(std::runtime_error("file not initialized"));
+        }
+        return file.close().then([&output] {
             return write_objects(output, sstring("retclose"), 0);
         }).then([&output] {
             return output.flush();
+        }).then([&file] {
+            // can't open file after closing it, so we create new file
+            file = seastar::file();
+            cerr << "Sent reply for close operation" << endl;
         });
     }).handle_exception([&output] (std::exception_ptr e) {
         cerr << "An error occurred in handle_close" << endl;
@@ -156,22 +155,23 @@ future<> handle_close(input_stream<char>& input, output_stream<char>& output) {
     });
 }
 
-// input format  - fd:int count:size_t offset:off_t
+// input format  - count:size_t offset:off_t
 // output format - retpread err:int [buff:str]
-future<> handle_pread(input_stream<char>& input, output_stream<char>& output) {
-    return do_with(0, (size_t)0, (off_t)0, [&input, &output] (int& fd, size_t& count, off_t& offset) {
-        return read_objects(input, fd, count, offset).then([&fd, &count, &offset] () {
-            auto it = files.fd_map.find(fd);
-            if (it == files.fd_map.end()) {
-                return make_exception_future<temporary_buffer<char>>
-                       (std::runtime_error("File is not open"));
-            }
-            file file = it->second;
-            return file.dma_read<char>(offset, count);
-        }).then([&output] (temporary_buffer<char> read_buf) {
-            return write_objects(output, sstring("retpread"), 0, std::move(read_buf));
-        }).then([&output] {
-            return output.flush();
+future<> handle_pread(input_stream<char>& input, output_stream<char>& output, file& file) {
+    return now().then([&input, &output, &file] {
+        if (!file) {
+            return make_exception_future(std::runtime_error("file not initialized"));
+        }
+        return do_with((size_t)0, (off_t)0, [&input, &output, &file] (size_t& count, off_t& offset) {
+            return read_objects(input, count, offset).then([&count, &offset, &file] () {
+                return file.dma_read<char>(offset, count);
+            }).then([&output] (temporary_buffer<char> read_buf) {
+                return write_objects(output, sstring("retpread"), 0, std::move(read_buf));
+            }).then([&output] {
+                return output.flush();
+            }).then([] {
+                cerr << "Sent reply for pread operation" << endl;
+            });
         });
     }).handle_exception([&output] (std::exception_ptr e) {
         cerr << "An error occurred in handle_pread" << endl;
@@ -183,32 +183,33 @@ future<> handle_pread(input_stream<char>& input, output_stream<char>& output) {
     });
 }
 
-// input format  - fd:int buff:str count:size_t offset:off_t
+// input format  - buff:str count:size_t offset:off_t
 // output format - retpwrite err:int [size:size_t]
 // TODO: solve alignment problem
-future<> handle_pwrite(input_stream<char>& input, output_stream<char>& output) {
-    return do_with(0, sstring(), (size_t)0, (off_t)0,
-                            [&input, &output]
-                            (int& fd, sstring& buff, size_t& count, off_t& offset) {
-        return read_objects(input, fd, buff, count, offset).then([&fd, &buff, &count, &offset] () {
-            if (count % alignment != 0 || offset % alignment != 0) {
-                return make_exception_future<size_t>(std::runtime_error("count and offset not aligned"));
-            }
-            auto it = files.fd_map.find(fd);
-            if (it == files.fd_map.end()) {
-                return make_exception_future<size_t>(std::runtime_error("Couldn't find given fd"));
-            }
-            file file = it->second;
-            auto temp_buf = temporary_buffer<char>::aligned(alignment, buff.size());
-            std::memcpy(temp_buf.get_write(), buff.c_str(), buff.size());
-            return file.dma_write<char>(offset, temp_buf.get(), count)
-                    .then([temp_buf = std::move(temp_buf)] (size_t write_size) {
-                return write_size;
+future<> handle_pwrite(input_stream<char>& input, output_stream<char>& output, file& file) {
+    return now().then([&input, &output, &file] {
+        if (!file) {
+            return make_exception_future(std::runtime_error("file not initialized"));
+        }
+        return do_with(sstring(), (size_t)0, (off_t)0,
+                [&input, &output, &file] (sstring& buff, size_t& count, off_t& offset) {
+            return read_objects(input, buff, count, offset).then([&buff, &count, &offset, &file] () {
+                if (count % alignment != 0 || offset % alignment != 0) {
+                    return make_exception_future<size_t>(std::runtime_error("count and offset not aligned"));
+                }
+                auto temp_buf = temporary_buffer<char>::aligned(alignment, buff.size());
+                std::memcpy(temp_buf.get_write(), buff.c_str(), buff.size());
+                return file.dma_write<char>(offset, temp_buf.get(), count)
+                        .then([temp_buf = std::move(temp_buf)] (size_t write_size) {
+                    return write_size;
+                });
+            }).then([&output] (size_t write_size) {
+                return write_objects(output, sstring("retpwrite"), 0, write_size);
+            }).then([&output] {
+                return output.flush();
+            }).then([] {
+                cerr << "Sent reply for pwrite operation" << endl;
             });
-        }).then([&output] (size_t write_size) {
-            return write_objects(output, sstring("retpwrite"), 0, write_size);
-        }).then([&output] {
-            return output.flush();
         });
     }).handle_exception([&output] (std::exception_ptr e) {
         cerr << "An error occurred in handle_pwrite" << endl;
@@ -240,6 +241,8 @@ future<> handle_readdir(input_stream<char>& input, output_stream<char>& output) 
             return write_objects(output, sstring("retreaddir"), 0, std::move(vec));
         }).then([&output] {
             return output.flush();
+        }).then([] {
+            cerr << "Sent reply for readdir operation" << endl;
         });
     }).handle_exception([&output] (std::exception_ptr e) {
         cerr << "An error occurred in handle_readdir" << endl;
@@ -283,9 +286,11 @@ future<> handle_getattr(input_stream<char>& input, output_stream<char>& output) 
         return read_objects(input, path).then([&path] () {
             return file_stat(path);
         }).then([&output] (struct stat_data stat_data) {
-            return write_objects(output, sstring("retgetattr"), 0, stat_data_to_stat(stat_data)); // TODO: should we pack struct stat before sending?
+            return write_objects(output, sstring("retgetattr"), 0, stat_data_to_stat(stat_data));
         }).then([&output] {
             return output.flush();
+        }).then([] {
+            cerr << "Sent reply for getattr operation" << endl;
         });
     }).handle_exception([&output] (std::exception_ptr e) {
         cerr << "An error occurred in handle_getattr" << endl;
@@ -297,54 +302,53 @@ future<> handle_getattr(input_stream<char>& input, output_stream<char>& output) 
     });
 }
 
-future<> handle_single_operation(input_stream<char>& input, output_stream<char>& output) {
+future<> handle_single_operation(input_stream<char>& input, output_stream<char>& output, file& file) {
     // read operation name and decide which operation handler to start
-    return read_object<sstring>(input).then([&input, &output] (std::optional<sstring> option) {
-        if (!option.has_value())
-            return make_exception_future<>(std::runtime_error("Error while reading operation name"));
-        cerr << "operation: " << option.value() << endl;
+    return do_with(sstring(), [&input, &output, &file] (sstring& operation_name) {
+        return read_objects(input, operation_name).then([&input, &output, &file, &operation_name] () {
+            cerr << "operation: " << operation_name << endl;
 
-        future<> operation = make_ready_future<>();
-        if (option.value() == "open") {
-            operation = handle_open(input, output);
-        }
-        else if (option.value() == "close") {
-            operation = handle_close(input, output);
-        }
-        else if (option.value() == "pread") {
-            operation = handle_pread(input, output);
-        }
-        else if (option.value() == "pwrite") {
-            operation = handle_pwrite(input, output);
-        }
-        else if (option.value() == "readdir") {
-            operation = handle_readdir(input, output);
-        }
-        else if (option.value() == "getattr") {
-            operation = handle_getattr(input, output);
-        }
-        else {
-            operation = make_exception_future<>(std::runtime_error("Operation name invalid"));
-        }
+            future<> operation = make_ready_future<>();
+            if (operation_name == "open") {
+                operation = handle_open(input, output, file);
+            } else if (operation_name == "close") {
+                operation = handle_close(output, file);
+            } else if (operation_name == "pread") {
+                operation = handle_pread(input, output, file);
+            } else if (operation_name == "pwrite") {
+                operation = handle_pwrite(input, output, file);
+            } else if (operation_name == "readdir") {
+                operation = handle_readdir(input, output);
+            } else if (operation_name == "getattr") {
+                operation = handle_getattr(input, output);
+            } else {
+                operation = make_exception_future<>(std::runtime_error("Invalid operation name"));
+            }
 
-        return operation;
+            return operation;
+        });
     });
 }
 
 future<> handle_connection(connected_socket connection, socket_address remote_address) {
     cerr << "New connection from " << remote_address << endl;
-    return do_with(connection.input(), connection.output(),
-            [] (input_stream<char>& input, output_stream<char>& output) {
-        return repeat([&input, &output] {
-            return handle_single_operation(input, output).then([] () {
+    return do_with(connection.input(), connection.output(), file(),
+            [] (input_stream<char>& input, output_stream<char>& output, file& file) {
+        return repeat([&input, &output, &file] {
+            return handle_single_operation(input, output, file).then([] () {
                 return stop_iteration::no;
             });
-        }).finally([&output] {
-            return output.close();
+        }).finally([&output, &file] {
+            return output.close().then([&file] {
+                if (file)
+                    return file.close();
+                return make_ready_future<>();
+            });
         });
-    // TODO: why needs to be commented out to work with multiple connections?
-    }).finally([/* connection = std::move(connection),  */remote_address = std::move(remote_address)] {
-        cerr << "Closing connection with " << remote_address << endl;
+    }).handle_exception([] (std::exception_ptr e) {
+        cerr << "An error occurred: " << e << endl;
+    }).finally([connection = std::move(connection), remote_address = std::move(remote_address)] {
+        cerr << "Closing connection with " << remote_address << endl << endl;
     });
 }
 
@@ -356,10 +360,7 @@ future<> start_server(uint16_t port) {
         return keep_doing([&listener, &gate] () {
             return listener.accept().then([&gate] (accept_result connection) {
                 auto connection_handler = with_gate(gate, [connection = std::move(connection)] () mutable {
-                    return handle_connection(std::move(connection.connection), std::move(connection.remote_address))
-                            .handle_exception([] (std::exception_ptr e) {
-                        cerr << "An error occurred: " << e << endl;
-                    });
+                    return handle_connection(std::move(connection.connection), std::move(connection.remote_address));
                 });
             });
         }).finally([&gate] {
@@ -370,6 +371,7 @@ future<> start_server(uint16_t port) {
 
 }
 
+// TODO: need to be started with one core (-c 1) else client freezes sometimes
 int main(int argc, char** argv) {
     app_template app;
     namespace bpo = boost::program_options;
