@@ -229,6 +229,7 @@ class http_server {
     bool _stopping = false;
     promise<> _all_connections_stopped;
     future<> _stopped = _all_connections_stopped.get_future();
+    size_t _content_length_limit;
 private:
     void maybe_idle() {
         if (_stopping && !_connections_being_accepted && !_current_connections) {
@@ -238,7 +239,16 @@ private:
 public:
     routes _routes;
     using connection = seastar::httpd::connection;
-    explicit http_server(const sstring& name) : _stats(*this, name) {
+    explicit http_server(const sstring& name)
+            : _stats(*this, name)
+            , _content_length_limit(std::numeric_limits<size_t>::max())
+    {
+        _date_format_timer.arm_periodic(1s);
+    }
+    http_server(const sstring& name, size_t content_length_limit)
+            : _stats(*this, name)
+            , _content_length_limit(content_length_limit)
+    {
         _date_format_timer.arm_periodic(1s);
     }
     /*!
@@ -269,6 +279,10 @@ public:
      */
     void set_tls_credentials(shared_ptr<seastar::tls::server_credentials> credentials) {
         _credentials = credentials;
+    }
+
+    void set_content_length_limit(size_t limit) {
+        _content_length_limit = limit;
     }
 
     future<> listen(socket_address addr, listen_options lo) {
@@ -308,7 +322,7 @@ public:
                 return;
             }
             auto ar = f_ar.get0();
-            auto conn = new connection(*this, std::move(ar.connection), std::move(ar.remote_address));
+            auto conn = new connection(*this, std::move(ar.connection), std::move(ar.remote_address), _content_length_limit);
             // FIXME: future is discarded
             (void)conn->process().then_wrapped([conn] (auto&& f) {
                 delete conn;
