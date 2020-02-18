@@ -194,7 +194,6 @@ future<> connection::read() {
 // header - chunked encoding is not yet supported.
 static future<std::unique_ptr<httpd::request>>
 read_request_body(input_stream<char>& buf, std::unique_ptr<httpd::request> req) {
-    req->content_length = strtol(req->get_header("Content-Length").c_str(), nullptr, 10);
     if (!req->content_length) {
         return make_ready_future<std::unique_ptr<httpd::request>>(std::move(req));
     }
@@ -202,6 +201,10 @@ read_request_body(input_stream<char>& buf, std::unique_ptr<httpd::request> req) 
         req->content = seastar::to_sstring(std::move(body));
         return make_ready_future<std::unique_ptr<httpd::request>>(std::move(req));
     });
+}
+
+static void read_content_length(httpd::request& req) {
+    req.content_length = strtol(req.get_header("Content-Length").c_str(), nullptr, 10);
 }
 
 void connection::generate_error_reply(std::unique_ptr<httpd::request> req, reply::status_type status, const sstring& msg) {
@@ -225,6 +228,12 @@ future<> connection::read_one() {
         std::unique_ptr<httpd::request> req = _parser.get_parsed_request();
         if (_server._credentials) {
             req->protocol_name = "https";
+        }
+        read_content_length(*req);
+        if (req->content_length > _content_length_limit) {
+            generate_error_reply(std::move(req), reply::status_type::forbidden,
+                    format("Content length limit ({}) exceeded: {}", _content_length_limit, req->content_length));
+            return make_ready_future<>();
         }
         return read_request_body(_read_buf, std::move(req)).then([this] (std::unique_ptr<httpd::request> req) {
             return _replies.not_full().then([req = std::move(req), this] () mutable {
