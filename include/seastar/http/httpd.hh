@@ -66,6 +66,7 @@ class connection : public boost::intrusive::list_base_hook<> {
     connected_socket _fd;
     input_stream<char> _read_buf;
     output_stream<char> _write_buf;
+    size_t _content_length_limit;
     static constexpr size_t limit = 4096;
     using tmp_buf = temporary_buffer<char>;
     http_request_parser _parser;
@@ -77,8 +78,21 @@ class connection : public boost::intrusive::list_base_hook<> {
 public:
     connection(http_server& server, connected_socket&& fd,
             socket_address addr)
-            : _server(server), _fd(std::move(fd)), _read_buf(_fd.input()), _write_buf(
-                    _fd.output()) {
+            : _server(server)
+            , _fd(std::move(fd))
+            , _read_buf(_fd.input())
+            , _write_buf(_fd.output())
+            , _content_length_limit(std::numeric_limits<size_t>::max())
+    {
+        on_new_connection();
+    }
+    connection(http_server& server, connected_socket&& fd, socket_address addr, size_t content_length_limit)
+            : _server(server)
+            , _fd(std::move(fd))
+            , _read_buf(_fd.input())
+            , _write_buf(_fd.output())
+            , _content_length_limit(content_length_limit)
+    {
         on_new_connection();
     }
     ~connection();
