@@ -40,12 +40,12 @@ inline unsigned inode_to_shard_no(inode_t inode, unsigned fs_shards_pool_size) n
 // Returns inode belonging to the shard owning @p shard_previous_inode that is next after @p shard_previous_inode
 // (i.e. the lowest inode greater than @p shard_previous_inode belonging to the same shard)
 //@p fs_shards_pool_size is the number of file system shards rounded up to a power of 2
-inline unsigned shard_next_inode(inode_t shard_previous_inode, unsigned fs_shards_pool_size) noexcept {
+inline inode_t shard_next_inode(inode_t shard_previous_inode, unsigned fs_shards_pool_size) noexcept {
     return shard_previous_inode + fs_shards_pool_size;
 }
 
 // Returns first inode (lowest by value) belonging to the shard @p shard_id
-inline unsigned shard_first_inode(unsigned shard_id) noexcept {
+inline inode_t shard_first_inode(unsigned shard_id) noexcept {
     return shard_id;
 }
 
