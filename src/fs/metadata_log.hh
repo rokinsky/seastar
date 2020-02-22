@@ -157,7 +157,7 @@ public:
 
     future<inode_t> create_file(sstring path, file_permissions perms);
 
-    future<inode_t> create_directory(sstring path, file_permissions perms);
+    future<> create_directory(sstring path, file_permissions perms);
 
     // TODO: what about permissions, uid, gid etc.
     future<inode_t> open_file(sstring path) { return make_ready_future<inode_t>(0); }
