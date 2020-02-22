@@ -66,7 +66,7 @@ public:
 
     /**
      * @brief Writes buffered (unflushed) data to disk
-     *   IMPORTANT: using this buffer before call co flush_to_disk() completes is UB
+     *   IMPORTANT: using this buffer before call to flush_to_disk() completes is perfectly OK
      *
      * @param device output device
      * @param align_after_flush whether to align to beginning of the next unflushed data or set it to where
@@ -97,14 +97,16 @@ public:
             next_unflushed_data = {_unflushed_data.end, _unflushed_data.end};
         }
 
-        return device.write(_disk_write_offset + real_write.beg, _buff.get_write() + real_write.beg, real_write.size()).then([this, real_write, next_unflushed_data](size_t written_bytes) {
+        // Make sure the buffer is usable before returning from this function
+        _unflushed_data = next_unflushed_data;
+        if (bytes_left() > 0) {
+            start_new_unflushed_data();
+        }
+
+        return device.write(_disk_write_offset + real_write.beg, _buff.get_write() + real_write.beg, real_write.size()).then([real_write](size_t written_bytes) {
             if (written_bytes != real_write.size()) {
                 return make_exception_future<>(std::runtime_error("Partial write"));
-            }
-
-            _unflushed_data = next_unflushed_data;
-            if (bytes_left() > 0) {
-                start_new_unflushed_data();
+                // TODO: maybe add some way to retry write, because once the buffer is corrupt nothing can be done now
             }
 
             return now();
@@ -112,6 +114,7 @@ public:
     }
 
 protected:
+    // May be called before the flushing previous fragment is
     virtual void start_new_unflushed_data() noexcept {}
 
     virtual void prepare_unflushed_data_for_flush() noexcept {}
@@ -125,6 +128,12 @@ public:
 
     // Returns maximum number of bytes that may be written to buffer without calling reset()
     size_t bytes_left() const noexcept { return _buff.size() - _unflushed_data.end; }
+
+    virtual size_t bytes_left_after_flush_if_done_now(bool align_after_flush) const noexcept {
+        if (not align_after_flush)
+            return bytes_left();
+        return _buff.size() - round_up_to_multiple_of_power_of_2(_unflushed_data.end, _alignment);
+    }
 };
 
 } // namespace seastar::fs

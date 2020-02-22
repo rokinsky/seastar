@@ -88,7 +88,7 @@ private:
     void prepare_unflushed_data_for_flush() noexcept override {
         // Make checkpoint valid
         constexpr ondisk_type checkpoint_type = CHECKPOINT;
-        size_t checkpoint_pos = _unflushed_data.beg + sizeof(checkpoint_type); // TODO: check
+        size_t checkpoint_pos = _unflushed_data.beg + sizeof(checkpoint_type);
         ondisk_checkpoint checkpoint;
         checkpoint.checkpointed_data_length = _unflushed_data.end - checkpoint_pos - sizeof(checkpoint);
         _crc.process_bytes(&checkpoint.checkpointed_data_length, sizeof(checkpoint.checkpointed_data_length));
@@ -98,6 +98,10 @@ private:
         memcpy(_buff.get_write() + checkpoint_pos, &checkpoint, sizeof(checkpoint));
     }
 
+public:
+    using to_disk_buffer::bytes_left_after_flush_if_done_now; // Explicitly stated that stays the same
+
+private:
     void append_bytes(const void* data, size_t len) noexcept override {
         to_disk_buffer::append_bytes(data, len);
         _crc.process_bytes(data, len);
