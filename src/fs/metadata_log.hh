@@ -21,12 +21,25 @@
 
 #pragma once
 
-#include "cluster_allocator.hh"
-#include "inode_info.hh"
-#include "metadata_disk_entries.hh"
-#include "metadata_to_disk_buffer.hh"
+#include "fs/cluster.hh"
+#include "fs/cluster_allocator.hh"
+#include "fs/inode.hh"
+#include "fs/inode_info.hh"
+#include "fs/metadata_disk_entries.hh"
+#include "fs/metadata_to_disk_buffer.hh"
+#include "fs/units.hh"
+#include "fs/unix_metadata.hh"
+#include "fs/value_shared_lock.hh"
 #include "seastar/core/file-types.hh"
-#include "units.hh"
+#include "seastar/core/future-util.hh"
+#include "seastar/core/future.hh"
+#include "seastar/core/shared_future.hh"
+#include "seastar/core/shared_ptr.hh"
+#include "seastar/core/temporary_buffer.hh"
+
+#include <chrono>
+#include <cstddef>
+#include <exception>
 
 namespace seastar::fs {
 
@@ -42,20 +55,35 @@ struct no_more_space_exception : public std::exception {
     const char* what() const noexcept { return "No more space on device"; }
 };
 
+struct file_already_exists_exception : public std::exception {
+    const char* what() const noexcept { return "File already exists"; }
+};
+
+struct filename_too_long_exception : public std::exception {
+    const char* what() const noexcept { return "Filename too long"; }
+};
 
 class metadata_log {
     block_device _device;
     const unit_size_t _cluster_size;
     const unit_size_t _alignment;
-    metadata_to_disk_buffer _curr_cluster_buff; // Takes care of writing current cluster of serialized metadata log to device
+    // Takes care of writing current cluster of serialized metadata log entries to device
+    lw_shared_ptr<metadata_to_disk_buffer> _curr_cluster_buff;
+    shared_future<> _previous_flushes = now();
 
     // In memory metadata
     cluster_allocator _cluster_allocator;
     std::map<inode_t, inode_info> _inodes;
+    value_shared_lock<inode_t> _inode_locks;
+    value_shared_lock<std::pair<inode_t, sstring>> _dir_entry_locks;
     inode_t _root_dir;
+    shard_inode_allocator _inode_allocator;
 
     // TODO: for compaction: keep some set(?) of inode_data_vec, so that we can keep track of clusters that have lowest utilization (up-to-date data)
     // TODO: for compaction: keep estimated metadata log size (that would take when written to disk) and the real size of metadata log taken on disk to allow for detecting when compaction
+
+    friend class metadata_log_bootstrap;
+    friend class create_file_operation;
 
 public:
     metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment);
@@ -63,7 +91,7 @@ public:
     metadata_log(const metadata_log&) = delete;
     metadata_log& operator=(const metadata_log&) = delete;
 
-    future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters);
+    future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters, fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id);
 
     void write_update(inode_info::file& file, inode_data_vec new_data_vec);
 
@@ -71,7 +99,42 @@ public:
     void cut_out_data_range(inode_info::file& file, file_range range);
 
 private:
-    future<> append_unwritten_metadata(uint8_t* data, size_t len);
+    void memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata);
+
+    void memory_only_delete_inode(inode_t inode);
+
+    void memory_only_small_write(inode_t inode, disk_offset_t offset, temporary_buffer<uint8_t> data);
+
+    void memory_only_update_mtime(inode_t inode, decltype(unix_metadata::mtime_ns) mtime_ns);
+
+    void memory_only_truncate(inode_t inode, disk_offset_t size);
+
+    void memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, sstring entry_name);
+
+    void memory_only_delete_dir_entry(inode_info::directory& dir, sstring entry_name);
+
+    future<> flush_curr_cluster();
+
+    future<> flush_curr_cluster_and_change_it_to_new_one();
+
+    template<class... Args>
+    future<> append_ondisk_entry(Args&&... args) {
+        return repeat([this, args...] {
+            auto append_res = _curr_cluster_buff->append(args...);
+            switch (append_res) {
+            case metadata_to_disk_buffer::APPENDED:
+                return make_ready_future<stop_iteration>(stop_iteration::yes);
+
+            case metadata_to_disk_buffer::TOO_BIG: {
+                return flush_curr_cluster_and_change_it_to_new_one().then([] {
+                    return stop_iteration::no;
+                });
+            }
+            }
+
+            __builtin_unreachable();
+        });
+    }
 
     enum class path_lookup_error {
         NOT_ABSOLUTE, // a path is not absolute
@@ -90,10 +153,8 @@ public:
     // Returns size of the file or throws exception iff @p inode is invalid
     file_offset_t file_size(inode_t inode) const;
 
-    // TODO: what about permissions, uid, gid etc.
     future<inode_t> create_file(sstring path, file_permissions perms);
 
-    // TODO: what about permissions, uid, gid etc.
     future<inode_t> create_directory(sstring path, file_permissions perms);
 
     // TODO: what about permissions, uid, gid etc.
@@ -119,7 +180,9 @@ public:
     future<> truncate_file(inode_t inode, file_offset_t new_size) { return make_ready_future(); }
 
     // All disk-related errors will be exposed here // TODO: related to flush, but earlier may be exposed through other methods e.g. create_file()
-    future<> flush_log() { return make_ready_future(); }
+    future<> flush_log() {
+        return flush_curr_cluster();
+    }
 };
 
 } // namespace seastar::fs

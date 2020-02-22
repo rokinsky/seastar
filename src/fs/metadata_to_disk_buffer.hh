@@ -203,6 +203,19 @@ public:
         return APPENDED;
     }
 
+    append_result append(const ondisk_create_inode_as_dir_entry_header& create_inode_as_dir_entry, const void* entry_name) noexcept {
+        ondisk_type type = CREATE_INODE_AS_DIR_ENTRY;
+        size_t total_size = sizeof(type) + sizeof(create_inode_as_dir_entry) + create_inode_as_dir_entry.entry_name_length;
+        if (not fits_for_append(total_size)) {
+            return TOO_BIG;
+        }
+
+        append_bytes(&type, sizeof(type));
+        append_bytes(&create_inode_as_dir_entry, sizeof(create_inode_as_dir_entry));
+        append_bytes(entry_name, create_inode_as_dir_entry.entry_name_length);
+        return APPENDED;
+    }
+
     append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name, const void* new_name) noexcept {
         ondisk_type type = RENAME_DIR_ENTRY;
         size_t total_size = sizeof(type) + sizeof(rename_dir_entry) + rename_dir_entry.entry_old_name_length + rename_dir_entry.entry_new_name_length;

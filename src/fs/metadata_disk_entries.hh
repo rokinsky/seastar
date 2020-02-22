@@ -52,10 +52,21 @@ inline unix_metadata ondisk_metadata_to_metadata(const ondisk_unix_metadata& ond
     return res;
 }
 
+inline ondisk_unix_metadata metadata_to_ondisk_metadata(const unix_metadata& metadata) noexcept {
+    ondisk_unix_metadata res;
+    static_assert(sizeof(res) == 28, "metadata size changed: check if below assignments need update");
+    res.perms = static_cast<decltype(res.perms)>(metadata.perms);
+    res.uid = metadata.uid;
+    res.gid = metadata.gid;
+    res.mtime_ns = metadata.mtime_ns;
+    res.ctime_ns = metadata.ctime_ns;
+    return res;
+}
+
 enum ondisk_type : uint8_t {
     INVALID = 0,
-    NEXT_METADATA_CLUSTER,
     CHECKPOINT,
+    NEXT_METADATA_CLUSTER,
     CREATE_INODE,
     UPDATE_METADATA,
     DELETE_INODE,
@@ -66,13 +77,10 @@ enum ondisk_type : uint8_t {
     TRUNCATE,
     MTIME_UPDATE,
     ADD_DIR_ENTRY,
-    RENAME_DIR_ENTRY,
+    CREATE_INODE_AS_DIR_ENTRY,
     DELETE_DIR_ENTRY,
+    RENAME_DIR_ENTRY,
 };
-
-struct ondisk_next_metadata_cluster {
-    cluster_id_t cluster_id; // metadata log continues there
-} __attribute__((packed));
 
 struct ondisk_checkpoint {
     // The disk format is as follows:
@@ -88,6 +96,10 @@ struct ondisk_checkpoint {
     // E.g. if the data consist of bytes "abcd" and checkpointed_data_length of bytes "xyz" then the byte sequence would be "abcdxyz"
     uint32_t crc32_code;
     unit_size_t checkpointed_data_length;
+} __attribute__((packed));
+
+struct ondisk_next_metadata_cluster {
+    cluster_id_t cluster_id; // metadata log continues there
 } __attribute__((packed));
 
 struct ondisk_create_inode {
@@ -152,18 +164,25 @@ struct ondisk_add_dir_entry_header {
     // After header comes entry name
 } __attribute__((packed));
 
-struct ondisk_rename_dir_entry_header {
+struct ondisk_create_inode_as_dir_entry_header {
+    ondisk_create_inode entry_inode;
     inode_t dir_inode;
-    inode_t new_dir_inode;
-    uint16_t entry_old_name_length;
-    uint16_t entry_new_name_length;
-    // After header come: first old_name, then new_name
+    uint16_t entry_name_length;
+    // After header comes entry name
 } __attribute__((packed));
 
 struct ondisk_delete_dir_entry_header {
     inode_t dir_inode;
     uint16_t entry_name_length;
     // After header comes entry name
+} __attribute__((packed));
+
+struct ondisk_rename_dir_entry_header {
+    inode_t dir_inode;
+    inode_t new_dir_inode;
+    uint16_t entry_old_name_length;
+    uint16_t entry_new_name_length;
+    // After header come: first old_name, then new_name
 } __attribute__((packed));
 
 } // namespace seastar::fs
