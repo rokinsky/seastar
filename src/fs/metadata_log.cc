@@ -163,15 +163,19 @@ void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, sstr
     dir.entries.erase(it);
 }
 
+void metadata_log::schedule_curr_cluster_flush() {
+    // Make writes concurrent (TODO: maybe serialized within *one* cluster would be faster?)
+    _previous_flushes = when_all_succeed(_previous_flushes.get_future(), do_with(_curr_cluster_buff, &_device, [](auto& crr_clstr_bf, auto& device) {
+        return crr_clstr_bf->flush_to_disk(*device, true);
+    }));
+}
+
 future<> metadata_log::flush_curr_cluster() {
     if (_curr_cluster_buff->bytes_left_after_flush_if_done_now(true) == 0) {
         return flush_curr_cluster_and_change_it_to_new_one();
     }
 
-    _previous_flushes = _previous_flushes.get_future().then([crr_clstr_bf = _curr_cluster_buff, dev = &_device] {
-        return crr_clstr_bf->flush_to_disk(*dev, true);
-    });
-
+    schedule_curr_cluster_flush();
     return _previous_flushes.get_future();
 }
 
@@ -184,9 +188,7 @@ future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
 
     auto append_res = _curr_cluster_buff->append(ondisk_next_metadata_cluster {*next_cluster});
     assert(append_res == metadata_to_disk_buffer::APPENDED);
-    _previous_flushes = _previous_flushes.get_future().then([crr_clstr_bf = _curr_cluster_buff, dev = &_device] {
-        return crr_clstr_bf->flush_to_disk(*dev, true);
-    });
+    schedule_curr_cluster_flush();
 
     // Make next cluster the current cluster to allow writing of next metadata entries before flushing finishes
     _curr_cluster_buff = make_lw_shared<metadata_to_disk_buffer>(_cluster_size, _alignment, cluster_id_to_offset(*next_cluster, _cluster_size));

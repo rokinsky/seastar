@@ -113,6 +113,8 @@ private:
 
     void memory_only_delete_dir_entry(inode_info::directory& dir, sstring entry_name);
 
+    void schedule_curr_cluster_flush();
+
     future<> flush_curr_cluster();
 
     future<> flush_curr_cluster_and_change_it_to_new_one();
