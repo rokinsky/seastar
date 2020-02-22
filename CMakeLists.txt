@@ -617,6 +617,7 @@ add_library (seastar STATIC
   src/fs/to_disk_buffer.hh
   src/fs/units.hh
   src/fs/unix_metadata.hh
+  src/fs/value_shared_lock.hh
   src/http/api_docs.cc
   src/http/common.cc
   src/http/file_handler.cc
