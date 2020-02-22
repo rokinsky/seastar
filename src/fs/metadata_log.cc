@@ -305,8 +305,8 @@ future<inode_t> metadata_log::create_file(sstring path, file_permissions perms) 
     return create_file_operation::perform(*this, std::move(path), std::move(perms), false);
 }
 
-future<inode_t> metadata_log::create_directory(sstring path, file_permissions perms) {
-    return create_file_operation::perform(*this, std::move(path), std::move(perms), true);
+future<> metadata_log::create_directory(sstring path, file_permissions perms) {
+    return create_file_operation::perform(*this, std::move(path), std::move(perms), true).discard_result();
 }
 
 // TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE, then it should be possible to compact some data (e.g. by truncating a file) via top-level interface and retrying the flush() without a ENOSPACE error. In particular if we delete all files after ENOSPACE it should be successful. It becomes especially hard if we write metadata to the last cluster and there is no enough room to write these delete operations. We have to guarantee that the filesystem is in a recoverable state then.
