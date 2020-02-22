@@ -1,26 +1,27 @@
-#include <asm-generic/errno-base.h>
-#include <exception>
 #define FUSE_USE_VERSION 31
 
-#include <fuse.h>
-#include <vector>
-#include <string>
-#include <iostream>
-#include <optional>
-#include <unistd.h>
-#include <cstring>
+#include "io.hh"
+
 #include <cassert>
-#include <sys/types.h>
-#include <sys/socket.h>
+#include <cstring>
+#include <fuse.h>
+#include <iostream>
 #include <netdb.h>
+#include <optional>
 #include <sstream>
-#include <boost/stacktrace.hpp>
+#include <string>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <vector>
 
 using std::vector;
 using std::string;
 using std::cerr;
 using std::cout;
 using std::endl;
+
+namespace {
 
 template<typename ...Args>
 void _debug(const char* func_name, int line, Args&&... args) {
@@ -32,24 +33,15 @@ void _debug(const char* func_name, int line, Args&&... args) {
 
 #define DEBUG(args...) _debug(__FUNCTION__, __LINE__, ##args)
 
-
-/*
- * Command line options
- *
- * We can't set default values for the char* fields here because
- * fuse_opt_parse would attempt to free() them when the user specifies
- * different values on the command line.
- */
 // TODO: make options more c++ like (boost?)
-static struct options {
+struct options {
     const char *host;
     const char *port;
     int show_help;
 } options;
 
-#define OPTION(t, p)                           \
-    { t, offsetof(struct options, p), 1 }
-static const struct fuse_opt option_spec[] = {
+#define OPTION(t, p) { t, offsetof(struct options, p), 1 }
+const struct fuse_opt option_spec[] = {
     OPTION("--host=%s", host),
     OPTION("--port=%s", port),
     OPTION("-h", show_help),
@@ -57,10 +49,15 @@ static const struct fuse_opt option_spec[] = {
     FUSE_OPT_END
 };
 
-struct fixed_buf_string {
-    char* buf;
-    size_t size;
-};
+void show_help(const char* progname) {
+    printf("usage: %s [options] <mountpoint>\n\n", progname);
+    printf("File-system specific options:\n"
+           "    --host=<s>          Host address to connect\n"
+           "                        (default: \"localhost\")\n"
+           "    --port=<s>          Port to use while connecting\n"
+           "                        (default: 6969)\n"
+           "\n");
+}
 
 template<typename F>
 class final_action {
@@ -82,150 +79,9 @@ public:
     }
 };
 
-
 template<typename F>
 final_action<F> finally(F f) {
     return final_action<F>(std::move(f));
-}
-
-size_t read_exactly(int fd, size_t num, char* buff) noexcept {
-    size_t pos = 0;
-    while (num > 0) {
-        int rd = read(fd, buff + pos, num);
-        if (rd <= 0) {
-            return pos;
-        }
-        num -= rd;
-        pos += rd;
-    }
-    return pos;
-}
-
-template<typename T>
-int read_object(int fd, T& obj) noexcept {
-    T tmp;
-    if (read_exactly(fd, sizeof(tmp), reinterpret_cast<char*>(&tmp)) != sizeof(tmp)) {
-        return -EIO;
-    }
-
-    obj = std::move(tmp);
-    return 0;
-}
-
-// TODO: try to avoid dynamic length strings because of out of memory errors
-template <>
-int read_object(int fd, string& str) noexcept {
-    try {
-        int ret = 0;
-
-        size_t size;
-        if ((ret = read_object(fd, size)) != 0) {
-            return ret;
-        }
-
-        string tmp(size, 0);
-        if (read_exactly(fd, size, tmp.data()) != size) {
-            return -EIO;
-        }
-
-        str = std::move(tmp);
-        return 0;
-    } catch (...) {
-        DEBUG("caught an exception");
-        return -EPERM;
-    }
-}
-
-template <>
-int read_object(int fd, fixed_buf_string& str) noexcept {
-    try {
-        int ret = 0;
-
-        size_t size;
-        if ((ret = read_object(fd, size)) != 0) {
-            return ret;
-        }
-
-        if (read_exactly(fd, size, str.buf) != size) {
-            return -EIO;
-        }
-        str.size = size;
-
-        return 0;
-    } catch (...) {
-        DEBUG("caught an exception");
-        return -EPERM;
-    }
-}
-
-template <>
-int read_object(int fd, vector<string>& vec) noexcept {
-    try {
-        int ret = 0;
-
-        size_t size;
-        if ((ret = read_object(fd, size)) != 0) {
-            return ret;
-        }
-
-        vector<string> tmp_vec;
-        while (size--) {
-            string tmp_str(size, 0);
-            if ((ret = read_object(fd, tmp_str)) != 0) {
-                return ret;
-            }
-            tmp_vec.emplace_back(std::move(tmp_str));
-        }
-
-        vec = std::move(tmp_vec);
-        return 0;
-    } catch (...) {
-        DEBUG("caught an exception");
-        return -EPERM;
-    }
-}
-
-template<typename... T>
-int read_objects(int fd, T&... objects) noexcept {
-    int ret = 0;
-    (void) (((ret = read_object(fd, objects)) == 0) && ...);
-    return ret;
-}
-
-size_t write_exactly(int fd, const char* buff, size_t num) noexcept {
-    size_t pos = 0;
-    while (num > 0) {
-        int rd = write(fd, buff + pos, num);
-        if (rd <= 0) {
-            return pos;
-        }
-        num -= rd;
-        pos += rd;
-    }
-    return pos;
-}
-
-template<typename T>
-int write_object(int fd, const T& obj) noexcept {
-    char buff[sizeof(obj)];
-    std::memcpy(buff, &obj, sizeof(obj));
-    return write_exactly(fd, buff, sizeof(obj)) == sizeof(obj) ? 0 : -EIO;
-}
-
-template<>
-int write_object(int fd, const string& str) noexcept {
-    int ret = write_object(fd, str.size());
-    if (ret) {
-        return ret;
-    }
-    return write_exactly(fd, str.data(), str.size()) == str.size() ? 0 : -EIO;
-}
-
-template<typename... T>
-int write_objects(int fd, T&&... objects) noexcept {
-    int ret = 0;
-    (void) (((ret = write_object(fd, objects)) == 0) && ...);
-    return ret;
 }
 
 int get_connection(const string& host, const string& port) noexcept {
@@ -241,6 +97,7 @@ int get_connection(const string& host, const string& port) noexcept {
     }
 
     int sock;
+    // TODO: set timeout on socket for connect and reads?
     if ((sock = socket(addr_result->ai_family, addr_result->ai_socktype, addr_result->ai_protocol)) < 0) {
         return -errno;
     }
@@ -250,90 +107,87 @@ int get_connection(const string& host, const string& port) noexcept {
         return -errno;
     }
 
+
     freeaddrinfo(addr_result);
 
     return sock;
 }
 
-int check_ans_prefix(int fd, const string& op) noexcept {
-    try {
-        string type;
-        int err;
-        if (read_objects(fd, type, err) || type != "ret" + op) {
-            return -EIO;
-        }
-        if (err < 0) {
-            return err;
-        }
-        return 0;
-    } catch (...) {
-        DEBUG("caught an exception");
-        return -EPERM;
+int get_server_answer(int fd) noexcept {
+    int err;
+    if (read_objects(fd, err)) {
+        return -EIO;
     }
+    if (err < 0) {
+        return err;
+    }
+    return 0;
 }
 
-static int network_fs_getattr(const char* path, struct stat* stbuf,
-        __attribute__((unused)) struct fuse_file_info* fi) noexcept {
+int network_fs_getattr(const char* path, struct stat* stbuf,
+        __attribute__((unused)) struct fuse_file_info* fi) {
     DEBUG("path=", path);
 
     int ret;
     if ((ret = get_connection(options.host, options.port)) < 0) {
-        DEBUG("couldn't connect");
+        DEBUG("couldn't connect, error=", std::strerror(-ret));
         return ret;
     }
+
     int fd = ret;
     auto clean = finally([&] {
         close(fd);
     });
 
-    if ((ret = write_objects(fd, string("getattr"), "." + string(path))) < 0) {
-        DEBUG("error while sending request");
+    if ((ret = write_objects(fd, string("getattr"), string(path))) < 0) {
+        DEBUG("error while sending request, error=", std::strerror(-ret));
         return ret;
     }
 
-    if ((ret = check_ans_prefix(fd, "getattr")) < 0) {
-        DEBUG("initial check error");
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
         return ret;
     }
 
     if ((ret = read_objects(fd, *stbuf)) < 0) {
-        DEBUG("couldn't receive answer");
+        DEBUG("couldn't receive an answer, error=", std::strerror(-ret));
         return ret;
     }
 
     return 0;
 }
 
-static int network_fs_readdir(const char* path, void* buf,
+int network_fs_readdir(const char* path, void* buf,
         fuse_fill_dir_t filler,
         __attribute__((unused)) off_t offset,
         __attribute__((unused)) struct fuse_file_info* fi,
-        __attribute__((unused)) enum fuse_readdir_flags flags) noexcept {
+        __attribute__((unused)) enum fuse_readdir_flags flags) {
     DEBUG("path=", path);
 
     int ret;
     if ((ret = get_connection(options.host, options.port)) < 0) {
-        DEBUG("couldn't connect");
+        DEBUG("couldn't connect, error=", std::strerror(-ret));
         return ret;
     }
+
     int fd = ret;
     auto clean = finally([&] {
         close(fd);
     });
 
-    if ((ret = write_objects(fd, string("readdir"), "." + string(path))) < 0) {
-        DEBUG("couldn't send request");
+    if ((ret = write_objects(fd, string("readdir"), string(path))) < 0) {
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
 
-    if ((ret = check_ans_prefix(fd, "readdir")) < 0) {
-        DEBUG("initial check error");
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
         return ret;
     }
 
     std::vector<string> vec;
     if ((ret = read_objects(fd, vec)) < 0) {
-        DEBUG("couldn't receive answer");
+        DEBUG("couldn't receive an answer, error=", std::strerror(-ret));
         return ret;
     }
 
@@ -346,26 +200,23 @@ static int network_fs_readdir(const char* path, void* buf,
     return 0;
 }
 
-static int network_fs_open_helper(const char* path, int flags) noexcept {
-    int ret, fd;
-
+int network_fs_open_helper(const char* path, int flags) {
+    int ret;
     if ((ret = get_connection(options.host, options.port)) < 0) {
-        DEBUG("couldn't connect");
         return ret;
     }
-    fd = ret;
+
+    int fd = ret;
     auto clean = [&] {
         close(fd);
     };
 
-    if ((ret = write_objects(fd, string("open"), "." + string(path), flags)) < 0) {
-        DEBUG("couldn't send request");
+    if ((ret = write_objects(fd, string("open"), string(path), flags)) < 0) {
         clean();
         return ret;
     }
 
-    if ((ret = check_ans_prefix(fd, "open")) < 0) {
-        DEBUG("initial check error");
+    if ((ret = get_server_answer(fd)) < 0) {
         clean();
         return ret;
     }
@@ -373,99 +224,273 @@ static int network_fs_open_helper(const char* path, int flags) noexcept {
     return fd;
 }
 
-static int network_fs_open(const char* path, struct fuse_file_info* fi) noexcept {
-    DEBUG("path=", path);
-    int ret;
-
-    if ((ret = network_fs_open_helper(path, fi->fh)) > 0) {
-        fi->fh = ret;
-        return 0;
-    }
-
-    return ret;
-}
-
-static int network_fs_release_helper(int fd) noexcept {
+int network_fs_release_helper(int fd) {
     auto clean = finally([&] {
         close(fd);
     });
 
     int ret;
     if ((ret = write_objects(fd, string("close"))) < 0) {
-        DEBUG("couldn't send request");
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
 
-    if ((ret = check_ans_prefix(fd, "close")) < 0) {
-        DEBUG("initial check error");
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
         return ret;
     }
 
     return 0;
 }
 
-static int network_fs_release(const char* path, struct fuse_file_info* fi) noexcept {
-    DEBUG("path=", path);
-    return network_fs_release_helper(fi->fh);;
-}
-
-static int network_fs_read(const char* path, char* buf, size_t size,
-        off_t offset, struct fuse_file_info* fi) noexcept {
+int network_fs_read(const char* path, char* buf, size_t size,
+        off_t offset, __attribute__((unused)) struct fuse_file_info* fi) {
     DEBUG("path=", path, ", size=", size, ", offset=", offset);
 
-    int fd, ret;
-    if (fi == NULL) {
-        if ((ret = network_fs_open_helper(path, fi->fh)) < 0) {
-            return ret;
-        }
-        fd = ret;
-    } else {
-        fd = fi->fh;
+    int ret;
+    if ((ret = network_fs_open_helper(path, O_RDONLY)) < 0) {
+        DEBUG("couldn't open the file, error=", std::strerror(-ret));
+        return ret;
     }
+
+    int fd = ret;
     auto clean = finally([&] {
-        if (fi == NULL) {
-            network_fs_release_helper(fd);
+        if (network_fs_release_helper(fd) < 0) {
+            DEBUG("couldn't close the file");
         }
     });
 
     if ((ret = write_objects(fd, string("pread"), size, offset)) < 0) {
-        DEBUG("couldn't send request");
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
 
-    if ((ret = check_ans_prefix(fd, "pread")) < 0) {
-        DEBUG("initial check error");
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
         return ret;
     }
 
     fixed_buf_string buf_container{buf, 0};
     if ((ret = read_objects(fd, buf_container)) < 0) {
-        DEBUG("couldn't receive answer");
+        DEBUG("couldn't receive an answer, error=", std::strerror(-ret));
         return ret;
     }
 
     return buf_container.size;
 }
 
-static struct fuse_operations network_fs_oper = {
+int network_fs_mkdir(const char *path, mode_t mode) {
+    DEBUG("path=", path, ", mode=", mode);
+
+    int ret;
+    if ((ret = get_connection(options.host, options.port)) < 0) {
+        DEBUG("couldn't connect, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    int fd = ret;
+    auto clean = finally([&] {
+        close(fd);
+    });
+
+    if ((ret = write_objects(fd, string("mkdir"), string(path), mode)) < 0) {
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+int network_fs_unlink(const char *path) {
+    DEBUG("path=", path);
+
+    int ret;
+    if ((ret = get_connection(options.host, options.port)) < 0) {
+        DEBUG("couldn't connect, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    int fd = ret;
+    auto clean = finally([&] {
+        close(fd);
+    });
+
+    if ((ret = write_objects(fd, string("unlink"), string(path))) < 0) {
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+// TODO: use flags?
+int network_fs_rename(const char *from, const char *to, __attribute__((unused)) unsigned int flags) {
+    DEBUG("from=", from, ", to=", to);
+
+    int ret;
+    if ((ret = get_connection(options.host, options.port)) < 0) {
+        DEBUG("couldn't connect, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    int fd = ret;
+    auto clean = finally([&] {
+        close(fd);
+    });
+
+    if ((ret = write_objects(fd, string("rename"), string(from), string(to))) < 0) {
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+// TODO: create function like send_single_command which sends command with parameters
+// and checks server's output to limit copy pasting
+int network_fs_rmdir(const char *path) {
+    DEBUG("path=", path);
+
+    int ret;
+    if ((ret = get_connection(options.host, options.port)) < 0) {
+        DEBUG("couldn't connect, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    int fd = ret;
+    auto clean = finally([&] {
+        close(fd);
+    });
+
+    if ((ret = write_objects(fd, string("rmdir"), string(path))) < 0) {
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+// TODO: use mode?
+int network_fs_create(const char *path, __attribute__((unused)) mode_t mode,
+        __attribute__((unused)) struct fuse_file_info *fi) {
+    DEBUG("path=", path);
+
+    int ret;
+    if ((ret = network_fs_open_helper(path, O_CREAT)) < 0) {
+        DEBUG("couldn't open the file, error=", std::strerror(-ret));
+        return ret;
+    }
+    close(ret);
+
+    return 0;
+}
+
+int network_fs_truncate(const char *path, off_t size, __attribute__((unused)) struct fuse_file_info *fi) {
+    DEBUG("path=", path, ", size=", size);
+
+    int ret;
+    if ((ret = network_fs_open_helper(path, O_RDWR)) < 0) {
+        DEBUG("couldn't open the file, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    int fd = ret;
+    auto clean = finally([&] {
+        if (network_fs_release_helper(fd) < 0) {
+            DEBUG("couldn't close the file");
+        }
+    });
+
+    if ((ret = write_objects(fd, string("truncate"), size)) < 0) {
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    return 0;
+}
+
+int network_fs_write(const char *path, const char *buf, size_t size, off_t offset,
+        __attribute__((unused)) struct fuse_file_info *fi) {
+    DEBUG("path=", path, ", size=", size, ", offset=", offset);
+
+    int ret;
+    if ((ret = network_fs_open_helper(path, O_WRONLY)) < 0) {
+        DEBUG("couldn't open the file, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    int fd = ret;
+    auto clean = finally([&] {
+        if (network_fs_release_helper(fd) < 0) {
+            DEBUG("couldn't close the file");
+        }
+    });
+
+    // TODO: is it ok to use that const_cast here?
+    fixed_buf_string buf_container{const_cast<char*>(buf), size};
+    if ((ret = write_objects(fd, string("pwrite"), buf_container, size, offset)) < 0) {
+        DEBUG("couldn't send request, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    if ((ret = get_server_answer(fd)) < 0) {
+        DEBUG("initial check error, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    int read_data;
+    if ((ret = read_objects(fd, read_data)) < 0) {
+        DEBUG("couldn't receive an answer, error=", std::strerror(-ret));
+        return ret;
+    }
+
+    return read_data;
+}
+
+struct fuse_operations network_fs_oper = {
     .getattr = network_fs_getattr,
     .readlink = nullptr,
     .mknod = nullptr,
-    .mkdir = nullptr,
-    .unlink = nullptr,
-    .rmdir = nullptr,
+    .mkdir = network_fs_mkdir,
+    .unlink = network_fs_unlink,
+    .rmdir = network_fs_rmdir,
     .symlink = nullptr,
-    .rename = nullptr,
+    .rename = network_fs_rename,
     .link = nullptr,
     .chmod = nullptr,
     .chown = nullptr,
-    .truncate = nullptr,
-    .open = network_fs_open,
+    .truncate = network_fs_truncate,
+    .open = nullptr,
     .read = network_fs_read,
-    .write = nullptr,
+    .write = network_fs_write,
     .statfs = nullptr,
     .flush = nullptr,
-    .release = network_fs_release,
+    .release = nullptr,
     .fsync = nullptr,
     .setxattr = nullptr,
     .getxattr = nullptr,
@@ -478,7 +503,7 @@ static struct fuse_operations network_fs_oper = {
     .init = nullptr,
     .destroy = nullptr,
     .access = nullptr,
-    .create = nullptr,
+    .create = network_fs_create,
     .lock = nullptr,
     .utimens = nullptr,
     .bmap = nullptr,
@@ -492,35 +517,18 @@ static struct fuse_operations network_fs_oper = {
     .lseek = nullptr,
 };
 
-static void show_help(const char* progname) {
-    printf("usage: %s [options] <mountpoint>\n\n", progname);
-    printf("File-system specific options:\n"
-           "    --host=<s>          Host address to connect\n"
-           "                        (default: \"localhost\")\n"
-           "    --port=<s>          Port to use while connecting\n"
-           "                        (default: 6969)\n"
-           "\n");
 }
 
 int main(int argc, char* argv[]) {
     int ret;
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
-    /* Set defaults -- we have to use strdup so that
-       fuse_opt_parse can free the defaults if other
-       values are specified */
     options.host = strdup("localhost");
     options.port = strdup("6969");
 
-    /* Parse options */
     if (fuse_opt_parse(&args, &options, option_spec, NULL) == -1)
         return 1;
 
-    /* When --help is specified, first print our own file-system
-       specific help text, then signal fuse_main to show
-       additional help (by adding `--help` to the options again)
-       without usage: line (by setting argv[0] to the empty
-       string) */
     if (options.show_help) {
         show_help(argv[0]);
         assert(fuse_opt_add_arg(&args, "--help") == 0);
