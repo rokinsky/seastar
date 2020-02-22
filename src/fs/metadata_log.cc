@@ -21,22 +21,34 @@
 
 #include "fs/cluster.hh"
 #include "fs/cluster_allocator.hh"
+#include "fs/inode.hh"
+#include "fs/inode_info.hh"
+#include "fs/metadata_disk_entries.hh"
 #include "fs/metadata_log.hh"
+#include "fs/metadata_log_bootstrap.hh"
+#include "fs/metadata_log_operations/create_file.hh"
+#include "fs/metadata_to_disk_buffer.hh"
+#include "fs/unix_metadata.hh"
 #include "seastar/core/aligned_buffer.hh"
 #include "seastar/core/do_with.hh"
 #include "seastar/core/file-types.hh"
 #include "seastar/core/future-util.hh"
 #include "seastar/core/future.hh"
+#include "seastar/core/shared_mutex.hh"
 #include "seastar/fs/overloaded.hh"
 #include "seastar/fs/path.hh"
 
+#include <bits/stdint-uintn.h>
 #include <boost/crc.hpp>
 #include <boost/range/irange.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <pthread.h>
 #include <seastar/core/units.hh>
 #include <stdexcept>
+#include <unistd.h>
 #include <unordered_set>
 #include <variant>
 
@@ -46,349 +58,140 @@ metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t 
 : _device(std::move(device))
 , _cluster_size(cluster_size)
 , _alignment(alignment)
-, _curr_cluster_buff(cluster_size, alignment, 0)
-, _cluster_allocator({}, {}) {
+, _cluster_allocator({}, {})
+, _inode_allocator(1, 0) {
     assert(is_power_of_2(alignment));
     assert(cluster_size > 0 and cluster_size % alignment == 0);
 }
 
-future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters) {
-    // Clear the metadata log
-    _root_dir = root_dir;
-    _inodes.clear();
-    // Bootstrap
-    return do_with(std::optional(first_metadata_cluster_id), temporary_buffer<uint8_t>::aligned(_alignment, _cluster_size), std::unordered_set<cluster_id_t>{}, [this, available_clusters](auto& cluster_id, auto& buff, auto& taken_clusters) {
-        return repeat([this, &cluster_id, &taken_clusters, &buff] {
-            if (not cluster_id) {
-                return make_ready_future<stop_iteration>(stop_iteration::yes);
-            }
+future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters, fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id) {
+    return metadata_log_bootstrap::bootstrap(*this, root_dir, first_metadata_cluster_id, available_clusters, fs_shards_pool_size, fs_shard_id);
+}
 
-            disk_offset_t curr_cluster_offset = cluster_id_to_offset(*cluster_id, _cluster_size);
-            return _device.read(curr_cluster_offset, buff.get_write(), _cluster_size).then([this](size_t bytes_read) {
-                if (bytes_read != _cluster_size) {
-                    return make_exception_future(std::runtime_error("Failed to read whole metadata log cluster"));
-                }
-                return now();
+void metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata) {
+    assert(_inodes.count(inode) == 0);
+    _inodes.emplace(inode, inode_info {
+        0,
+        0,
+        metadata,
+        [&]() -> decltype(inode_info::contents) {
+            if (is_directory)
+                return inode_info::directory {};
 
-            }).then([this, &cluster_id, &taken_clusters, &buff, curr_cluster_offset] {
-                taken_clusters.emplace(*cluster_id);
-                size_t pos = 0;
-                auto load_entry = [this, &buff, &pos](auto& entry) {
-                    if (pos + sizeof(entry) > _cluster_size) {
-                        return false;
-                    }
-
-                    memcpy(&entry, buff.get() + pos, sizeof(entry));
-                    pos += sizeof(entry);
-                    return true;
-                };
-
-                auto invalid_entry_exception = [] {
-                    return make_exception_future<stop_iteration>(std::runtime_error("Invalid metadata log entry"));
-                };
-
-                // Process cluster: the data layout format is:
-                // | checkpoint1 | data1... | checkpoint2 | data2... |
-                bool log_ended = false;
-                cluster_id = std::nullopt;
-                for (;;) {
-                    if (cluster_id) {
-                        break; // Committed block with next cluster_id marks the end of the current metadata log cluster
-                    }
-
-                    ondisk_type entry_type;
-                    if (not load_entry(entry_type) or entry_type != CHECKPOINT) {
-                        log_ended = true; // Invalid entry
-                        break;
-                    }
-
-                    ondisk_checkpoint checkpoint;
-                    if (not load_entry(checkpoint) or pos + checkpoint.checkpointed_data_length > _cluster_size) {
-                        log_ended = true; // Invalid checkpoint
-                        break;
-                    }
-
-                    boost::crc_32_type crc;
-                    crc.process_bytes(buff.get() + pos, checkpoint.checkpointed_data_length);
-                    crc.process_bytes(&checkpoint.checkpointed_data_length, sizeof(checkpoint.checkpointed_data_length));
-                    if (crc.checksum() != checkpoint.crc32_code) {
-                        log_ended = true; // Invalid CRC code
-                        break;
-                    }
-
-                    auto checkpointed_data_end = pos + checkpoint.checkpointed_data_length;
-                    while (pos < checkpointed_data_end) {
-                        switch (entry_type) {
-                        case INVALID: {
-                            return invalid_entry_exception();
-                        }
-
-                        case NEXT_METADATA_CLUSTER: {
-                            ondisk_next_metadata_cluster entry;
-                            if (not load_entry(entry)) {
-                                return invalid_entry_exception();
-                            }
-
-                            cluster_id = (cluster_id_t)entry.cluster_id;
-                            continue;
-                        }
-
-                        case CHECKPOINT: {
-                            // CHECKPOINT is handled before entering the switch
-                            return invalid_entry_exception();
-                        }
-
-                        case CREATE_INODE: {
-                            ondisk_create_inode entry;
-                            if (not load_entry(entry)) {
-                                return invalid_entry_exception();
-                            }
-
-                            auto [it, was_inserted] = _inodes.emplace((inode_t)entry.inode, inode_info {
-                                0,
-                                0, // TODO: maybe creating dangling inode (not attached to any directory is invalid), if not then we have to drop them after finishing bootstraping, because at that point dangling inodes are invaild (that's how I see it now)
-                                ondisk_metadata_to_metadata(entry.metadata),
-                                [&]() -> decltype(inode_info::contents) {
-                                    if (entry.is_directory) {
-                                        return inode_info::directory {};
-                                    } else {
-                                        return inode_info::file {};
-                                    }
-                                }()
-                            });
-
-                            if (not was_inserted) {
-                                return invalid_entry_exception(); // inode already exists
-                            }
-                            continue;
-                        }
-
-                        case UPDATE_METADATA: {
-                            ondisk_update_metadata entry;
-                            if (not load_entry(entry)) {
-                                return invalid_entry_exception();
-                            }
-
-                            auto it = _inodes.find(entry.inode);
-                            if (it == _inodes.end()) {
-                                return invalid_entry_exception();
-                            }
-
-                            it->second.metadata = ondisk_metadata_to_metadata(entry.metadata);
-                            continue;
-                        }
-
-                        case DELETE_INODE: {
-                            // TODO: for compaction: update used inode_data_vec
-                            ondisk_delete_inode entry;
-                            if (not load_entry(entry)) {
-                                return invalid_entry_exception();
-                            }
-
-                            auto it = _inodes.find(entry.inode);
-                            if (it == _inodes.end()) {
-                                return invalid_entry_exception();
-                            }
-
-                            inode_info& inode_info = it->second;
-                            if (inode_info.directories_containing_file > 0) {
-                                return invalid_entry_exception();
-                            }
-
-                            bool failed = std::visit(overloaded {
-                                [](const inode_info::directory& dir) {
-                                    return (not dir.entries.empty());
-                                },
-                                [](const inode_info::file&) {
-                                    return false;
-                                }
-                            }, inode_info.contents);
-                            if (failed) {
-                                return invalid_entry_exception();
-                            }
-
-                            _inodes.erase(it);
-                            continue;
-                        }
-
-                        case SMALL_WRITE: {
-                            // TODO: for compaction: update used inode_data_vec
-                            ondisk_small_write_header entry;
-                            if (not load_entry(entry) or pos + entry.length > checkpointed_data_end) {
-                                return invalid_entry_exception();
-                            }
-
-                            auto it = _inodes.find(entry.inode);
-                            if (it == _inodes.end()) {
-                                return invalid_entry_exception();
-                            }
-
-                            temporary_buffer<uint8_t> data(buff.get() + pos, entry.length);
-                            pos += entry.length;
-
-                            inode_data_vec data_vec = {
-                                {entry.offset, entry.offset + entry.length},
-                                inode_data_vec::in_mem_data {std::move(data)}
-                            };
-
-                            inode_info& inode_info = it->second;
-                            if (not std::holds_alternative<inode_info::file>(inode_info.contents)) {
-                                return invalid_entry_exception();
-                            }
-
-                            auto& file = std::get<inode_info::file>(inode_info.contents);
-                            write_update(file, std::move(data_vec));
-                            inode_info.metadata.mtime_ns = entry.mtime_ns;
-                            continue;
-                        }
-
-                        case MTIME_UPDATE: {
-                            ondisk_mtime_update entry;
-                            if (not load_entry(entry) or _inodes.count(entry.inode) != 1) {
-                                return invalid_entry_exception();
-                            }
-
-                            _inodes[entry.inode].metadata.mtime_ns = entry.mtime_ns;
-                            continue;
-                        }
-
-                        case TRUNCATE: {
-                            ondisk_truncate entry;
-                            // TODO: add checks for being directory
-                            if (not load_entry(entry)) {
-                                return invalid_entry_exception();
-                            }
-
-                            auto it = _inodes.find(entry.inode);
-                            if (it == _inodes.end()) {
-                                return invalid_entry_exception();
-                            }
-
-                            inode_info& inode_info = it->second;
-                            if (not std::holds_alternative<inode_info::file>(inode_info.contents)) {
-                                return invalid_entry_exception();
-                            }
-
-                            auto& file = std::get<inode_info::file>(inode_info.contents);
-                            auto fsize = file.size();
-                            if (entry.size > fsize) {
-                                file.data.emplace(fsize, inode_data_vec {
-                                    {fsize, entry.size},
-                                    inode_data_vec::hole_data {}
-                                });
-                            } else {
-                                cut_out_data_range(file, {
-                                    entry.size,
-                                    std::numeric_limits<decltype(file_range::end)>::max()
-                                });
-                            }
-
-                            inode_info.metadata.mtime_ns = entry.mtime_ns;
-                            continue;
-                        }
-
-                        case ADD_DIR_ENTRY: {
-                            ondisk_add_dir_entry_header entry;
-                            if (not load_entry(entry) or pos + entry.entry_name_length > checkpointed_data_end or _inodes.count(entry.dir_inode) != 1 or _inodes.count(entry.entry_inode) != 1) {
-                                return invalid_entry_exception();
-                            }
-
-                            sstring dir_entry_name((const char*)buff.get() + pos, entry.entry_name_length);
-                            pos += entry.entry_name_length;
-
-                            inode_info& dir_inode_info = _inodes[entry.dir_inode];
-                            inode_info& dir_entry_inode_info = _inodes[entry.entry_inode];
-
-                            if (not std::holds_alternative<inode_info::directory>(dir_inode_info.contents)) {
-                                return invalid_entry_exception();
-                            }
-                            auto& dir = std::get<inode_info::directory>(dir_inode_info.contents);
-
-                            if (std::holds_alternative<inode_info::directory>(dir_entry_inode_info.contents) and dir_entry_inode_info.directories_containing_file > 0) {
-                                return invalid_entry_exception(); // Directory may only be linked once
-                            }
-
-                            dir.entries.emplace(std::move(dir_entry_name), (inode_t)entry.entry_inode);
-                            ++dir_entry_inode_info.directories_containing_file;
-                            continue;
-                        }
-
-                        case DELETE_DIR_ENTRY: {
-                            ondisk_delete_dir_entry_header entry;
-                            if (not load_entry(entry) or pos + entry.entry_name_length > checkpointed_data_end or _inodes.count(entry.dir_inode) != 1) {
-                                return invalid_entry_exception();
-                            }
-
-                            sstring dir_entry_name((const char*)buff.get() + pos, entry.entry_name_length);
-                            pos += entry.entry_name_length;
-
-                            inode_info& dir_inode_info = _inodes[entry.dir_inode];
-                            if (not std::holds_alternative<inode_info::directory>(dir_inode_info.contents)) {
-                                return invalid_entry_exception();
-                            }
-                            auto& dir = std::get<inode_info::directory>(dir_inode_info.contents);
-
-                            auto it = dir.entries.find(dir_entry_name);
-                            if (it == dir.entries.end()) {
-                                return invalid_entry_exception();
-                            }
-
-                            inode_t inode = it->second;
-                            auto inode_it = _inodes.find(inode);
-                            if (inode_it == _inodes.end()) {
-                                return invalid_entry_exception();
-                            }
-
-                            inode_info& inode_info = inode_it->second;
-                            assert(inode_info.directories_containing_file > 0);
-                            --inode_info.directories_containing_file;
-
-                            dir.entries.erase(it);
-                            continue;
-                        }
-
-                        case RENAME_DIR_ENTRY: {
-                            // TODO: implement it
-                            continue;
-                        }
-
-                        case MEDIUM_WRITE: // TODO: will be very similar to SMALL_WRITE
-                        case LARGE_WRITE: // TODO: will be very similar to SMALL_WRITE
-                        case LARGE_WRITE_WITHOUT_MTIME: // TODO: will be very similar to SMALL_WRITE
-                            // TODO: implement it
-                            throw std::runtime_error("Not implemented");
-
-                        // default: is omitted to make compiler warn if there is an unhandled type
-                        }
-
-                        // unknown type => metadata log inconsistency
-                        return invalid_entry_exception();
-                    }
-
-                    if (pos != checkpointed_data_end) {
-                        return invalid_entry_exception();
-                    }
-
-                    if (log_ended) {
-                        // Bootstrap _curr_cluster_buff
-                        _curr_cluster_buff.reset_from_bootstraped_cluster(curr_cluster_offset, buff.get(), pos, true);
-                        return make_ready_future<stop_iteration>(stop_iteration::yes);
-                    }
-                }
-
-                return make_ready_future<stop_iteration>(stop_iteration::no);
-            });
-        }).then([this, &available_clusters, &taken_clusters] {
-            // Initialize _cluser_allocator
-            std::deque<cluster_id_t> free_clusters;
-            for (auto cid : boost::irange(available_clusters.beg, available_clusters.end)) {
-                if (taken_clusters.count(cid) == 0) {
-                    free_clusters.emplace_back(cid);
-                }
-            }
-            _cluster_allocator = cluster_allocator(std::move(taken_clusters), std::move(free_clusters));
-        });
+            return inode_info::file {};
+        }()
     });
+}
+
+void metadata_log::memory_only_delete_inode(inode_t inode) {
+    auto it = _inodes.find(inode);
+    assert(it != _inodes.end());
+    assert(it->second.opened_files_count == 0);
+    assert(it->second.directories_containing_file == 0);
+
+    std::visit(overloaded {
+        [](const inode_info::directory& dir) {
+            assert(dir.entries.empty());
+        },
+        [](const inode_info::file&) {
+            // TODO: for compaction: update used inode_data_vec
+        }
+    }, it->second.contents);
+
+    _inodes.erase(it);
+}
+
+void metadata_log::memory_only_small_write(inode_t inode, disk_offset_t offset, temporary_buffer<uint8_t> data) {
+    inode_data_vec data_vec = {
+        {offset, offset + data.size()},
+        inode_data_vec::in_mem_data {std::move(data)}
+    };
+
+    auto it = _inodes.find(inode);
+    assert(it != _inodes.end());
+    assert(std::holds_alternative<inode_info::file>(it->second.contents));
+    write_update(std::get<inode_info::file>(it->second.contents), std::move(data_vec));
+}
+
+void metadata_log::memory_only_update_mtime(inode_t inode, decltype(unix_metadata::mtime_ns) mtime_ns) {
+    auto it = _inodes.find(inode);
+    assert(it != _inodes.end());
+    it->second.metadata.mtime_ns = mtime_ns;
+}
+
+void metadata_log::memory_only_truncate(inode_t inode, disk_offset_t size) {
+    auto it = _inodes.find(inode);
+    assert(it != _inodes.end());
+    assert(std::holds_alternative<inode_info::file>(it->second.contents));
+    auto& file = std::get<inode_info::file>(it->second.contents);
+
+    auto file_size = file.size();
+    if (size > file_size) {
+        file.data.emplace(file_size, inode_data_vec {
+            {file_size, size},
+            inode_data_vec::hole_data {}
+        });
+    } else {
+        // TODO: for compaction: update used inode_data_vec
+        cut_out_data_range(file, {
+            size,
+            std::numeric_limits<decltype(file_range::end)>::max()
+        });
+    }
+}
+
+void metadata_log::memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, sstring entry_name) {
+    auto it = _inodes.find(entry_inode);
+    assert(it != _inodes.end());
+    // Directory may only be linked once (to avoid creating cycles)
+    assert(not std::holds_alternative<inode_info::directory>(it->second.contents) or it->second.directories_containing_file == 0);
+
+    bool inserted = dir.entries.emplace(std::move(entry_name), entry_inode).second;
+    assert(inserted);
+    ++it->second.directories_containing_file;
+}
+
+void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, sstring entry_name) {
+    auto it = dir.entries.find(entry_name);
+    assert(it != dir.entries.end());
+
+    auto entry_it = _inodes.find(it->second);
+    assert(entry_it != _inodes.end());
+    assert(entry_it->second.directories_containing_file > 0);
+
+    --entry_it->second.directories_containing_file;
+    dir.entries.erase(it);
+}
+
+future<> metadata_log::flush_curr_cluster() {
+    if (_curr_cluster_buff->bytes_left_after_flush_if_done_now(true) == 0) {
+        return flush_curr_cluster_and_change_it_to_new_one();
+    }
+
+    _previous_flushes = _previous_flushes.get_future().then([crr_clstr_bf = _curr_cluster_buff, dev = &_device] {
+        return crr_clstr_bf->flush_to_disk(*dev, true);
+    });
+
+    return _previous_flushes.get_future();
+}
+
+future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
+    auto next_cluster = _cluster_allocator.alloc();
+    if (not next_cluster) {
+        // Here metadata log dies, we cannot even flush current cluster because from there we won't be able to recover
+        return make_exception_future(no_more_space_exception());
+    }
+
+    auto append_res = _curr_cluster_buff->append(ondisk_next_metadata_cluster {*next_cluster});
+    assert(append_res == metadata_to_disk_buffer::APPENDED);
+    _previous_flushes = _previous_flushes.get_future().then([crr_clstr_bf = _curr_cluster_buff, dev = &_device] {
+        return crr_clstr_bf->flush_to_disk(*dev, true);
+    });
+
+    // Make next cluster the current cluster to allow writing of next metadata entries before flushing finishes
+    _curr_cluster_buff = make_lw_shared<metadata_to_disk_buffer>(_cluster_size, _alignment, cluster_id_to_offset(*next_cluster, _cluster_size));
+
+    return _previous_flushes.get_future();
 }
 
 void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_vec) {
@@ -497,24 +300,11 @@ file_offset_t metadata_log::file_size(inode_t inode) const {
 }
 
 future<inode_t> metadata_log::create_file(sstring path, file_permissions perms) {
-    return now().then([this, path = std::move(path), perms]() mutable {
-        // TODO: checking permissions...
-        sstring entry = last_component(path);
-        if (entry.empty()) {
-            return make_exception_future<inode_t>(std::runtime_error("Path has to end with character different than '/'"));
-        }
-        path.erase(path.end() - entry.size(), path.end());
+    return create_file_operation::perform(*this, std::move(path), std::move(perms), false);
+}
 
-        return futurized_path_lookup(path).then([this, entry = std::move(entry)](auto dir_inode) {
-            auto dir_it = _inodes.find(dir_inode);
-            if (dir_it == _inodes.end()) {
-                return make_exception_future<inode_t>(operation_became_invalid_exception());
-            }
-
-            // TODO: continue here
-            return make_ready_future<inode_t>();
-        });
-    });
+future<inode_t> metadata_log::create_directory(sstring path, file_permissions perms) {
+    return create_file_operation::perform(*this, std::move(path), std::move(perms), true);
 }
 
 // TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE, then it should be possible to compact some data (e.g. by truncating a file) via top-level interface and retrying the flush() without a ENOSPACE error. In particular if we delete all files after ENOSPACE it should be successful. It becomes especially hard if we write metadata to the last cluster and there is no enough room to write these delete operations. We have to guarantee that the filesystem is in a recoverable state then.

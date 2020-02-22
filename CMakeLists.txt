@@ -618,6 +618,8 @@ add_library (seastar STATIC
   src/fs/metadata_disk_entries.hh
   src/fs/metadata_log.cc
   src/fs/metadata_log.hh
+  src/fs/metadata_log_bootstrap.hh
+  src/fs/metadata_log_operations/create_file.hh
   src/fs/metadata_to_disk_buffer.hh
   src/fs/range.hh
   src/fs/to_disk_buffer.hh
