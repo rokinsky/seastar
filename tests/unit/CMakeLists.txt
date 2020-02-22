@@ -215,263 +215,268 @@ add_custom_target (test_unit
   COMMAND ctest --verbose -R Seastar.unit
   USES_TERMINAL)
 
-seastar_add_test (abort_source
-  SOURCES abort_source_test.cc)
+# seastar_add_test (abort_source
+#   SOURCES abort_source_test.cc)
+# 
+# seastar_add_test (alloc
+#   SOURCES alloc_test.cc)
+# 
+# if (NOT Seastar_EXECUTE_ONLY_FAST_TESTS)
+#   set (allocator_test_args "")
+# else ()
+#   if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+#     set (allocator_test_args --iterations 5)
+#   else ()
+#     set (allocator_test_args --time 0.1)
+#   endif ()
+# endif ()
+# 
+# seastar_add_test (allocator
+#   SOURCES allocator_test.cc
+#   RUN_ARGS ${allocator_test_args})
+# 
+# seastar_add_app_test (alien
+#   SOURCES alien_test.cc)
+# 
+# seastar_add_test (checked_ptr
+#   SOURCES checked_ptr_test.cc)
+# 
+# seastar_add_test (chunked_fifo
+#   SOURCES chunked_fifo_test.cc)
+# 
+# seastar_add_test (circular_buffer
+#   SOURCES circular_buffer_test.cc)
+# 
+# seastar_add_test (circular_buffer_fixed_capacity
+#   SOURCES circular_buffer_fixed_capacity_test.cc)
+# 
+# seastar_add_test (connect
+#   SOURCES connect_test.cc)
+# 
+# if (Seastar_EXPERIMENTAL_COROUTINES_TS)
+#   seastar_add_test (coroutines
+#     SOURCES coroutines_test.cc)
+# endif ()
+# 
+# seastar_add_test (defer
+#   SOURCES defer_test.cc)
+# 
+# seastar_add_test (deleter
+#   SOURCES deleter_test.cc)
+# 
+# seastar_add_app_test (directory
+#   SOURCES directory_test.cc)
+# 
+# seastar_add_app_test (distributed
+#   SOURCES distributed_test.cc)
+# 
+# seastar_add_test (dns
+#   SOURCES dns_test.cc)
+# 
+# seastar_add_test (execution_stage
+#   SOURCES execution_stage_test.cc)
+# 
+# seastar_add_test (expiring_fifo
+#   SOURCES expiring_fifo_test.cc)
+# 
+# seastar_add_test (fair_queue
+#   SOURCES fair_queue_test.cc)
+# 
+# seastar_add_test (file_io
+#   SOURCES file_io_test.cc)
+# 
+# seastar_add_test (foreign_ptr
+#   SOURCES foreign_ptr_test.cc)
+# 
+# seastar_add_test (fstream
+#   SOURCES
+#     fstream_test.cc
+#     mock_file.hh)
+# 
+# seastar_add_test (futures
+#   SOURCES futures_test.cc)
+# 
+# seastar_add_test (sharded
+#   SOURCES sharded_test.cc)
+# 
+# seastar_add_test (httpd
+#   SOURCES
+#     httpd_test.cc
+#     loopback_socket.hh)
+# 
+# seastar_add_test (ipv6
+#   SOURCES ipv6_test.cc)
+# 
+# seastar_add_test (network_interface
+#   SOURCES network_interface_test.cc)
+# 
+# seastar_add_test (json_formatter
+#   SOURCES json_formatter_test.cc)
+# 
+# seastar_add_test (lowres_clock
+#   SOURCES lowres_clock_test.cc)
+# 
+# seastar_add_test (metrics
+#   SOURCES metrics_test.cc)
+# 
+# seastar_add_test (net_config
+#   KIND BOOST
+#   SOURCES net_config_test.cc)
+# 
+# seastar_add_test (noncopyable_function
+#   KIND BOOST
+#   SOURCES noncopyable_function_test.cc)
+# 
+# seastar_add_test (output_stream
+#   SOURCES output_stream_test.cc)
+# 
+# seastar_add_test (packet
+#   KIND BOOST
+#   SOURCES packet_test.cc)
+# 
+# seastar_add_test (program_options
+#   KIND BOOST
+#   SOURCES program_options_test.cc)
+# 
+# seastar_add_test (queue
+#   SOURCES queue_test.cc)
+# 
+# seastar_add_test (rpc
+#   SOURCES
+#     loopback_socket.hh
+#     rpc_test.cc)
+# 
+# seastar_add_test (semaphore
+#   SOURCES semaphore_test.cc)
+# 
+# seastar_add_test (shared_ptr
+#   KIND BOOST
+#   SOURCES shared_ptr_test.cc)
+# 
+# seastar_add_test (signal
+#   SOURCES signal_test.cc)
+# 
+# seastar_add_test (simple_stream
+#   KIND BOOST
+#   SOURCES simple_stream_test.cc)
+# 
+# # TODO: Disabled for now. See GH-520.
+# # seastar_add_test (slab
+# #   SOURCES slab_test.cc
+# #   NO_SEASTAR_TESTING_LIBRARY)
+# 
+# seastar_add_app_test (smp
+#   SOURCES smp_test.cc)
+# 
+# seastar_add_app_test (socket
+#   SOURCES socket_test.cc)
+# 
+# seastar_add_test (sstring
+#   KIND BOOST
+#   SOURCES sstring_test.cc)
+# 
+# seastar_add_test (stall_detector
+#   SOURCES stall_detector_test.cc)
+# 
+# seastar_add_test (thread
+#   SOURCES thread_test.cc)
+# 
+# seastar_add_test (scheduling_group
+#   SOURCES scheduling_group_test.cc)
+# 
+# seastar_add_app_test (thread_context_switch
+#   SOURCES thread_context_switch_test.cc)
+# 
+# seastar_add_app_test (timer
+#   SOURCES timer_test.cc)
+# 
+# seastar_add_test (uname
+#   KIND BOOST
+#   SOURCES uname_test.cc)
+# 
+# # find_package(GTest REQUIRED)
+# # # TODO [PQ] Is it OK to build a parquet_testing library this way
+# # add_library(parquet_testing
+# #         parquet/gtest_util.h
+# #         parquet/random.h
+# #         parquet/util.h
+# #         parquet/util.cc
+# #         parquet/test_util.cc
+# #         parquet/gtest_util.cc
+# #         parquet/random.cc
+# #         parquet/gtest_seastar_main.cc)
+# # target_link_libraries(parquet_testing seastar)
+# # # TODO [PQ] Modify seastar_add_test (maybe by adding a new KIND for parquet)
+# # function(parquet_add_test name src)
+# #   seastar_add_test(${name}
+# #     SOURCES
+# #     ${src}
+# #     LIBRARIES
+# #    gtest
+# #    parquet_testing)
+# # endfunction()
+# # parquet_add_test(parquet_column_reader parquet/column_reader_test.cc)
+# # parquet_add_test(parquet_column_writer parquet/column_writer_test.cc)
+# # parquet_add_test(parquet_encoding parquet/encoding_test.cc)
+# # parquet_add_test(parquet_encryption_properties parquet/encryption_properties_test.cc)
+# # parquet_add_test(parquet_encryption_write_configurations parquet/encryption_write_configurations_test.cc)
+# # parquet_add_test(parquet_file_deserialize parquet/file_deserialize_test.cc)
+# # parquet_add_test(parquet_file_serialize parquet/file_serialize_test.cc)
+# # parquet_add_test(parquet_metadata parquet/metadata_test.cc)
+# # parquet_add_test(parquet_properties parquet/properties_test.cc)
+# # parquet_add_test(parquet_reader parquet/reader_test.cc)
+# # parquet_add_test(parquet_schema parquet/schema_test.cc)
+# # parquet_add_test(parquet_statistics parquet/statistics_test.cc)
+# # parquet_add_test(parquet_types parquet/types_test.cc)
+# # parquet_add_test(parquet_cql parquet/cql_test.cc)
+# 
+seastar_add_test (parquet_file_reader
+  SOURCES parquet/file_reader.cc)
 
-seastar_add_test (alloc
-  SOURCES alloc_test.cc)
-
-if (NOT Seastar_EXECUTE_ONLY_FAST_TESTS)
-  set (allocator_test_args "")
-else ()
-  if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set (allocator_test_args --iterations 5)
-  else ()
-    set (allocator_test_args --time 0.1)
-  endif ()
-endif ()
-
-seastar_add_test (allocator
-  SOURCES allocator_test.cc
-  RUN_ARGS ${allocator_test_args})
-
-seastar_add_app_test (alien
-  SOURCES alien_test.cc)
-
-seastar_add_test (checked_ptr
-  SOURCES checked_ptr_test.cc)
-
-seastar_add_test (chunked_fifo
-  SOURCES chunked_fifo_test.cc)
-
-seastar_add_test (circular_buffer
-  SOURCES circular_buffer_test.cc)
-
-seastar_add_test (circular_buffer_fixed_capacity
-  SOURCES circular_buffer_fixed_capacity_test.cc)
-
-seastar_add_test (connect
-  SOURCES connect_test.cc)
-
-if (Seastar_EXPERIMENTAL_COROUTINES_TS)
-  seastar_add_test (coroutines
-    SOURCES coroutines_test.cc)
-endif ()
-
-seastar_add_test (defer
-  SOURCES defer_test.cc)
-
-seastar_add_test (deleter
-  SOURCES deleter_test.cc)
-
-seastar_add_app_test (directory
-  SOURCES directory_test.cc)
-
-seastar_add_app_test (distributed
-  SOURCES distributed_test.cc)
-
-seastar_add_test (dns
-  SOURCES dns_test.cc)
-
-seastar_add_test (execution_stage
-  SOURCES execution_stage_test.cc)
-
-seastar_add_test (expiring_fifo
-  SOURCES expiring_fifo_test.cc)
-
-seastar_add_test (fair_queue
-  SOURCES fair_queue_test.cc)
-
-seastar_add_test (file_io
-  SOURCES file_io_test.cc)
-
-seastar_add_test (foreign_ptr
-  SOURCES foreign_ptr_test.cc)
-
-seastar_add_test (fstream
-  SOURCES
-    fstream_test.cc
-    mock_file.hh)
-
-seastar_add_test (futures
-  SOURCES futures_test.cc)
-
-seastar_add_test (sharded
-  SOURCES sharded_test.cc)
-
-seastar_add_test (httpd
-  SOURCES
-    httpd_test.cc
-    loopback_socket.hh)
-
-seastar_add_test (ipv6
-  SOURCES ipv6_test.cc)
-
-seastar_add_test (network_interface
-  SOURCES network_interface_test.cc)
-
-seastar_add_test (json_formatter
-  SOURCES json_formatter_test.cc)
-
-seastar_add_test (lowres_clock
-  SOURCES lowres_clock_test.cc)
-
-seastar_add_test (metrics
-  SOURCES metrics_test.cc)
-
-seastar_add_test (net_config
-  KIND BOOST
-  SOURCES net_config_test.cc)
-
-seastar_add_test (noncopyable_function
-  KIND BOOST
-  SOURCES noncopyable_function_test.cc)
-
-seastar_add_test (output_stream
-  SOURCES output_stream_test.cc)
-
-seastar_add_test (packet
-  KIND BOOST
-  SOURCES packet_test.cc)
-
-seastar_add_test (program_options
-  KIND BOOST
-  SOURCES program_options_test.cc)
-
-seastar_add_test (queue
-  SOURCES queue_test.cc)
-
-seastar_add_test (rpc
-  SOURCES
-    loopback_socket.hh
-    rpc_test.cc)
-
-seastar_add_test (semaphore
-  SOURCES semaphore_test.cc)
-
-seastar_add_test (shared_ptr
-  KIND BOOST
-  SOURCES shared_ptr_test.cc)
-
-seastar_add_test (signal
-  SOURCES signal_test.cc)
-
-seastar_add_test (simple_stream
-  KIND BOOST
-  SOURCES simple_stream_test.cc)
-
-# TODO: Disabled for now. See GH-520.
-# seastar_add_test (slab
-#   SOURCES slab_test.cc
-#   NO_SEASTAR_TESTING_LIBRARY)
-
-seastar_add_app_test (smp
-  SOURCES smp_test.cc)
-
-seastar_add_app_test (socket
-  SOURCES socket_test.cc)
-
-seastar_add_test (sstring
-  KIND BOOST
-  SOURCES sstring_test.cc)
-
-seastar_add_test (stall_detector
-  SOURCES stall_detector_test.cc)
-
-seastar_add_test (thread
-  SOURCES thread_test.cc)
-
-seastar_add_test (scheduling_group
-  SOURCES scheduling_group_test.cc)
-
-seastar_add_app_test (thread_context_switch
-  SOURCES thread_context_switch_test.cc)
-
-seastar_add_app_test (timer
-  SOURCES timer_test.cc)
-
-seastar_add_test (uname
-  KIND BOOST
-  SOURCES uname_test.cc)
-
-
-find_package(GTest REQUIRED)
-# TODO [PQ] Is it OK to build a parquet_testing library this way
-add_library(parquet_testing
-        parquet/gtest_util.h
-        parquet/random.h
-        parquet/util.h
-        parquet/util.cc
-        parquet/test_util.cc
-        parquet/gtest_util.cc
-        parquet/random.cc
-        parquet/gtest_seastar_main.cc)
-target_link_libraries(parquet_testing seastar)
-# TODO [PQ] Modify seastar_add_test (maybe by adding a new KIND for parquet)
-function(parquet_add_test name src)
-  seastar_add_test(${name}
-    SOURCES
-    ${src}
-    LIBRARIES
-    gtest
-    parquet_testing)
-endfunction()
-parquet_add_test(parquet_column_reader parquet/column_reader_test.cc)
-parquet_add_test(parquet_column_writer parquet/column_writer_test.cc)
-parquet_add_test(parquet_encoding parquet/encoding_test.cc)
-parquet_add_test(parquet_encryption_properties parquet/encryption_properties_test.cc)
-parquet_add_test(parquet_encryption_write_configurations parquet/encryption_write_configurations_test.cc)
-parquet_add_test(parquet_file_deserialize parquet/file_deserialize_test.cc)
-parquet_add_test(parquet_file_serialize parquet/file_serialize_test.cc)
-parquet_add_test(parquet_metadata parquet/metadata_test.cc)
-parquet_add_test(parquet_properties parquet/properties_test.cc)
-parquet_add_test(parquet_reader parquet/reader_test.cc)
-parquet_add_test(parquet_schema parquet/schema_test.cc)
-parquet_add_test(parquet_statistics parquet/statistics_test.cc)
-parquet_add_test(parquet_types parquet/types_test.cc)
-parquet_add_test(parquet_cql parquet/cql_test.cc)
-
-set (tls_certificate_files
-  catest.key
-  catest.pem
-  tls-ca-bundle.pem
-  test.crl
-  test.crt
-  test.csr
-  test.key)
-
-prepend_each (
-  in_tls_certificate_files
-  ${CMAKE_CURRENT_SOURCE_DIR}/
-  ${tls_certificate_files})
-
-prepend_each (
-  out_tls_certificate_files
-  ${CMAKE_CURRENT_BINARY_DIR}/
-  ${tls_certificate_files})
-
-add_custom_command (
-  DEPENDS ${in_tls_certificate_files}
-  OUTPUT ${out_tls_certificate_files}
-  COMMAND ${CMAKE_COMMAND} -E copy ${in_tls_certificate_files} ${CMAKE_CURRENT_BINARY_DIR})
-
-# TODO: Disabled for now. See GH-514.
-# seastar_add_test (tls
-#   DEPENDS ${out_tls_certificate_files}
-#   SOURCES tls_test.cc
-#   WORKING_DIRECTORY ${Seastar_BINARY_DIR})
-
-seastar_add_test (tuple_utils
-  KIND BOOST
-  SOURCES tuple_utils_test.cc)
-
-seastar_add_test (unixdomain
-  SOURCES unix_domain_test.cc)
-
-seastar_add_test (unwind
-  KIND BOOST
-  SOURCES unwind_test.cc)
-
-seastar_add_test (weak_ptr
-  KIND BOOST
-  SOURCES weak_ptr_test.cc)
+seastar_add_test (parquet_cql_test
+  SOURCES parquet/cql_test.cc)
+# 
+# set (tls_certificate_files
+#   catest.key
+#   catest.pem
+#   tls-ca-bundle.pem
+#   test.crl
+#   test.crt
+#   test.csr
+#   test.key)
+# 
+# prepend_each (
+#   in_tls_certificate_files
+#   ${CMAKE_CURRENT_SOURCE_DIR}/
+#   ${tls_certificate_files})
+# 
+# prepend_each (
+#   out_tls_certificate_files
+#   ${CMAKE_CURRENT_BINARY_DIR}/
+#   ${tls_certificate_files})
+# 
+# add_custom_command (
+#   DEPENDS ${in_tls_certificate_files}
+#   OUTPUT ${out_tls_certificate_files}
+#   COMMAND ${CMAKE_COMMAND} -E copy ${in_tls_certificate_files} ${CMAKE_CURRENT_BINARY_DIR})
+# 
+# # TODO: Disabled for now. See GH-514.
+# # seastar_add_test (tls
+# #   DEPENDS ${out_tls_certificate_files}
+# #   SOURCES tls_test.cc
+# #   WORKING_DIRECTORY ${Seastar_BINARY_DIR})
+# 
+# seastar_add_test (tuple_utils
+#   KIND BOOST
+#   SOURCES tuple_utils_test.cc)
+# 
+# seastar_add_test (unixdomain
+#   SOURCES unix_domain_test.cc)
+# 
+# seastar_add_test (unwind
+#   KIND BOOST
+#   SOURCES unwind_test.cc)
+# 
+# seastar_add_test (weak_ptr
+#   KIND BOOST
+#   SOURCES weak_ptr_test.cc)

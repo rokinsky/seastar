@@ -5,9 +5,6 @@ namespace parquet::seastarized::logical_schema {
 
 namespace {
 
-template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
-template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
-
 Node BuildLogicalNode(
     const SchemaDescriptor* schema,
     const schema::Node* node,

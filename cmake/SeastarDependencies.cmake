@@ -59,6 +59,7 @@ macro (seastar_find_dependencies)
     Snappy
     OpenSSL
     # Private and private/public dependencies.
+    ZLIB
     Concepts
     GnuTLS
     LinuxMembarrier

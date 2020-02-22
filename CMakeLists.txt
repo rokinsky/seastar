@@ -407,132 +407,148 @@ add_library (seastar STATIC
 
   #TODO [PQ] Move to a separate target/library/Cmake file
 #SOURCE FILES
-src/parquet/parquet/column_reader.cc
-src/parquet/parquet/column_scanner.cc
-src/parquet/parquet/column_writer.cc
-src/parquet/parquet/deprecated_io.cc
-src/parquet/parquet/encoding.cc
-src/parquet/parquet/encryption.cc
-src/parquet/parquet/encryption_internal.cc
-src/parquet/parquet/file_reader.cc
-src/parquet/parquet/file_writer.cc
-src/parquet/parquet/internal_file_decryptor.cc
-src/parquet/parquet/internal_file_encryptor.cc
-src/parquet/parquet/io.cc
-src/parquet/parquet/metadata.cc
-src/parquet/parquet/parquet_types.cc
-src/parquet/parquet/platform.cc
-src/parquet/parquet/printer.cc
-src/parquet/parquet/properties.cc
-src/parquet/parquet/schema.cc
-src/parquet/parquet/statistics.cc
-src/parquet/parquet/types.cc
-src/parquet/parquet/cql_reader.cc
-src/parquet/parquet/logical_schema.cc
-src/parquet/parquet/cql_schema.cc
-src/parquet/arrow/array.cc
-src/parquet/arrow/array/builder_base.cc
-src/parquet/arrow/array/builder_binary.cc
-src/parquet/arrow/array/builder_dict.cc
-src/parquet/arrow/array/builder_nested.cc
-src/parquet/arrow/array/builder_primitive.cc
-src/parquet/arrow/array/dict_internal.cc
-src/parquet/arrow/buffer.cc
-src/parquet/arrow/builder.cc
-src/parquet/arrow/compare.cc
-src/parquet/arrow/io/buffered.cc
-src/parquet/arrow/io/file.cc
-src/parquet/arrow/io/interfaces.cc
-src/parquet/arrow/io/memory.cc
-src/parquet/arrow/memory_pool.cc
-src/parquet/arrow/result.cc
-src/parquet/arrow/status.cc
-src/parquet/arrow/table.cc
-src/parquet/arrow/type.cc
-src/parquet/arrow/util/bit_util.cc
-src/parquet/arrow/util/compression.cc
-src/parquet/arrow/util/compression_snappy.cc
-src/parquet/arrow/util/int_util.cc
-src/parquet/arrow/util/io_util.cc
-src/parquet/arrow/util/key_value_metadata.cc
-src/parquet/arrow/util/logging.cc
-src/parquet/arrow/util/string_builder.cc
-src/parquet/arrow/util/utf8.cc
-src/parquet/arrow/visitor.cc
-#HEADER FILES
-include/seastar/parquet/parquet/column_page.h
-include/seastar/parquet/parquet/column_reader.h
-include/seastar/parquet/parquet/column_scanner.h
-include/seastar/parquet/parquet/column_writer.h
-include/seastar/parquet/parquet/deprecated_io.h
-include/seastar/parquet/parquet/encoding.h
-include/seastar/parquet/parquet/encryption.h
-include/seastar/parquet/parquet/encryption_internal.h
-include/seastar/parquet/parquet/exception.h
-include/seastar/parquet/parquet/file_reader.h
-include/seastar/parquet/parquet/file_writer.h
-include/seastar/parquet/parquet/internal_file_decryptor.h
-include/seastar/parquet/parquet/internal_file_encryptor.h
-include/seastar/parquet/parquet/io.h
-include/seastar/parquet/parquet/metadata.h
-include/seastar/parquet/parquet/platform.h
-include/seastar/parquet/parquet/printer.h
-include/seastar/parquet/parquet/properties.h
-include/seastar/parquet/parquet/schema.h
-include/seastar/parquet/parquet/schema_internal.h
-include/seastar/parquet/parquet/statistics.h
-include/seastar/parquet/parquet/thrift_internal.h
-include/seastar/parquet/parquet/types.h
-include/seastar/parquet/parquet/cql_reader.h
-include/seastar/parquet/parquet/logical_schema.h
-include/seastar/parquet/parquet/cql_schema.h
-include/seastar/parquet/arrow/array.h
-include/seastar/parquet/arrow/array/builder_base.h
-include/seastar/parquet/arrow/array/builder_binary.h
-include/seastar/parquet/arrow/array/builder_dict.h
-include/seastar/parquet/arrow/array/builder_nested.h
-include/seastar/parquet/arrow/array/builder_primitive.h
-include/seastar/parquet/arrow/array/builder_time.h
-include/seastar/parquet/arrow/array/dict_internal.h
-include/seastar/parquet/arrow/buffer.h
-include/seastar/parquet/arrow/buffer_builder.h
-include/seastar/parquet/arrow/builder.h
-include/seastar/parquet/arrow/compare.h
-include/seastar/parquet/arrow/io/buffered.h
-include/seastar/parquet/arrow/io/concurrency.h
-include/seastar/parquet/arrow/io/file.h
-include/seastar/parquet/arrow/io/interfaces.h
-include/seastar/parquet/arrow/io/memory.h
-include/seastar/parquet/arrow/memory_pool.h
-include/seastar/parquet/arrow/result.h
-include/seastar/parquet/arrow/status.h
-include/seastar/parquet/arrow/table.h
-include/seastar/parquet/arrow/type.h
-include/seastar/parquet/arrow/type_fwd.h
-include/seastar/parquet/arrow/type_traits.h
-include/seastar/parquet/arrow/util/bit_stream_utils.h
-include/seastar/parquet/arrow/util/bit_util.h
-include/seastar/parquet/arrow/util/bpacking.h
-include/seastar/parquet/arrow/util/checked_cast.h
-include/seastar/parquet/arrow/util/compression.h
-include/seastar/parquet/arrow/util/compression_snappy.h
-include/seastar/parquet/arrow/util/hashing.h
-include/seastar/parquet/arrow/util/int_util.h
-include/seastar/parquet/arrow/util/io_util.h
-include/seastar/parquet/arrow/util/key_value_metadata.h
-include/seastar/parquet/arrow/util/logging.h
-include/seastar/parquet/arrow/util/macros.h
-include/seastar/parquet/arrow/util/rle_encoding.h
-include/seastar/parquet/arrow/util/stl.h
-include/seastar/parquet/arrow/util/string_builder.h
-include/seastar/parquet/arrow/util/string_view.h
-include/seastar/parquet/arrow/util/type_traits.h
-include/seastar/parquet/arrow/util/ubsan.h
-include/seastar/parquet/arrow/util/utf8.h
-include/seastar/parquet/arrow/util/variant.h
-include/seastar/parquet/arrow/util/visibility.h
-include/seastar/parquet/arrow/visitor.h
-include/seastar/parquet/arrow/visitor_inline.h
+# src/parquet/parquet/column_reader.cc
+# src/parquet/parquet/column_scanner.cc
+# src/parquet/parquet/column_writer.cc
+# src/parquet/parquet/deprecated_io.cc
+# src/parquet/parquet/encoding.cc
+# src/parquet/parquet/encryption.cc
+# src/parquet/parquet/encryption_internal.cc
+# src/parquet/parquet/file_reader.cc
+# src/parquet/parquet/file_writer.cc
+# src/parquet/parquet/internal_file_decryptor.cc
+# src/parquet/parquet/internal_file_encryptor.cc
+# src/parquet/parquet/io.cc
+# src/parquet/parquet/metadata.cc
+# src/parquet/parquet/parquet_types.cc
+# src/parquet/parquet/platform.cc
+# src/parquet/parquet/printer.cc
+# src/parquet/parquet/properties.cc
+# src/parquet/parquet/schema.cc
+# src/parquet/parquet/statistics.cc
+# src/parquet/parquet/types.cc
+# src/parquet/parquet/cql_reader.cc
+# src/parquet/parquet/logical_schema.cc
+# src/parquet/parquet/cql_schema.cc
+# src/parquet/arrow/array.cc
+# src/parquet/arrow/array/builder_base.cc
+# src/parquet/arrow/array/builder_binary.cc
+# src/parquet/arrow/array/builder_dict.cc
+# src/parquet/arrow/array/builder_nested.cc
+# src/parquet/arrow/array/builder_primitive.cc
+# src/parquet/arrow/array/dict_internal.cc
+# src/parquet/arrow/buffer.cc
+# src/parquet/arrow/builder.cc
+# src/parquet/arrow/compare.cc
+# src/parquet/arrow/io/buffered.cc
+# src/parquet/arrow/io/file.cc
+# src/parquet/arrow/io/interfaces.cc
+# src/parquet/arrow/io/memory.cc
+# src/parquet/arrow/memory_pool.cc
+# src/parquet/arrow/result.cc
+# src/parquet/arrow/status.cc
+# src/parquet/arrow/table.cc
+# src/parquet/arrow/type.cc
+# src/parquet/arrow/util/bit_util.cc
+# src/parquet/arrow/util/compression.cc
+# src/parquet/arrow/util/compression_snappy.cc
+# src/parquet/arrow/util/int_util.cc
+# src/parquet/arrow/util/io_util.cc
+# src/parquet/arrow/util/key_value_metadata.cc
+# src/parquet/arrow/util/logging.cc
+# src/parquet/arrow/util/string_builder.cc
+# src/parquet/arrow/util/utf8.cc
+# src/parquet/arrow/visitor.cc
+# #HEADER FILES
+# include/seastar/parquet/parquet/column_page.h
+# include/seastar/parquet/parquet/column_reader.h
+# include/seastar/parquet/parquet/column_scanner.h
+# include/seastar/parquet/parquet/column_writer.h
+# include/seastar/parquet/parquet/deprecated_io.h
+# include/seastar/parquet/parquet/encoding.h
+# include/seastar/parquet/parquet/encryption.h
+# include/seastar/parquet/parquet/encryption_internal.h
+# include/seastar/parquet/parquet/exception.h
+# include/seastar/parquet/parquet/file_reader.h
+# include/seastar/parquet/parquet/file_writer.h
+# include/seastar/parquet/parquet/internal_file_decryptor.h
+# include/seastar/parquet/parquet/internal_file_encryptor.h
+# include/seastar/parquet/parquet/io.h
+# include/seastar/parquet/parquet/metadata.h
+# include/seastar/parquet/parquet/platform.h
+# include/seastar/parquet/parquet/printer.h
+# include/seastar/parquet/parquet/properties.h
+# include/seastar/parquet/parquet/schema.h
+# include/seastar/parquet/parquet/schema_internal.h
+# include/seastar/parquet/parquet/statistics.h
+# include/seastar/parquet/parquet/thrift_internal.h
+# include/seastar/parquet/parquet/types.h
+# include/seastar/parquet/parquet/cql_reader.h
+# include/seastar/parquet/parquet/logical_schema.h
+# include/seastar/parquet/parquet/cql_schema.h
+# include/seastar/parquet/arrow/array.h
+# include/seastar/parquet/arrow/array/builder_base.h
+# include/seastar/parquet/arrow/array/builder_binary.h
+# include/seastar/parquet/arrow/array/builder_dict.h
+# include/seastar/parquet/arrow/array/builder_nested.h
+# include/seastar/parquet/arrow/array/builder_primitive.h
+# include/seastar/parquet/arrow/array/builder_time.h
+# include/seastar/parquet/arrow/array/dict_internal.h
+# include/seastar/parquet/arrow/buffer.h
+# include/seastar/parquet/arrow/buffer_builder.h
+# include/seastar/parquet/arrow/builder.h
+# include/seastar/parquet/arrow/compare.h
+# include/seastar/parquet/arrow/io/buffered.h
+# include/seastar/parquet/arrow/io/concurrency.h
+# include/seastar/parquet/arrow/io/file.h
+# include/seastar/parquet/arrow/io/interfaces.h
+# include/seastar/parquet/arrow/io/memory.h
+# include/seastar/parquet/arrow/memory_pool.h
+# include/seastar/parquet/arrow/result.h
+# include/seastar/parquet/arrow/status.h
+# include/seastar/parquet/arrow/table.h
+# include/seastar/parquet/arrow/type.h
+# include/seastar/parquet/arrow/type_fwd.h
+# include/seastar/parquet/arrow/type_traits.h
+# include/seastar/parquet/arrow/util/bit_stream_utils.h
+# include/seastar/parquet/arrow/util/bit_util.h
+# include/seastar/parquet/arrow/util/bpacking.h
+# include/seastar/parquet/arrow/util/checked_cast.h
+# include/seastar/parquet/arrow/util/compression.h
+# include/seastar/parquet/arrow/util/compression_snappy.h
+# include/seastar/parquet/arrow/util/hashing.h
+# include/seastar/parquet/arrow/util/int_util.h
+# include/seastar/parquet/arrow/util/io_util.h
+# include/seastar/parquet/arrow/util/key_value_metadata.h
+# include/seastar/parquet/arrow/util/logging.h
+# include/seastar/parquet/arrow/util/macros.h
+# include/seastar/parquet/arrow/util/rle_encoding.h
+# include/seastar/parquet/arrow/util/stl.h
+# include/seastar/parquet/arrow/util/string_builder.h
+# include/seastar/parquet/arrow/util/string_view.h
+# include/seastar/parquet/arrow/util/type_traits.h
+# include/seastar/parquet/arrow/util/ubsan.h
+# include/seastar/parquet/arrow/util/utf8.h
+# include/seastar/parquet/arrow/util/variant.h
+# include/seastar/parquet/arrow/util/visibility.h
+# include/seastar/parquet/arrow/visitor.h
+# include/seastar/parquet/arrow/visitor_inline.h
+
+include/seastar/parquet/bpacking.hh
+include/seastar/parquet/cql_reader.hh
+include/seastar/parquet/cql_schema.hh
+include/seastar/parquet/exception.hh
+include/seastar/parquet/file_reader.hh
+include/seastar/parquet/parquet_types.h
+include/seastar/parquet/rle_encoding.hh
+include/seastar/parquet/schema.hh
+src/parquet/compression.cc
+src/parquet/compression.hh
+src/parquet/cql_reader.cc
+src/parquet/cql_schema.cc
+src/parquet/file_reader.cc
+src/parquet/parquet_types.cpp
+src/parquet/schema.cc
 
   include/seastar/core/abort_source.hh
   include/seastar/core/alien.hh
@@ -820,6 +836,7 @@ target_link_libraries (seastar
     OpenSSL::Crypto
   PRIVATE
     ${CMAKE_DL_LIBS}
+    ZLIB::ZLIB
     Boost::filesystem
     GnuTLS::gnutls
     StdAtomic::atomic
