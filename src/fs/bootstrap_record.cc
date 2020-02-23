@@ -21,9 +21,8 @@
 
 #include "fs/bootstrap_record.hh"
 #include "fs/crc.hh"
-
-#include <seastar/core/units.hh>
-#include <seastar/core/print.hh>
+#include "seastar/core/print.hh"
+#include "seastar/core/units.hh"
 
 namespace seastar::fs {
 
