@@ -189,6 +189,7 @@ class metadata_log_bootstrap {
         });
     }
 
+    // Returns whether reading and checking was successful
     bool read_and_check_checkpoint() {
         ondisk_type entry_type;
         ondisk_checkpoint checkpoint;
