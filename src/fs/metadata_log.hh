@@ -33,6 +33,7 @@
 #include "seastar/core/file-types.hh"
 #include "seastar/core/future-util.hh"
 #include "seastar/core/future.hh"
+#include "seastar/core/semaphore.hh"
 #include "seastar/core/shared_future.hh"
 #include "seastar/core/shared_ptr.hh"
 #include "seastar/core/sstring.hh"
@@ -82,19 +83,39 @@ class metadata_log {
     block_device _device;
     const unit_size_t _cluster_size;
     const unit_size_t _alignment;
+
     // Takes care of writing current cluster of serialized metadata log entries to device
     lw_shared_ptr<metadata_to_disk_buffer> _curr_cluster_buff;
     shared_future<> _previous_flushes = now();
+    static constexpr bool align_after_flush = true;
 
     // In memory metadata
     cluster_allocator _cluster_allocator;
     std::map<inode_t, inode_info> _inodes;
-    value_shared_lock<inode_t> _inode_locks;
-    value_shared_lock<std::pair<inode_t, sstring>> _dir_entry_locks;
     inode_t _root_dir;
     shard_inode_allocator _inode_allocator;
 
-    static constexpr bool align_after_flush = true;
+    // Locks used to ensure metadata consistency while allowing concurrent usage.
+    // Whenever one wants to create or delete inode or directory entry _create_or_delete_lock have to be acquired first.
+    // Then appropriate unique lock for the inode / dir entry that will appear / disappear and after that the operation should take place.
+    // Shared locks should be used only to ensure that an inode / dir entry won't disappear / appear, while some action is performed.
+    // All this is to ensure we won't end up with a deadlock and that assumptions can be "acquired" about inode's / dir entry's
+    // existence without constant checking for it. We assume that inode / dir entry creation / deletion are not the primary
+    // operations that take place, so a global lock can be used for them. Other operations use shared locks to maximize concurrency.
+    // E.g.
+    // To create file, _create_or_delete_lock is acquired first, then corresponding dir entry is unique-locked and finally
+    // file creation is performed (notice that we do not have to acquire shared lock on the directory to which we add entry because
+    // we hold global lock, so it won't disappear in the meantime).
+    // To make a read or write to a file, a shared lock is acquired on its inode and then the operation is performed.
+    // Motivation:
+    // Global unique lock ensures that only one operation using unique locks on inode / dir entry takes place at any time.
+    // "Local" unique locks ensure that resource is not used by anyone else. Regarding deadlocks, the only place for
+    // a deadlock to appear is while unique lock is taken on an inode / dir entry. As far as, the operation holding global lock
+    // acquires only one locks it's all good. If two are acquired at the same time, an extreme caution should be used and
+    // if possible two unique locks should be avoided.
+    value_shared_lock<inode_t> _inode_locks;
+    value_shared_lock<std::pair<inode_t, sstring>> _dir_entry_locks;
+    semaphore _create_or_delete_lock {1};
 
     // TODO: for compaction: keep some set(?) of inode_data_vec, so that we can keep track of clusters that have lowest utilization (up-to-date data)
     // TODO: for compaction: keep estimated metadata log size (that would take when written to disk) and the real size of metadata log taken on disk to allow for detecting when compaction
