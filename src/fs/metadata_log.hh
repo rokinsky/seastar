@@ -94,6 +94,8 @@ class metadata_log {
     inode_t _root_dir;
     shard_inode_allocator _inode_allocator;
 
+    static constexpr bool align_after_flush = true;
+
     // TODO: for compaction: keep some set(?) of inode_data_vec, so that we can keep track of clusters that have lowest utilization (up-to-date data)
     // TODO: for compaction: keep estimated metadata log size (that would take when written to disk) and the real size of metadata log taken on disk to allow for detecting when compaction
 

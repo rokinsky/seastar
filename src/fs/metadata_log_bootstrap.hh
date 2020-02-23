@@ -135,7 +135,7 @@ class metadata_log_bootstrap {
             }).then([this, &last_cluster] {
                 // Initialize _curr_cluster_buff
                 _metadata_log._curr_cluster_buff = make_lw_shared<metadata_to_disk_buffer>(_metadata_log._cluster_size, _metadata_log._alignment, 0);
-                _metadata_log._curr_cluster_buff->reset_from_bootstraped_cluster(cluster_id_to_offset(last_cluster, _metadata_log._cluster_size), _curr_cluster_data.get(), _curr_cluster.curr_pos(), true);
+                _metadata_log._curr_cluster_buff->reset_from_bootstraped_cluster(cluster_id_to_offset(last_cluster, _metadata_log._cluster_size), _curr_cluster_data.get(), _curr_cluster.curr_pos(), metadata_log::align_after_flush);
             });
         }).then([this, fs_shards_pool_size, fs_shard_id] {
             // Initialize _cluser_allocator
