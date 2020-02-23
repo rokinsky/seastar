@@ -26,13 +26,13 @@
 #include "fs/inode_info.hh"
 #include "fs/metadata_disk_entries.hh"
 #include "fs/units.hh"
-#include "metadata_log.hh"
+#include "fs/metadata_log.hh"
 #include "seastar/core/do_with.hh"
 #include "seastar/core/future-util.hh"
 #include "seastar/core/future.hh"
 #include "seastar/core/sstring.hh"
 #include "seastar/core/temporary_buffer.hh"
-#include <bits/stdint-uintn.h>
+
 #include <boost/crc.hpp>
 #include <cstddef>
 #include <cstring>
@@ -61,7 +61,7 @@ public:
             return false;
         }
 
-        memcpy(destination, _data + _pos, size);
+        std::memcpy(destination, _data + _pos, size);
         _pos += size;
         return true;
     }
@@ -111,7 +111,7 @@ class metadata_log_bootstrap {
     metadata_log& _metadata_log;
     cluster_range _available_clusters;
     std::unordered_set<cluster_id_t> _taken_clusters;
-    std::optional<inode_t> _next_cluster;
+    std::optional<cluster_id_t> _next_cluster;
     temporary_buffer<uint8_t> _curr_cluster_data;
     data_reader _curr_cluster;
     data_reader _curr_checkpoint;
@@ -135,7 +135,7 @@ class metadata_log_bootstrap {
             }).then([this, &last_cluster] {
                 // Initialize _curr_cluster_buff
                 _metadata_log._curr_cluster_buff = make_lw_shared<metadata_to_disk_buffer>(_metadata_log._cluster_size, _metadata_log._alignment, 0);
-                _metadata_log._curr_cluster_buff->reset_from_bootstraped_cluster(cluster_id_to_offset(last_cluster, _metadata_log._cluster_size), _curr_cluster_data.get(), _curr_cluster.curr_pos(), metadata_log::align_after_flush);
+                _metadata_log._curr_cluster_buff->reset_from_bootstrapped_cluster(cluster_id_to_offset(last_cluster, _metadata_log._cluster_size), _curr_cluster_data.get(), _curr_cluster.curr_pos(), metadata_log::align_after_flush);
             });
         }).then([this, fs_shards_pool_size, fs_shard_id] {
             // Initialize _cluser_allocator
@@ -268,6 +268,10 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
+        if (_next_cluster.has_value()) {
+            return invalid_entry_exception(); // Only one NEXT_METADATA_CLUSTER may appear in one cluster
+        }
+
         _next_cluster = (cluster_id_t)entry.cluster_id;
         return now();
     }
@@ -292,7 +296,7 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
-        _metadata_log._inodes[entry.inode].metadata = ondisk_metadata_to_metadata(entry.metadata);
+        _metadata_log.memory_only_update_metadata(entry.inode, ondisk_metadata_to_metadata(entry.metadata));
         return now();
     }
 
@@ -307,7 +311,7 @@ class metadata_log_bootstrap {
             return invalid_entry_exception(); // Only unlinked inodes may be deleted
         }
 
-        if (std::holds_alternative<inode_info::directory>(inode_info.contents) and not std::get<inode_info::directory>(inode_info.contents).entries.empty()) {
+        if (inode_info.is_directory() and not inode_info.get_directory().entries.empty()) {
             return invalid_entry_exception(); // Only empty directories may be deleted
         }
 
@@ -321,15 +325,15 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
+        if (not _metadata_log._inodes[entry.inode].is_file()) {
+            return invalid_entry_exception();
+        }
+
         auto data_opt = _curr_checkpoint.read_tmp_buff(entry.length);
         if (not data_opt) {
             return invalid_entry_exception();
         }
         temporary_buffer<uint8_t>& data = *data_opt;
-
-        if (not std::holds_alternative<inode_info::file>(_metadata_log._inodes[entry.inode].contents)) {
-            return invalid_entry_exception();
-        }
 
         _metadata_log.memory_only_small_write(entry.inode, entry.offset, std::move(data));
         _metadata_log.memory_only_update_mtime(entry.inode, entry.mtime_ns);
@@ -337,18 +341,21 @@ class metadata_log_bootstrap {
     }
 
     future<> bootstrap_medium_write() {
+        // TODO: update _taken_clusters
         // TODO: will be very similar to SMALL_WRITE
         assert(false && "Not implemented");
         return now();
     }
 
     future<> bootstrap_large_write() {
+        // TODO: update _taken_clusters
         // TODO: will be very similar to SMALL_WRITE
         assert(false && "Not implemented");
         return now();
     }
 
     future<> bootstrap_large_write_without_mtime() {
+        // TODO: update _taken_clusters
         // TODO: will be very similar to SMALL_WRITE
         assert(false && "Not implemented");
         return now();
@@ -360,7 +367,7 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
-        if (not std::holds_alternative<inode_info::file>(_metadata_log._inodes[entry.inode].contents)) {
+        if (not _metadata_log._inodes[entry.inode].is_file()) {
             return invalid_entry_exception();
         }
 
@@ -391,14 +398,14 @@ class metadata_log_bootstrap {
         }
 
         // Only files may be linked as not to create cycles
-        if (not std::holds_alternative<inode_info::file>(_metadata_log._inodes[entry.entry_inode].contents)) {
+        if (not _metadata_log._inodes[entry.entry_inode].is_file()) {
             return invalid_entry_exception();
         }
 
-        if (not std::holds_alternative<inode_info::directory>(_metadata_log._inodes[entry.dir_inode].contents)) {
+        if (not _metadata_log._inodes[entry.dir_inode].is_directory()) {
             return invalid_entry_exception();
         }
-        auto& dir = std::get<inode_info::directory>(_metadata_log._inodes[entry.dir_inode].contents);
+        auto& dir = _metadata_log._inodes[entry.dir_inode].get_directory();
 
         if (dir.entries.count(dir_entry_name) != 0) {
             return invalid_entry_exception();
@@ -420,10 +427,10 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
-        if (not std::holds_alternative<inode_info::directory>(_metadata_log._inodes[entry.dir_inode].contents)) {
+        if (not _metadata_log._inodes[entry.dir_inode].is_directory()) {
             return invalid_entry_exception();
         }
-        auto& dir = std::get<inode_info::directory>(_metadata_log._inodes[entry.dir_inode].contents);
+        auto& dir = _metadata_log._inodes[entry.dir_inode].get_directory();
 
         if (dir.entries.count(dir_entry_name) != 0) {
             return invalid_entry_exception();
@@ -446,17 +453,13 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
-        if (not std::holds_alternative<inode_info::directory>(_metadata_log._inodes[entry.dir_inode].contents)) {
+        if (not _metadata_log._inodes[entry.dir_inode].is_directory()) {
             return invalid_entry_exception();
         }
-        auto& dir = std::get<inode_info::directory>(_metadata_log._inodes[entry.dir_inode].contents);
+        auto& dir = _metadata_log._inodes[entry.dir_inode].get_directory();
 
         auto it = dir.entries.find(dir_entry_name);
         if (it == dir.entries.end()) {
-            return invalid_entry_exception();
-        }
-
-        if (_metadata_log._inodes.at(it->second).directories_containing_file == 0) {
             return invalid_entry_exception();
         }
 

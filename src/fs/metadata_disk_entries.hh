@@ -21,9 +21,9 @@
 
 #pragma once
 
-#include "cluster.hh"
-#include "inode.hh"
-#include "unix_metadata.hh"
+#include "fs/cluster.hh"
+#include "fs/inode.hh"
+#include "fs/unix_metadata.hh"
 
 namespace seastar::fs {
 

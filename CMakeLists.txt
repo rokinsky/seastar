@@ -494,7 +494,6 @@ add_library (seastar STATIC
   include/seastar/fs/block_device.hh
   include/seastar/fs/file.hh
   include/seastar/fs/overloaded.hh
-  include/seastar/fs/path.hh
   include/seastar/fs/temporary_file.hh
   include/seastar/http/api_docs.hh
   include/seastar/http/common.hh
@@ -621,6 +620,7 @@ add_library (seastar STATIC
   src/fs/metadata_log_bootstrap.hh
   src/fs/metadata_log_operations/create_file.hh
   src/fs/metadata_to_disk_buffer.hh
+  src/fs/path.hh
   src/fs/range.hh
   src/fs/to_disk_buffer.hh
   src/fs/units.hh

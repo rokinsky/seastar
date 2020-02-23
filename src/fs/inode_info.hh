@@ -21,12 +21,12 @@
 
 #pragma once
 
-#include "inode.hh"
+#include "fs/inode.hh"
+#include "fs/units.hh"
+#include "fs/unix_metadata.hh"
 #include "seastar/core/sstring.hh"
 #include "seastar/core/temporary_buffer.hh"
 #include "seastar/fs/overloaded.hh"
-#include "units.hh"
-#include "unix_metadata.hh"
 
 #include <map>
 #include <variant>
@@ -131,6 +131,22 @@ struct inode_info {
     };
 
     std::variant<directory, file> contents;
+
+    constexpr bool is_directory() const noexcept { return std::holds_alternative<directory>(contents); }
+
+    // These are noexcept because invalid access is a bug not an error
+    constexpr directory& get_directory() & noexcept { return std::get<directory>(contents); }
+    constexpr const directory& get_directory()  const & noexcept { return std::get<directory>(contents); }
+    constexpr directory&& get_directory() && noexcept { return std::move(std::get<directory>(contents)); }
+    constexpr const directory&& get_directory() const && noexcept { return std::move(std::get<directory>(contents)); }
+
+    constexpr bool is_file() const noexcept { return std::holds_alternative<file>(contents); }
+
+    // These are noexcept because invalid access is a bug not an error
+    constexpr file& get_file() & noexcept { return std::get<file>(contents); }
+    constexpr const file& get_file()  const & noexcept { return std::get<file>(contents); }
+    constexpr file&& get_file() && noexcept { return std::move(std::get<file>(contents)); }
+    constexpr const file&& get_file() const && noexcept { return std::move(std::get<file>(contents)); }
 };
 
 } // namespace seastar::fs

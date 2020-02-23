@@ -21,11 +21,11 @@
 
 #pragma once
 
-#include "bitwise.hh"
+#include "fs/bitwise.hh"
+#include "fs/units.hh"
 #include "seastar/core/future.hh"
 #include "seastar/core/temporary_buffer.hh"
 #include "seastar/fs/block_device.hh"
-#include "units.hh"
 
 #include <cstring>
 
@@ -40,7 +40,7 @@ protected:
     size_t _zero_padded_end; // Optimization to skip padding before write if it is already done
 
 public:
-    // Represents buffer that will be written to a block_device at offset @p disk_alligned_write_offset. Total number of bytes appended cannot exceed @p aligned_max_size.
+    // Represents buffer that will be written to a block_device at offset @p disk_aligned_write_offset. Total number of bytes appended cannot exceed @p aligned_max_size.
     to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
     : _buff(decltype(_buff)::aligned(alignment, aligned_max_size))
     , _alignment(alignment)
@@ -122,7 +122,7 @@ protected:
 public:
     virtual void append_bytes(const void* data, size_t len) noexcept {
         assert(len <= bytes_left());
-        memcpy(_buff.get_write() + _unflushed_data.end, data, len);
+        std::memcpy(_buff.get_write() + _unflushed_data.end, data, len);
         _unflushed_data.end += len;
     }
 
