@@ -44,10 +44,7 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
-#include <pthread.h>
-#include <seastar/core/units.hh>
 #include <stdexcept>
-#include <unistd.h>
 #include <unordered_set>
 #include <variant>
 
