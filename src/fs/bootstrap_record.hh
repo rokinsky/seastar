@@ -23,9 +23,9 @@
 
 #include "fs/cluster.hh"
 #include "fs/inode.hh"
+#include "seastar/fs/block_device.hh"
 
 #include <exception>
-#include <seastar/fs/block_device.hh>
 
 namespace seastar::fs {
 

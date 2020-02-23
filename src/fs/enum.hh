@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include <seastar/core/file.hh>
+#include "seastar/core/file.hh"
 
 namespace seastar::fs {
 

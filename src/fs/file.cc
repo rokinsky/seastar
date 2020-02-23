@@ -19,9 +19,9 @@
  * Copyright (C) 2019 ScyllaDB
  */
 
-#include <seastar/core/future.hh>
-#include <seastar/fs/block_device.hh>
-#include <seastar/fs/file.hh>
+#include "seastar/core/future.hh"
+#include "seastar/fs/block_device.hh"
+#include "seastar/fs/file.hh"
 
 namespace seastar::fs {
 
