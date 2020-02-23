@@ -21,9 +21,9 @@
 
 #pragma once
 
-#include <seastar/core/sstring.hh>
+#include "seastar/core/sstring.hh"
 
-namespace seastar {
+namespace seastar::fs {
 
 // Returns the last component in @p path. WARNING: The last component is empty iff @p path is empty or ends with '/'
 sstring last_component(const sstring& path) {
@@ -34,4 +34,4 @@ sstring last_component(const sstring& path) {
     return path.substr(beg + 1);
 }
 
-} // namespace seastar
+} // namespace seastar::fs

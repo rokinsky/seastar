@@ -21,8 +21,8 @@
 
 #pragma once
 
-#include "bitwise.hh"
-#include "units.hh"
+#include "fs/bitwise.hh"
+#include "fs/units.hh"
 
 #include <cstdint>
 #include <optional>

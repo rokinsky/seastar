@@ -28,6 +28,7 @@
 #include "fs/metadata_log_bootstrap.hh"
 #include "fs/metadata_log_operations/create_file.hh"
 #include "fs/metadata_to_disk_buffer.hh"
+#include "fs/path.hh"
 #include "fs/unix_metadata.hh"
 #include "seastar/core/aligned_buffer.hh"
 #include "seastar/core/do_with.hh"
@@ -36,9 +37,7 @@
 #include "seastar/core/future.hh"
 #include "seastar/core/shared_mutex.hh"
 #include "seastar/fs/overloaded.hh"
-#include "seastar/fs/path.hh"
 
-#include <bits/stdint-uintn.h>
 #include <boost/crc.hpp>
 #include <boost/range/irange.hpp>
 #include <chrono>
@@ -83,6 +82,12 @@ void metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, un
     });
 }
 
+void metadata_log::memory_only_update_metadata(inode_t inode, unix_metadata metadata) {
+    auto it = _inodes.find(inode);
+    assert(it != _inodes.end());
+    it->second.metadata = std::move(metadata);
+}
+
 void metadata_log::memory_only_delete_inode(inode_t inode) {
     auto it = _inodes.find(inode);
     assert(it != _inodes.end());
@@ -109,8 +114,8 @@ void metadata_log::memory_only_small_write(inode_t inode, disk_offset_t offset, 
 
     auto it = _inodes.find(inode);
     assert(it != _inodes.end());
-    assert(std::holds_alternative<inode_info::file>(it->second.contents));
-    write_update(std::get<inode_info::file>(it->second.contents), std::move(data_vec));
+    assert(it->second.is_file());
+    write_update(it->second.get_file(), std::move(data_vec));
 }
 
 void metadata_log::memory_only_update_mtime(inode_t inode, decltype(unix_metadata::mtime_ns) mtime_ns) {
@@ -122,8 +127,8 @@ void metadata_log::memory_only_update_mtime(inode_t inode, decltype(unix_metadat
 void metadata_log::memory_only_truncate(inode_t inode, disk_offset_t size) {
     auto it = _inodes.find(inode);
     assert(it != _inodes.end());
-    assert(std::holds_alternative<inode_info::file>(it->second.contents));
-    auto& file = std::get<inode_info::file>(it->second.contents);
+    assert(it->second.is_file());
+    auto& file = it->second.get_file();
 
     auto file_size = file.size();
     if (size > file_size) {
@@ -144,7 +149,7 @@ void metadata_log::memory_only_add_dir_entry(inode_info::directory& dir, inode_t
     auto it = _inodes.find(entry_inode);
     assert(it != _inodes.end());
     // Directory may only be linked once (to avoid creating cycles)
-    assert(not std::holds_alternative<inode_info::directory>(it->second.contents) or it->second.directories_containing_file == 0);
+    assert(not it->second.is_directory() or it->second.directories_containing_file == 0);
 
     bool inserted = dir.entries.emplace(std::move(entry_name), entry_inode).second;
     assert(inserted);
@@ -183,6 +188,7 @@ future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
     auto next_cluster = _cluster_allocator.alloc();
     if (not next_cluster) {
         // Here metadata log dies, we cannot even flush current cluster because from there we won't be able to recover
+        // TODO: ^ add protection from it and take it into account during compaction
         return make_exception_future(no_more_space_exception());
     }
 
@@ -250,8 +256,8 @@ std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup
         } else {
             auto dir_it = _inodes.find(components_stack.back());
             assert(dir_it != _inodes.end() and "inode comes from some previous lookup (or is a root directory) hence dir_it has to be valid");
-            assert(std::holds_alternative<inode_info::directory>(dir_it->second.contents) and "every previous component is a directory and it was checked when they were processed");
-            auto& curr_dir = std::get<inode_info::directory>(dir_it->second.contents);
+            assert(dir_it->second.is_directory() and "every previous component is a directory and it was checked when they were processed");
+            auto& curr_dir = dir_it->second.get_directory();
 
             auto it = curr_dir.entries.find(component);
             if (it == curr_dir.entries.end()) {
@@ -262,7 +268,7 @@ std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup
             if (check_if_dir) {
                 auto entry_it = _inodes.find(entry_inode);
                 assert(entry_it != _inodes.end() and "dir entries have to exist");
-                if (not std::holds_alternative<inode_info::directory>(entry_it->second.contents)) {
+                if (not entry_it->second.is_directory()) {
                     return path_lookup_error::NOT_DIR;
                 }
             }

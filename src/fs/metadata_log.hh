@@ -139,6 +139,8 @@ public:
 private:
     void memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata);
 
+    void memory_only_update_metadata(inode_t inode, unix_metadata metadata);
+
     void memory_only_delete_inode(inode_t inode);
 
     void memory_only_small_write(inode_t inode, disk_offset_t offset, temporary_buffer<uint8_t> data);
@@ -207,7 +209,7 @@ public:
                 if (it == _inodes.end()) {
                     return now(); // Directory disappeared
                 }
-                if (not std::holds_alternative<inode_info::directory>(it->second.contents)) {
+                if (not it->second.is_directory()) {
                     return make_exception_future(path_component_not_directory());
                 }
 
@@ -216,10 +218,10 @@ public:
                     if (it == _inodes.end()) {
                         return make_ready_future<stop_iteration>(stop_iteration::yes); // Directory disappeared
                     }
-                    if (not std::holds_alternative<inode_info::directory>(it->second.contents)) {
-                        return make_ready_future<stop_iteration>(stop_iteration::yes); // Directory became a file (should not happen, but safe-check)
+                    if (not it->second.is_directory()) {
+                        return make_ready_future<stop_iteration>(stop_iteration::yes); // Directory became a file
                     }
-                    auto& dir = std::get<inode_info::directory>(it->second.contents);
+                    auto& dir = it->second.get_directory();
 
                     auto entry_it = dir.entries.upper_bound(prev_entry);
                     if (entry_it == dir.entries.end()) {

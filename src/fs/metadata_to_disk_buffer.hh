@@ -21,9 +21,9 @@
 
 #pragma once
 
-#include "bitwise.hh"
-#include "metadata_disk_entries.hh"
-#include "to_disk_buffer.hh"
+#include "fs/bitwise.hh"
+#include "fs/metadata_disk_entries.hh"
+#include "fs/to_disk_buffer.hh"
 
 #include <boost/crc.hpp>
 
@@ -33,7 +33,7 @@ class metadata_to_disk_buffer : protected to_disk_buffer {
     boost::crc_32_type _crc;
 
 public:
-    // Represents buffer that will be written to a block_device at offset @p disk_alligned_write_offset. Total number of bytes appended cannot exceed @p aligned_max_size.
+    // Represents buffer that will be written to a block_device at offset @p disk_aligned_write_offset. Total number of bytes appended cannot exceed @p aligned_max_size.
     metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
     : to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset) {
         assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
@@ -42,14 +42,14 @@ public:
     using to_disk_buffer::reset;
 
     /**
-     * @brief Clears buffer, leaving it in state as if it was just constructed
+     * @brief Clears buffer, leaving it in state as if just after flushing with unflushed data end at @p cluster_beg_offset
      *
      * @param cluster_beg_offset disk offset of the beginning of the cluster
      * @param cluster_contents pointer to contents of the cluster
      * @param metadata_end_pos position at which valid metadata ends: valid metadata range: [0, @p metadata_end_pos)
      * @param align_before_buffering whether to align to beginning of the next unflushed data or set it to @p metadata_end_pos
      */
-    void reset_from_bootstraped_cluster(disk_offset_t cluster_beg_offset, const uint8_t* cluster_contents, size_t metadata_end_pos, bool align_before_buffering) noexcept {
+    void reset_from_bootstrapped_cluster(disk_offset_t cluster_beg_offset, const uint8_t* cluster_contents, size_t metadata_end_pos, bool align_before_buffering) noexcept {
         assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
         _disk_write_offset = cluster_beg_offset;
         _zero_padded_end = 0;
@@ -64,7 +64,7 @@ public:
                 round_down_to_multiple_of_power_of_2(_unflushed_data.beg, _alignment),
                 _unflushed_data.beg,
             };
-            memcpy(_buff.get_write() + to_copy.beg, cluster_contents + to_copy.beg, to_copy.size());
+            std::memcpy(_buff.get_write() + to_copy.beg, cluster_contents + to_copy.beg, to_copy.size());
         }
 
         if (bytes_left() > 0) {
@@ -94,8 +94,8 @@ private:
         _crc.process_bytes(&checkpoint.checkpointed_data_length, sizeof(checkpoint.checkpointed_data_length));
         checkpoint.crc32_code = _crc.checksum();
 
-        memcpy(_buff.get_write() + _unflushed_data.beg, &checkpoint_type, sizeof(checkpoint_type));
-        memcpy(_buff.get_write() + checkpoint_pos, &checkpoint, sizeof(checkpoint));
+        std::memcpy(_buff.get_write() + _unflushed_data.beg, &checkpoint_type, sizeof(checkpoint_type));
+        std::memcpy(_buff.get_write() + checkpoint_pos, &checkpoint, sizeof(checkpoint));
     }
 
 public:

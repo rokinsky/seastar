@@ -21,8 +21,8 @@
 
 #pragma once
 
-#include "../metadata_log.hh"
-#include "seastar/fs/path.hh"
+#include "fs/metadata_log.hh"
+#include "fs/path.hh"
 
 namespace seastar::fs {
 
@@ -71,8 +71,8 @@ class create_file_operation {
             return make_exception_future<inode_t>(operation_became_invalid_exception());
         }
 
-        assert(std::holds_alternative<inode_info::directory>(dir_it->second.contents));
-        _dir_info = &std::get<inode_info::directory>(dir_it->second.contents);
+        assert(dir_it->second.is_directory());
+        _dir_info = &dir_it->second.get_directory();
 
         return _metadata_log._dir_entry_locks.with_lock_on({_dir_inode, _entry_name}, [this] {
             return perform_3();
