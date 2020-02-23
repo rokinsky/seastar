@@ -120,13 +120,13 @@ SEASTAR_THREAD_TEST_CASE(aligned_unaligned_write_test) {
     dev.read<char>(0, buf.get_write(), len_aligned).get();
     strncpy(expected_buf.get_write(), "1234aaaaaaaaa", max_siz);
     BOOST_REQUIRE_EQUAL(strncmp(expected_buf.get(), buf.get(), len_aligned), 0);
-    
+
     disk_buf.append_bytes("asdfasdf", 6);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned-6);
     disk_buf.append_bytes("xyzxyzxyz", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned-15);
     disk_buf.flush_to_disk(dev, false).get();
-    memcpy(expected_buf.get_write()+len_aligned, "asdfasxyzxyzxyz", 15);
+    std::memcpy(expected_buf.get_write()+len_aligned, "asdfasxyzxyzxyz", 15);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned-15);
     len_aligned2 = round_up_to_multiple_of_power_of_2(len_aligned+15, alignment);
     dev.read<char>(0, buf.get_write(), len_aligned2).get();
@@ -240,7 +240,7 @@ SEASTAR_THREAD_TEST_CASE(combined_test) {
     BOOST_REQUIRE_EQUAL(strncmp(inp.get_write()+10, buf.get()+beg-beg_aligned, 8), 0);
     BOOST_REQUIRE_EQUAL(strncmp(inp.get_write()+20, buf.get()+beg-beg_aligned+8, 6), 0);
     BOOST_REQUIRE_EQUAL(strncmp(inp.get_write()+30, buf.get()+beg-beg_aligned+14, end_aligned-end), 0);
-    
+
     end = end_aligned;
     disk_buf.append_bytes(inp.get()+26, 4);
     end += 4;
