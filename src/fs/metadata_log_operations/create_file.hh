@@ -58,7 +58,8 @@ class create_file_operation {
         path.erase(path.end() - _entry_name.size(), path.end());
         return _metadata_log.futurized_path_lookup(path).then([this](inode_t dir_inode) {
             _dir_inode = dir_inode;
-            return _metadata_log._inode_locks.with_shared_on(dir_inode, [this] {
+            return with_semaphore(_metadata_log._create_or_delete_lock, 1, [this] {
+                // We do not have to shared lock dir_inode because we hold global lock
                 return perform_2();
             });
         });
