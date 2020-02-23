@@ -198,7 +198,16 @@ future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
 
 void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_vec) {
     // TODO: for compaction: update used inode_data_vec
-    cut_out_data_range(file, new_data_vec.data_range);
+    auto file_size = file.size();
+    if (file_size < new_data_vec.data_range.beg) {
+        file.data.emplace(file_size, inode_data_vec {
+            {file_size, new_data_vec.data_range.beg},
+            inode_data_vec::hole_data {}
+        });
+    } else {
+        cut_out_data_range(file, new_data_vec.data_range);
+    }
+
     file.data.emplace(new_data_vec.data_range.beg, std::move(new_data_vec));
 }
 
