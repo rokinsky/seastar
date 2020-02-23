@@ -63,6 +63,18 @@ struct filename_too_long_exception : public std::exception {
     const char* what() const noexcept { return "Filename too long"; }
 };
 
+struct path_is_not_absolute : public std::exception {
+    const char* what() const noexcept { return "Path is not absolute"; }
+};
+
+struct no_such_file_or_directory : public std::exception {
+    const char* what() const noexcept { return "No such file or directory"; }
+};
+
+struct path_component_not_directory : public std::exception {
+    const char* what() const noexcept { return "A component used as a directory is not a directory"; }
+};
+
 class metadata_log {
     block_device _device;
     const unit_size_t _cluster_size;
