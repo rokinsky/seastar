@@ -27,7 +27,6 @@ int main(int argc, char** argv) {
             });
 
             conn_handler.invoke_on_all(&connection_manager::start_server).get();
-
         }).or_terminate();
     });
     return 0;

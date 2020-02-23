@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <vector>
 
+using namespace std::string_literals;
 using std::vector;
 using std::string;
 using std::cerr;
@@ -88,13 +89,16 @@ int get_connection(const string& host, const string& port) noexcept {
     addrinfo addr_hints;
     addrinfo* addr_result;
 
-    memset(&addr_hints, 0, sizeof(addrinfo));
+    std::memset(&addr_hints, 0, sizeof(addrinfo));
     addr_hints.ai_family = AF_INET;
     addr_hints.ai_socktype = SOCK_STREAM;
     addr_hints.ai_protocol = IPPROTO_TCP;
     if (getaddrinfo(host.c_str(), port.c_str(), &addr_hints, &addr_result) != 0) {
         return -EINVAL;
     }
+    auto clean = finally([&] {
+        freeaddrinfo(addr_result);
+    });
 
     int sock;
     // TODO: set timeout on socket for connect and reads?
@@ -107,9 +111,6 @@ int get_connection(const string& host, const string& port) noexcept {
         return -errno;
     }
 
-
-    freeaddrinfo(addr_result);
-
     return sock;
 }
 
@@ -117,8 +118,7 @@ int get_server_answer(int fd) noexcept {
     int err;
     if (read_objects(fd, err)) {
         return -EIO;
-    }
-    if (err < 0) {
+    } else if (err < 0) {
         return err;
     }
     return 0;
@@ -139,7 +139,8 @@ int network_fs_getattr(const char* path, struct stat* stbuf,
         close(fd);
     });
 
-    if ((ret = write_objects(fd, string("getattr"), string(path))) < 0) {
+
+    if ((ret = write_objects(fd, fixed_buf_string("getattr"), fixed_buf_string(path))) < 0) {
         DEBUG("error while sending request, error=", std::strerror(-ret));
         return ret;
     }
@@ -175,7 +176,7 @@ int network_fs_readdir(const char* path, void* buf,
         close(fd);
     });
 
-    if ((ret = write_objects(fd, string("readdir"), string(path))) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("readdir"), fixed_buf_string(path))) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
@@ -211,7 +212,7 @@ int network_fs_open_helper(const char* path, int flags) {
         close(fd);
     };
 
-    if ((ret = write_objects(fd, string("open"), string(path), flags)) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("open"), fixed_buf_string(path), flags)) < 0) {
         clean();
         return ret;
     }
@@ -230,7 +231,7 @@ int network_fs_release_helper(int fd) {
     });
 
     int ret;
-    if ((ret = write_objects(fd, string("close"))) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("close"))) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
@@ -260,7 +261,7 @@ int network_fs_read(const char* path, char* buf, size_t size,
         }
     });
 
-    if ((ret = write_objects(fd, string("pread"), size, offset)) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("pread"), size, offset)) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
@@ -270,7 +271,7 @@ int network_fs_read(const char* path, char* buf, size_t size,
         return ret;
     }
 
-    fixed_buf_string buf_container{buf, 0};
+    fixed_buf_string buf_container(buf, 0);
     if ((ret = read_objects(fd, buf_container)) < 0) {
         DEBUG("couldn't receive an answer, error=", std::strerror(-ret));
         return ret;
@@ -293,7 +294,7 @@ int network_fs_mkdir(const char *path, mode_t mode) {
         close(fd);
     });
 
-    if ((ret = write_objects(fd, string("mkdir"), string(path), mode)) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("mkdir"), fixed_buf_string(path), mode)) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
@@ -320,7 +321,7 @@ int network_fs_unlink(const char *path) {
         close(fd);
     });
 
-    if ((ret = write_objects(fd, string("unlink"), string(path))) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("unlink"), fixed_buf_string(path))) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
@@ -348,7 +349,7 @@ int network_fs_rename(const char *from, const char *to, __attribute__((unused)) 
         close(fd);
     });
 
-    if ((ret = write_objects(fd, string("rename"), string(from), string(to))) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("rename"), fixed_buf_string(from), fixed_buf_string(to))) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
@@ -377,7 +378,7 @@ int network_fs_rmdir(const char *path) {
         close(fd);
     });
 
-    if ((ret = write_objects(fd, string("rmdir"), string(path))) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("rmdir"), fixed_buf_string(path))) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
@@ -421,7 +422,7 @@ int network_fs_truncate(const char *path, off_t size, __attribute__((unused)) st
         }
     });
 
-    if ((ret = write_objects(fd, string("truncate"), size)) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("truncate"), size)) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }
@@ -451,9 +452,7 @@ int network_fs_write(const char *path, const char *buf, size_t size, off_t offse
         }
     });
 
-    // TODO: is it ok to use that const_cast here?
-    fixed_buf_string buf_container{const_cast<char*>(buf), size};
-    if ((ret = write_objects(fd, string("pwrite"), buf_container, size, offset)) < 0) {
+    if ((ret = write_objects(fd, fixed_buf_string("pwrite"), fixed_buf_string(buf, size), size, offset)) < 0) {
         DEBUG("couldn't send request, error=", std::strerror(-ret));
         return ret;
     }

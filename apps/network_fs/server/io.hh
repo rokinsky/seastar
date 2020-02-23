@@ -44,6 +44,20 @@ seastar::future<> read_object(seastar::input_stream<char>& input, seastar::sstri
         });
     });
 }
+
+// temporary_buffer format - length:size_t string:char[]
+template <>
+inline
+seastar::future<> read_object(seastar::input_stream<char>& input, seastar::temporary_buffer<char>& buff) {
+    return seastar::do_with((size_t)0, [&input, &buff] (size_t& size) {
+        return read_object(input, size).then([&input, &size] () {
+            return input.read_exactly(size);
+        }).then([&buff] (seastar::temporary_buffer<char> tmp_buff) {
+            buff = std::move(tmp_buff);
+        });
+    });
+}
+
 template<typename... T>
 inline
 seastar::future<> read_objects(seastar::input_stream<char>& input, T&... objects) {
