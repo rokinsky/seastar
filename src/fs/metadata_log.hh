@@ -35,11 +35,14 @@
 #include "seastar/core/future.hh"
 #include "seastar/core/shared_future.hh"
 #include "seastar/core/shared_ptr.hh"
+#include "seastar/core/sstring.hh"
 #include "seastar/core/temporary_buffer.hh"
 
 #include <chrono>
 #include <cstddef>
 #include <exception>
+#include <type_traits>
+#include <variant>
 
 namespace seastar::fs {
 
@@ -161,7 +164,52 @@ private:
     future<inode_t> futurized_path_lookup(const sstring& path) const;
 
 public:
-    // TODO: add some way of iterating over a directory
+    template<class Func>
+    future<> iterate_directory(const sstring& dir_path, Func func) {
+        static_assert(std::is_invocable_r_v<future<>, Func, const sstring&> or std::is_invocable_r_v<future<stop_iteration>, Func, const sstring&>);
+        auto convert_func = [&]() -> decltype(auto) {
+            if constexpr (std::is_invocable_r_v<future<stop_iteration>, Func, const sstring&>) {
+                return std::move(func);
+            } else {
+                return [func = std::move(func)]() -> future<stop_iteration> {
+                    return func().then([] {
+                        return stop_iteration::no;
+                    });
+                };
+            }
+        };
+        return futurized_path_lookup(dir_path).then([this, func = convert_func()](inode_t dir_inode) {
+            return do_with(std::move(func), sstring {}, [this, dir_inode](auto& func, auto& prev_entry) {
+                auto it = _inodes.find(dir_inode);
+                if (it == _inodes.end()) {
+                    return now(); // Directory disappeared
+                }
+                if (not std::holds_alternative<inode_info::directory>(it->second.contents)) {
+                    return make_exception_future(path_component_not_directory());
+                }
+
+                return repeat([this, dir_inode, &prev_entry, &func] {
+                    auto it = _inodes.find(dir_inode);
+                    if (it == _inodes.end()) {
+                        return make_ready_future<stop_iteration>(stop_iteration::yes); // Directory disappeared
+                    }
+                    if (not std::holds_alternative<inode_info::directory>(it->second.contents)) {
+                        return make_ready_future<stop_iteration>(stop_iteration::yes); // Directory became a file (should not happen, but safe-check)
+                    }
+                    auto& dir = std::get<inode_info::directory>(it->second.contents);
+
+                    auto entry_it = dir.entries.upper_bound(prev_entry);
+                    if (entry_it == dir.entries.end()) {
+                        return make_ready_future<stop_iteration>(stop_iteration::yes); // No more entries
+                    }
+
+                    prev_entry = entry_it->first;
+                    return func(static_cast<const sstring&>(prev_entry));
+                });
+            });
+        });
+    }
+
     // TODO: add stat
 
     // Returns size of the file or throws exception iff @p inode is invalid
