@@ -7,9 +7,14 @@
 #include <utility>
 #include <vector>
 
+template<typename T>
 struct fixed_buf_string {
-    char* buf;
+    T* buff;
     size_t size;
+    fixed_buf_string(T* buff)
+        : buff(buff), size(std::strlen(buff)) {}
+    fixed_buf_string(T* buff, size_t size)
+        : buff(buff), size(size) {}
 };
 
 size_t read_exactly(int fd, size_t num, char* buff) noexcept {
@@ -55,7 +60,7 @@ int read_object(int fd, std::string& str) {
 }
 
 template <>
-int read_object(int fd, fixed_buf_string& str) {
+int read_object(int fd, fixed_buf_string<char>& str) {
     int ret = 0;
 
     size_t size;
@@ -64,7 +69,7 @@ int read_object(int fd, fixed_buf_string& str) {
     }
 
     size_t acc_read;
-    if ((acc_read = read_exactly(fd, size, str.buf)) != size) {
+    if ((acc_read = read_exactly(fd, size, str.buff)) != size) {
         return -EIO;
     }
     str.size = size;
@@ -131,12 +136,12 @@ int write_object(int fd, const std::string& str) noexcept {
 }
 
 template<>
-int write_object(int fd, const fixed_buf_string& str) noexcept {
+int write_object(int fd, const fixed_buf_string<const char>& str) noexcept {
     int ret = write_object(fd, str.size);
     if (ret) {
         return ret;
     }
-    return write_exactly(fd, str.buf, str.size) == str.size ? 0 : -EIO;
+    return write_exactly(fd, str.buff, str.size) == str.size ? 0 : -EIO;
 }
 
 template<typename... T>

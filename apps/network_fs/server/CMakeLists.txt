@@ -20,4 +20,9 @@
 # Copyright (C) 2020 Scylladb, Ltd.
 #
 
-add_subdirectory (server)
+seastar_add_app (network_fs_server
+  SOURCES
+    network_fs_server.cc
+    io.hh
+    connection_manager.hh
+    connection_manager.cc)

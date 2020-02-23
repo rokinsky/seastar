@@ -1,6 +1,11 @@
 #include "connection_manager.hh"
 #include "io.hh"
-#include "seastar/core/iostream.hh"
+
+#include <seastar/core/do_with.hh>
+#include <seastar/core/future-util.hh>
+#include <seastar/core/iostream.hh>
+#include <seastar/core/reactor.hh>
+#include <seastar/core/temporary_buffer.hh>
 
 #include <filesystem>
 #include <iostream>
@@ -35,6 +40,26 @@ future<> general_handler(output_stream<char>& output, std::exception_ptr e) {
     });
 }
 
+}
+
+seastar::future<> connection_manager::start_server() {
+    seastar::listen_options lo;
+    lo.reuse_address = true;
+    return seastar::do_with(seastar::engine().listen(
+            seastar::make_ipv4_address({_port}), lo), [this] (seastar::server_socket& listener) {
+        return seastar::keep_doing([this, &listener] () {
+            return listener.accept().then([this] (seastar::accept_result connection) {
+                auto conn = seastar::with_gate(_gate, [this, connection = std::move(connection)] () mutable {
+                    return handle_connection(
+                        std::move(connection.connection), std::move(connection.remote_address));
+                });
+            });
+        });
+    });
+}
+
+seastar::future<> connection_manager::stop() {
+    return _gate.close();
 }
 
 future<> connection_manager::handle_connection(connected_socket connection, socket_address remote_address) {
@@ -109,7 +134,7 @@ future<> connection_manager::handle_open(input_stream<char>& input, output_strea
         }
         return do_with(sstring(), 0, [this, &input, &output, &file] (sstring& path, int& flags) {
             return read_objects(input, path, flags).then([this, &file, &path, &flags] {
-                return open_file_dma(_root_dir + path, open_flags(flags)).then([&file] (auto new_file) {
+                return open_file_dma(_root_dir + path, static_cast<open_flags>(flags)).then([&file] (auto new_file) {
                     file = std::move(new_file);
                 });
             }).then([&output] {
@@ -137,7 +162,7 @@ future<> connection_manager::handle_close(output_stream<char>& output, file& fil
         }).then([&output] {
             return output.flush();
         }).then([&file] {
-            // can't open file after closing it, so we create new file
+            // can't open a file after closing it, so we create a new file
             file = seastar::file();
             cerr << "Sent reply for close operation" << endl;
         });
@@ -176,17 +201,20 @@ future<> connection_manager::handle_pwrite(input_stream<char>& input, output_str
         if (!file) {
             return make_exception_future(std::runtime_error("file not initialized"));
         }
-        return do_with(sstring(), (size_t)0, (off_t)0,
-                [&input, &output, &file] (sstring& buff, size_t& count, off_t& offset) { // TODO: buff -> temporary_buffor
+        return do_with(temporary_buffer<char>(), (size_t)0, (off_t)0,
+                [&input, &output, &file] (temporary_buffer<char>& buff, size_t& count, off_t& offset) {
             return read_objects(input, buff, count, offset).then([&buff, &count, &offset, &file] () {
                 // TODO: alignment problem will be solved after migrating to seastar fs
                 if (count % alignment || offset % alignment) {
                     return make_exception_future<size_t>(std::runtime_error("offset and count should be aligned"));
+                } else if (count > buff.size()) {
+                    return make_exception_future<size_t>(std::runtime_error("count is bigger than buffer"));
                 }
-                auto temp_buf = temporary_buffer<char>::aligned(alignment, buff.size());
-                std::memcpy(temp_buf.get_write(), buff.c_str(), buff.size());
-                return file.dma_write<char>(offset, temp_buf.get(), count)
-                        .then([temp_buf = std::move(temp_buf)] (size_t write_size) {
+                // TODO: it won't be needed to have aligned buffer after migrating to seastar fs
+                auto tmp_buff = temporary_buffer<char>::aligned(alignment, count);
+                std::memcpy(tmp_buff.get_write(), buff.get(), count);
+                buff = std::move(tmp_buff);
+                return file.dma_write<char>(offset, buff.get(), count).then([] (size_t write_size) {
                     return write_size;
                 });
             }).then([&output] (size_t write_size) {
