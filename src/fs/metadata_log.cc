@@ -45,6 +45,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_set>
 #include <variant>
 
@@ -71,8 +72,9 @@ void metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, un
         0,
         metadata,
         [&]() -> decltype(inode_info::contents) {
-            if (is_directory)
+            if (is_directory) {
                 return inode_info::directory {};
+            }
 
             return inode_info::file {};
         }()
@@ -142,7 +144,7 @@ void metadata_log::memory_only_truncate(inode_t inode, disk_offset_t size) {
     }
 }
 
-void metadata_log::memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, sstring entry_name) {
+void metadata_log::memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, std::string entry_name) {
     auto it = _inodes.find(entry_inode);
     assert(it != _inodes.end());
     // Directory may only be linked once (to avoid creating cycles)
@@ -153,7 +155,7 @@ void metadata_log::memory_only_add_dir_entry(inode_info::directory& dir, inode_t
     ++it->second.directories_containing_file;
 }
 
-void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, sstring entry_name) {
+void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, std::string entry_name) {
     auto it = dir.entries.find(entry_name);
     assert(it != dir.entries.end());
 
@@ -220,7 +222,7 @@ void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) 
     });
 }
 
-std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup(const sstring& path) const {
+std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::do_path_lookup(const std::string& path) const noexcept {
     if (path.empty() or path[0] != '/') {
         return path_lookup_error::NOT_ABSOLUTE;
     }
@@ -238,8 +240,7 @@ std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup
             beg = component_range.end + 1; // Jump over '/'
         }
 
-        // TODO: I don't like that we make a copy here -- it is totally redundant and inhibits adding noexcept
-        sstring component = path.substr(component_range.beg, component_range.size());
+        std::string_view component(path.data() + component_range.beg, component_range.size());
         // Process the component
         if (component == "") {
             continue;
@@ -277,8 +278,8 @@ std::variant<inode_t, metadata_log::path_lookup_error> metadata_log::path_lookup
     return components_stack.back();
 }
 
-future<inode_t> metadata_log::futurized_path_lookup(const sstring& path) const {
-    auto lookup_res = path_lookup(path);
+future<inode_t> metadata_log::path_lookup(const std::string& path) const {
+    auto lookup_res = do_path_lookup(path);
     return std::visit(overloaded {
         [](path_lookup_error error) {
             switch (error) {
@@ -313,11 +314,11 @@ file_offset_t metadata_log::file_size(inode_t inode) const {
     }, it->second.contents);
 }
 
-future<inode_t> metadata_log::create_file(sstring path, file_permissions perms) {
+future<inode_t> metadata_log::create_file(std::string path, file_permissions perms) {
     return create_file_operation::perform(*this, std::move(path), std::move(perms), false);
 }
 
-future<> metadata_log::create_directory(sstring path, file_permissions perms) {
+future<> metadata_log::create_directory(std::string path, file_permissions perms) {
     return create_file_operation::perform(*this, std::move(path), std::move(perms), true).discard_result();
 }
 

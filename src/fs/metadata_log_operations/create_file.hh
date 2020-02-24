@@ -29,7 +29,7 @@ namespace seastar::fs {
 class create_file_operation {
     metadata_log& _metadata_log;
     bool _is_directory;
-    sstring _entry_name;
+    std::string _entry_name;
     file_permissions _perms;
     inode_t _dir_inode;
     inode_info::directory* _dir_info;
@@ -37,11 +37,11 @@ class create_file_operation {
 
     create_file_operation(metadata_log& metadata_log) : _metadata_log(metadata_log) {}
 
-    future<inode_t> perform_1(sstring path, file_permissions perms, bool is_directory) {
+    future<inode_t> perform_1(std::string path, file_permissions perms, bool is_directory) {
         _is_directory = is_directory;
         if (is_directory) {
             while (not path.empty() and path.back() == '/') {
-                path.erase(path.end() - 1, path.end());
+                path.pop_back();
             }
         }
 
@@ -56,7 +56,8 @@ class create_file_operation {
 
         _perms = perms;
         path.erase(path.end() - _entry_name.size(), path.end());
-        return _metadata_log.futurized_path_lookup(path).then([this](inode_t dir_inode) {
+        assert(path.empty() or path.back() == '/'); // Hence fast-check for "is directory" is done in path_lookup
+        return _metadata_log.path_lookup(path).then([this](inode_t dir_inode) {
             _dir_inode = dir_inode;
             return with_semaphore(_metadata_log._create_or_delete_lock, 1, [this] {
                 // We do not have to shared lock dir_inode because we hold global lock
@@ -67,13 +68,11 @@ class create_file_operation {
 
     future<inode_t> perform_2() {
         auto dir_it = _metadata_log._inodes.find(_dir_inode);
-        if (dir_it == _metadata_log._inodes.end()) {
+        if (dir_it == _metadata_log._inodes.end() or not dir_it->second.is_directory()) {
             return make_exception_future<inode_t>(operation_became_invalid_exception());
         }
 
-        assert(dir_it->second.is_directory());
         _dir_info = &dir_it->second.get_directory();
-
         return _metadata_log._dir_entry_locks.with_lock_on({_dir_inode, _entry_name}, [this] {
             return perform_3();
         });
@@ -119,7 +118,7 @@ class create_file_operation {
     }
 
 public:
-    static future<inode_t> perform(metadata_log& metadata_log, sstring path, file_permissions perms, bool is_directory) {
+    static future<inode_t> perform(metadata_log& metadata_log, std::string path, file_permissions perms, bool is_directory) {
         return create_file_operation(metadata_log).perform_1(std::move(path), std::move(perms), is_directory);
     }
 };

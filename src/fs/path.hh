@@ -21,12 +21,12 @@
 
 #pragma once
 
-#include "seastar/core/sstring.hh"
+#include <string>
 
 namespace seastar::fs {
 
 // Returns the last component in @p path. WARNING: The last component is empty iff @p path is empty or ends with '/'
-sstring last_component(const sstring& path) {
+std::string last_component(const std::string& path) {
     auto beg = path.find_last_of('/');
     if (beg == path.npos) {
         return "";

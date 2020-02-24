@@ -30,7 +30,6 @@
 #include "seastar/core/do_with.hh"
 #include "seastar/core/future-util.hh"
 #include "seastar/core/future.hh"
-#include "seastar/core/sstring.hh"
 #include "seastar/core/temporary_buffer.hh"
 
 #include <boost/crc.hpp>
@@ -73,7 +72,7 @@ public:
     }
 
     // Returns whether the reading was successful
-    bool read_sstring(sstring& str, size_t size) {
+    bool read_string(std::string& str, size_t size) {
         str.resize(size);
         return read(str.data(), size);
     }
@@ -150,7 +149,7 @@ class metadata_log_bootstrap {
             // Reset _inode_allocator
             std::optional<inode_t> max_inode_no;
             if (not _metadata_log._inodes.empty()) {
-                max_inode_no = (--_metadata_log._inodes.end())->first;
+                max_inode_no =_metadata_log._inodes.rbegin()->first;
             }
             _metadata_log._inode_allocator = shard_inode_allocator(fs_shards_pool_size, fs_shard_id, max_inode_no);
 
@@ -392,8 +391,8 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
-        sstring dir_entry_name;
-        if (not _curr_checkpoint.read_sstring(dir_entry_name, entry.entry_name_length)) {
+        std::string dir_entry_name;
+        if (not _curr_checkpoint.read_string(dir_entry_name, entry.entry_name_length)) {
             return invalid_entry_exception();
         }
 
@@ -422,8 +421,8 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
-        sstring dir_entry_name;
-        if (not _curr_checkpoint.read_sstring(dir_entry_name, entry.entry_name_length)) {
+        std::string dir_entry_name;
+        if (not _curr_checkpoint.read_string(dir_entry_name, entry.entry_name_length)) {
             return invalid_entry_exception();
         }
 
@@ -448,8 +447,8 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
-        sstring dir_entry_name;
-        if (not _curr_checkpoint.read_sstring(dir_entry_name, entry.entry_name_length)) {
+        std::string dir_entry_name;
+        if (not _curr_checkpoint.read_string(dir_entry_name, entry.entry_name_length)) {
             return invalid_entry_exception();
         }
 

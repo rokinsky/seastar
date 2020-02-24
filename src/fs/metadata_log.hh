@@ -36,7 +36,6 @@
 #include "seastar/core/semaphore.hh"
 #include "seastar/core/shared_future.hh"
 #include "seastar/core/shared_ptr.hh"
-#include "seastar/core/sstring.hh"
 #include "seastar/core/temporary_buffer.hh"
 
 #include <chrono>
@@ -87,6 +86,9 @@ class metadata_log {
     // Takes care of writing current cluster of serialized metadata log entries to device
     lw_shared_ptr<metadata_to_disk_buffer> _curr_cluster_buff;
     shared_future<> _previous_flushes = now();
+    // After each flush we align the offset at which dumping metadata log is continued. This is very important, as it ensures
+    // that consecutive flushes, as their underlying write operations to a block device, do not overlap. If the writes overlapped,
+    // it would be possible that they would be written in the reverse order corrupting the on-disk metadata log.
     static constexpr bool align_after_flush = true;
 
     // In memory metadata
@@ -114,7 +116,7 @@ class metadata_log {
     // acquires only one locks it's all good. If two are acquired at the same time, an extreme caution should be used and
     // if possible two unique locks should be avoided.
     value_shared_lock<inode_t> _inode_locks;
-    value_shared_lock<std::pair<inode_t, sstring>> _dir_entry_locks;
+    value_shared_lock<std::pair<inode_t, std::string>> _dir_entry_locks;
     semaphore _create_or_delete_lock {1};
 
     // TODO: for compaction: keep some set(?) of inode_data_vec, so that we can keep track of clusters that have lowest utilization (up-to-date data)
@@ -131,27 +133,20 @@ public:
 
     future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters, fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id);
 
+private:
     void write_update(inode_info::file& file, inode_data_vec new_data_vec);
 
     // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap
     void cut_out_data_range(inode_info::file& file, file_range range);
 
-private:
     void memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata);
-
     void memory_only_update_metadata(inode_t inode, unix_metadata metadata);
-
     void memory_only_delete_inode(inode_t inode);
-
     void memory_only_small_write(inode_t inode, disk_offset_t offset, temporary_buffer<uint8_t> data);
-
     void memory_only_update_mtime(inode_t inode, decltype(unix_metadata::mtime_ns) mtime_ns);
-
     void memory_only_truncate(inode_t inode, disk_offset_t size);
-
-    void memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, sstring entry_name);
-
-    void memory_only_delete_dir_entry(inode_info::directory& dir, sstring entry_name);
+    void memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, std::string entry_name);
+    void memory_only_delete_dir_entry(inode_info::directory& dir, std::string entry_name);
 
     void schedule_curr_cluster_flush();
 
@@ -184,16 +179,16 @@ private:
         NOT_DIR, // a component used as a directory in path is not, in fact, a directory
     };
 
-    std::variant<inode_t, path_lookup_error> path_lookup(const sstring& path) const;
+    std::variant<inode_t, path_lookup_error> do_path_lookup(const std::string& path) const noexcept;
 
-    future<inode_t> futurized_path_lookup(const sstring& path) const;
+    future<inode_t> path_lookup(const std::string& path) const;
 
 public:
     template<class Func>
-    future<> iterate_directory(const sstring& dir_path, Func func) {
-        static_assert(std::is_invocable_r_v<future<>, Func, const sstring&> or std::is_invocable_r_v<future<stop_iteration>, Func, const sstring&>);
+    future<> iterate_directory(const std::string& dir_path, Func func) {
+        static_assert(std::is_invocable_r_v<future<>, Func, const std::string&> or std::is_invocable_r_v<future<stop_iteration>, Func, const std::string&>);
         auto convert_func = [&]() -> decltype(auto) {
-            if constexpr (std::is_invocable_r_v<future<stop_iteration>, Func, const sstring&>) {
+            if constexpr (std::is_invocable_r_v<future<stop_iteration>, Func, const std::string&>) {
                 return std::move(func);
             } else {
                 return [func = std::move(func)]() -> future<stop_iteration> {
@@ -203,8 +198,8 @@ public:
                 };
             }
         };
-        return futurized_path_lookup(dir_path).then([this, func = convert_func()](inode_t dir_inode) {
-            return do_with(std::move(func), sstring {}, [this, dir_inode](auto& func, auto& prev_entry) {
+        return path_lookup(dir_path).then([this, func = convert_func()](inode_t dir_inode) {
+            return do_with(std::move(func), std::string {}, [this, dir_inode](auto& func, auto& prev_entry) {
                 auto it = _inodes.find(dir_inode);
                 if (it == _inodes.end()) {
                     return now(); // Directory disappeared
@@ -229,7 +224,7 @@ public:
                     }
 
                     prev_entry = entry_it->first;
-                    return func(static_cast<const sstring&>(prev_entry));
+                    return func(static_cast<const std::string&>(prev_entry));
                 });
             });
         });
@@ -240,25 +235,25 @@ public:
     // Returns size of the file or throws exception iff @p inode is invalid
     file_offset_t file_size(inode_t inode) const;
 
-    future<inode_t> create_file(sstring path, file_permissions perms);
+    future<inode_t> create_file(std::string path, file_permissions perms);
 
-    future<> create_directory(sstring path, file_permissions perms);
+    future<> create_directory(std::string path, file_permissions perms);
 
     // TODO: what about permissions, uid, gid etc.
-    future<inode_t> open_file(sstring path) { return make_ready_future<inode_t>(0); }
+    future<inode_t> open_file(std::string path) { return make_ready_future<inode_t>(0); }
 
     future<> close_file(inode_t inode) { return make_ready_future(); }
 
     // Creates name (@p path) for a file (@p inode)
-    future<> link(inode_t inode, sstring path);
+    future<> link(inode_t inode, std::string path);
 
     // Creates name (@p destination) for a file (not directory) @p source
-    future<> link(sstring source, sstring destination);
+    future<> link(std::string source, std::string destination);
 
-    future<> unlink_file(inode_t inode);
+    future<> unlink_file(std::string path);
 
     // Removes empty directory or unlinks file
-    future<> remove(sstring path);
+    future<> remove(std::string path);
 
     future<size_t> read(inode_t inode, file_offset_t pos, void* buffer, size_t len, const io_priority_class& pc = default_priority_class ()) { return make_ready_future<size_t>(0); }
 

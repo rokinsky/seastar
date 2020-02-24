@@ -103,7 +103,7 @@ public:
     }
 };
 
-inline future<block_device> open_block_device(sstring name) {
+inline future<block_device> open_block_device(std::string name) {
     return open_file_dma(std::move(name), open_flags::rw).then([](file f) {
         return block_device(make_shared<file_block_device_impl>(std::move(f)));
     });
