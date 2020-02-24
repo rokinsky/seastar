@@ -24,7 +24,6 @@
 #include "fs/inode.hh"
 #include "fs/units.hh"
 #include "fs/unix_metadata.hh"
-#include "seastar/core/sstring.hh"
 #include "seastar/core/temporary_buffer.hh"
 #include "seastar/fs/overloaded.hh"
 
@@ -56,14 +55,14 @@ struct inode_info {
 
     struct directory {
         // TODO: directory entry cannot contain '/' character --> add checks for that
-        std::map<sstring, inode_t> entries; // entry name => inode
+        std::map<std::string, inode_t, std::less<>> entries; // entry name => inode
     };
 
     struct file {
         std::map<file_offset_t, inode_data_vec> data; // file offset => data vector that begins there (data vectors do not overlap)
 
         file_offset_t size() const noexcept {
-            return (data.empty() ? 0 : (--data.end())->second.data_range.end);
+            return (data.empty() ? 0 : data.rbegin()->second.data_range.end);
         }
 
         // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap.
@@ -78,8 +77,7 @@ struct inode_info {
             }
 
             while (it != data.end() and are_intersecting(range, it->second.data_range)) {
-                auto data_vec = std::move(it->second);
-                data.erase(it++);
+                auto data_vec = std::move(data.extract(it++).mapped());
                 const auto cap = intersection(range, data_vec.data_range);
                 if (cap == data_vec.data_range) {
                     // Fully intersects => remove it

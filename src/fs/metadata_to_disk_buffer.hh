@@ -51,6 +51,7 @@ public:
      */
     void reset_from_bootstrapped_cluster(disk_offset_t cluster_beg_offset, const uint8_t* cluster_contents, size_t metadata_end_pos, bool align_before_buffering) noexcept {
         assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
+        assert(metadata_end_pos < _buff.size());
         _disk_write_offset = cluster_beg_offset;
         _zero_padded_end = 0;
 
