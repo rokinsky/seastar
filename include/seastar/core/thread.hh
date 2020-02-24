@@ -80,6 +80,14 @@ class thread_attributes;
 class thread_attributes {
 public:
     compat::optional<seastar::scheduling_group> sched_group;
+    thread_attributes();
+    static thread_attributes with_custom_stack_size(size_t requested_stack_size);
+
+    size_t stack_size() const {
+        return _stack_size;
+    }
+protected:
+    size_t _stack_size;
 };
 
 
@@ -95,7 +103,7 @@ class thread_context final : private task {
     };
     using stack_holder = std::unique_ptr<char[], stack_deleter>;
 
-    stack_holder _stack{make_stack()};
+    stack_holder _stack;
     noncopyable_function<void ()> _func;
     jmp_buf_link _context;
     promise<> _done;
@@ -110,9 +118,9 @@ class thread_context final : private task {
     static thread_local all_thread_list _all_threads;
 private:
     static void s_main(int lo, int hi); // all parameters MUST be 'int' for makecontext
-    void setup();
+    void setup(const thread_attributes& attr);
     void main();
-    stack_holder make_stack();
+    stack_holder make_stack(size_t stack_size);
     virtual void run_and_dispose() noexcept override; // from task class
 public:
     thread_context(thread_attributes attr, noncopyable_function<void ()> func);
