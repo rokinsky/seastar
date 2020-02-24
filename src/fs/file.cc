@@ -99,7 +99,7 @@ seastarfs_file_impl::dma_read_bulk(uint64_t offset, size_t range_size, const io_
     throw std::bad_function_call();
 }
 
-future<file> open_file_dma(sstring name, open_flags flags) {
+future<file> open_file_dma(std::string name, open_flags flags) {
     return open_block_device(name).then([flags] (block_device bd) {
         return file(make_shared<seastarfs_file_impl>(std::move(bd), flags));
     });
