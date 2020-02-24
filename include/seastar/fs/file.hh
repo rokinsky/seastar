@@ -50,6 +50,6 @@ public:
     future<temporary_buffer<uint8_t>> dma_read_bulk(uint64_t offset, size_t range_size, const io_priority_class& pc) override;
 };
 
-future<file> open_file_dma(sstring name, open_flags flags);
+future<file> open_file_dma(std::string name, open_flags flags);
 
 }
