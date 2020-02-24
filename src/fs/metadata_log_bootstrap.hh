@@ -396,7 +396,7 @@ class metadata_log_bootstrap {
             return invalid_entry_exception();
         }
 
-        // Only files may be linked as not to create cycles
+        // Only files may be linked as not to create cycles (directories are created and linked using CREATE_INODE_AS_DIR_ENTRY)
         if (not _metadata_log._inodes[entry.entry_inode].is_file()) {
             return invalid_entry_exception();
         }
