@@ -46,36 +46,44 @@
 
 namespace seastar::fs {
 
-struct invalid_inode_exception : public std::exception {
-    const char* what() const noexcept { return "Invalid inode"; }
+struct fs_exception : public std::exception {
+    const char* what() const noexcept override = 0;
 };
 
-struct operation_became_invalid_exception : public std::exception {
-    const char* what() const noexcept { return "Operation became invalid"; }
+struct invalid_inode_exception : public fs_exception {
+    const char* what() const noexcept override { return "Invalid inode"; }
 };
 
-struct no_more_space_exception : public std::exception {
-    const char* what() const noexcept { return "No more space on device"; }
+struct operation_became_invalid_exception : public fs_exception {
+    const char* what() const noexcept override { return "Operation became invalid"; }
 };
 
-struct file_already_exists_exception : public std::exception {
-    const char* what() const noexcept { return "File already exists"; }
+struct no_more_space_exception : public fs_exception {
+    const char* what() const noexcept override { return "No more space on device"; }
 };
 
-struct filename_too_long_exception : public std::exception {
-    const char* what() const noexcept { return "Filename too long"; }
+struct file_already_exists_exception : public fs_exception {
+    const char* what() const noexcept override { return "File already exists"; }
 };
 
-struct path_is_not_absolute : public std::exception {
-    const char* what() const noexcept { return "Path is not absolute"; }
+struct filename_too_long_exception : public fs_exception {
+    const char* what() const noexcept override { return "Filename too long"; }
 };
 
-struct no_such_file_or_directory : public std::exception {
-    const char* what() const noexcept { return "No such file or directory"; }
+struct path_lookup_exception : public fs_exception {
+    const char* what() const noexcept override = 0;
 };
 
-struct path_component_not_directory : public std::exception {
-    const char* what() const noexcept { return "A component used as a directory is not a directory"; }
+struct path_is_not_absolute_exception : public path_lookup_exception {
+    const char* what() const noexcept override { return "Path is not absolute"; }
+};
+
+struct no_such_file_or_directory_exception : public path_lookup_exception {
+    const char* what() const noexcept override { return "No such file or directory"; }
+};
+
+struct path_component_not_directory_exception : public path_lookup_exception {
+    const char* what() const noexcept override { return "A component used as a directory is not a directory"; }
 };
 
 class metadata_log {
@@ -205,7 +213,7 @@ public:
                     return now(); // Directory disappeared
                 }
                 if (not it->second.is_directory()) {
-                    return make_exception_future(path_component_not_directory());
+                    return make_exception_future(path_component_not_directory_exception());
                 }
 
                 return repeat([this, dir_inode, &prev_entry, &func] {
