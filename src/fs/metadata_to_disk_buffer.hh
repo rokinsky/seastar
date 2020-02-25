@@ -129,7 +129,8 @@ public:
 
 private:
     bool fits_for_append(size_t bytes_no) const noexcept {
-        return (bytes_left() >= bytes_no + sizeof(ondisk_next_metadata_cluster)); // We need to reserve space for the next metadata cluster entry
+        // We need to reserve space for the next metadata cluster entry
+        return (bytes_left() >= bytes_no + sizeof(ondisk_type) + sizeof(ondisk_next_metadata_cluster));
     }
 
     template<class T>
