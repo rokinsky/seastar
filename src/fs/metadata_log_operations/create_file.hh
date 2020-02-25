@@ -37,7 +37,7 @@ class create_file_operation {
 
     create_file_operation(metadata_log& metadata_log) : _metadata_log(metadata_log) {}
 
-    future<inode_t> perform_1(std::string path, file_permissions perms, bool is_directory) {
+    future<inode_t> create_file(std::string path, file_permissions perms, bool is_directory) {
         _is_directory = is_directory;
         if (is_directory) {
             while (not path.empty() and path.back() == '/') {
@@ -61,12 +61,12 @@ class create_file_operation {
             _dir_inode = dir_inode;
             return with_semaphore(_metadata_log._create_or_delete_lock, 1, [this] {
                 // We do not have to shared lock dir_inode because we hold global lock
-                return perform_2();
+                return create_file_in_directory();
             });
         });
     }
 
-    future<inode_t> perform_2() {
+    future<inode_t> create_file_in_directory() {
         auto dir_it = _metadata_log._inodes.find(_dir_inode);
         if (dir_it == _metadata_log._inodes.end() or not dir_it->second.is_directory()) {
             return make_exception_future<inode_t>(operation_became_invalid_exception());
@@ -74,11 +74,11 @@ class create_file_operation {
 
         _dir_info = &dir_it->second.get_directory();
         return _metadata_log._dir_entry_locks.with_lock_on({_dir_inode, _entry_name}, [this] {
-            return perform_3();
+            return do_create_file_in_directory();
         });
     }
 
-    future<inode_t> perform_3() {
+    future<inode_t> do_create_file_in_directory() {
         if (_dir_info->entries.count(_entry_name) != 0) {
             return make_exception_future<inode_t>(file_already_exists_exception());
         }
@@ -119,7 +119,7 @@ class create_file_operation {
 
 public:
     static future<inode_t> perform(metadata_log& metadata_log, std::string path, file_permissions perms, bool is_directory) {
-        return create_file_operation(metadata_log).perform_1(std::move(path), std::move(perms), is_directory);
+        return create_file_operation(metadata_log).create_file(std::move(path), std::move(perms), is_directory);
     }
 };
 

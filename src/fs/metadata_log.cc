@@ -284,11 +284,11 @@ future<inode_t> metadata_log::path_lookup(const std::string& path) const {
         [](path_lookup_error error) {
             switch (error) {
             case path_lookup_error::NOT_ABSOLUTE:
-                return make_exception_future<inode_t>(path_is_not_absolute());
+                return make_exception_future<inode_t>(path_is_not_absolute_exception());
             case path_lookup_error::NO_ENTRY:
-                return make_exception_future<inode_t>(no_such_file_or_directory());
+                return make_exception_future<inode_t>(no_such_file_or_directory_exception());
             case path_lookup_error::NOT_DIR:
-                return make_exception_future<inode_t>(path_component_not_directory());
+                return make_exception_future<inode_t>(path_component_not_directory_exception());
             }
             __builtin_unreachable();
         },
