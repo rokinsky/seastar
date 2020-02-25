@@ -29,7 +29,7 @@ namespace seastar::fs {
 std::string last_component(const std::string& path) {
     auto beg = path.find_last_of('/');
     if (beg == path.npos) {
-        return "";
+        return path;
     }
     return path.substr(beg + 1);
 }
