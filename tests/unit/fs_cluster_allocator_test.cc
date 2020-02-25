@@ -30,7 +30,7 @@
 
 using namespace seastar;
 
-BOOST_AUTO_TEST_CASE(cluster_allocator_cluster_0) {
+BOOST_AUTO_TEST_CASE(test_cluster_0) {
     fs::cluster_allocator ca({}, {0});
     BOOST_REQUIRE_EQUAL(ca.alloc().value(), 0);
     BOOST_REQUIRE(ca.alloc() == std::nullopt);
@@ -41,12 +41,12 @@ BOOST_AUTO_TEST_CASE(cluster_allocator_cluster_0) {
     BOOST_REQUIRE(ca.alloc() == std::nullopt);
 }
 
-BOOST_AUTO_TEST_CASE(cluster_allocator_empty) {
+BOOST_AUTO_TEST_CASE(test_empty) {
     fs::cluster_allocator empty_ca{{}, {}};
     BOOST_REQUIRE(empty_ca.alloc() == std::nullopt);
 }
 
-BOOST_AUTO_TEST_CASE(cluster_allocator_small) {
+BOOST_AUTO_TEST_CASE(test_small) {
     std::deque<fs::cluster_id_t> deq{1, 5, 3, 4, 2};
     fs::cluster_allocator small_ca({}, deq);
     BOOST_REQUIRE_EQUAL(small_ca.alloc().value(), deq[0]);
@@ -76,7 +76,7 @@ BOOST_AUTO_TEST_CASE(cluster_allocator_small) {
     BOOST_REQUIRE_EQUAL(small_ca.alloc().value(), deq[2]);
 }
 
-BOOST_AUTO_TEST_CASE(cluster_allocator_max) {
+BOOST_AUTO_TEST_CASE(test_max) {
     constexpr fs::cluster_id_t clusters_per_shard = 1024;
     std::deque<fs::cluster_id_t> deq;
     for (fs::cluster_id_t i = 0; i < clusters_per_shard; i++) {
@@ -92,7 +92,7 @@ BOOST_AUTO_TEST_CASE(cluster_allocator_max) {
     }
 }
 
-BOOST_AUTO_TEST_CASE(cluster_allocator_pseudo_rand) {
+BOOST_AUTO_TEST_CASE(test_pseudo_rand) {
     std::unordered_set<fs::cluster_id_t> uset;
     std::deque<fs::cluster_id_t> deq;
     fs::cluster_id_t elem = 215;
