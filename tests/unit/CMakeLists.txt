@@ -243,7 +243,7 @@ seastar_add_app_test (block_device
   LIBRARIES seastar_testing)
 
 seastar_add_test (bootstrap_record
-  SOURCES 
+  SOURCES
     bootstrap_record_test.cc
     mock_block_device.hh)
 
@@ -300,6 +300,10 @@ seastar_add_test (file_io
 
 seastar_add_test (foreign_ptr
   SOURCES foreign_ptr_test.cc)
+
+seastar_add_test (fs_path
+  KIND BOOST
+  SOURCES fs_path_test.cc)
 
 seastar_add_test (fstream
   SOURCES
