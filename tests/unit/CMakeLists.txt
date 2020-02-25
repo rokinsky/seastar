@@ -242,6 +242,9 @@ seastar_add_app_test (block_device
   SOURCES block_device_test.cc
   LIBRARIES seastar_testing)
 
+seastar_add_test (fs_bootstrap_record
+  SOURCES fs_bootstrap_record_test.cc)
+
 seastar_add_test (cluster_allocator
   KIND BOOST
   SOURCES cluster_allocator_test.cc)
