@@ -93,7 +93,8 @@ struct ondisk_checkpoint {
     //    there ends checkpointed data and (next checkpoint begins or metadata in the current cluster end)
     //
     // CRC is calculated from byte sequence | data | checkpointed_data_length |
-    // E.g. if the data consist of bytes "abcd" and checkpointed_data_length of bytes "xyz" then the byte sequence would be "abcdxyz"
+    // E.g. if the data consist of bytes "abcd" and checkpointed_data_length of bytes "xyz" then the byte sequence
+    // would be "abcdxyz"
     uint32_t crc32_code;
     unit_size_t checkpointed_data_length;
 } __attribute__((packed));

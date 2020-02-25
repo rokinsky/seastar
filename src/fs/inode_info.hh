@@ -59,14 +59,16 @@ struct inode_info {
     };
 
     struct file {
-        std::map<file_offset_t, inode_data_vec> data; // file offset => data vector that begins there (data vectors do not overlap)
+        std::map<file_offset_t, inode_data_vec> data; // file offset => data vector that begins there (data vectors
+                                                      // do not overlap)
 
         file_offset_t size() const noexcept {
             return (data.empty() ? 0 : data.rbegin()->second.data_range.end);
         }
 
-        // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap.
-        // @p cut_data_vec_processor is called on each inode_data_vec (including parts of overlapped data vectors) that will be deleted
+        // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them
+        // not overlap. @p cut_data_vec_processor is called on each inode_data_vec (including parts of overlapped
+        // data vectors) that will be deleted
         template<class Func>
         void cut_out_data_range(file_range range, Func&& cut_data_vec_processor) {
             static_assert(std::is_invocable_v<Func, const inode_data_vec&>);
@@ -99,8 +101,12 @@ struct inode_info {
                 std::visit(overloaded {
                     [&](inode_data_vec::in_mem_data& mem) {
                         left.data_location = inode_data_vec::in_mem_data {mem.data.share(0, left.data_range.size())};
-                        mid.data_location = inode_data_vec::in_mem_data {mem.data.share(mid_beg_shift, mid.data_range.size())};
-                        right.data_location = inode_data_vec::in_mem_data {mem.data.share(right_beg_shift, right.data_range.size())};
+                        mid.data_location = inode_data_vec::in_mem_data {
+                            mem.data.share(mid_beg_shift, mid.data_range.size())
+                        };
+                        right.data_location = inode_data_vec::in_mem_data {
+                            mem.data.share(right_beg_shift, right.data_range.size())
+                        };
                     },
                     [&](inode_data_vec::on_disk_data& disk_data) {
                         left.data_location = disk_data;

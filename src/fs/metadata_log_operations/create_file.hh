@@ -118,7 +118,8 @@ class create_file_operation {
     }
 
 public:
-    static future<inode_t> perform(metadata_log& metadata_log, std::string path, file_permissions perms, bool is_directory) {
+    static future<inode_t> perform(metadata_log& metadata_log, std::string path, file_permissions perms,
+            bool is_directory) {
         return create_file_operation(metadata_log).create_file(std::move(path), std::move(perms), is_directory);
     }
 };

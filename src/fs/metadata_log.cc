@@ -170,12 +170,12 @@ void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, std:
 void metadata_log::schedule_curr_cluster_flush() {
     // Make writes concurrent (TODO: maybe serialized within *one* cluster would be faster?)
     _previous_flushes = when_all_succeed(_previous_flushes.get_future(), do_with(_curr_cluster_buff, &_device, [](auto& crr_clstr_bf, auto& device) {
-        return crr_clstr_bf->flush_to_disk(*device, align_after_flush);
+        return crr_clstr_bf->flush_to_disk(*device);
     }));
 }
 
 future<> metadata_log::flush_curr_cluster() {
-    if (_curr_cluster_buff->bytes_left_after_flush_if_done_now(align_after_flush) == 0) {
+    if (_curr_cluster_buff->bytes_left_after_flush_if_done_now() == 0) {
         return flush_curr_cluster_and_change_it_to_new_one();
     }
 
