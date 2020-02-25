@@ -57,7 +57,7 @@ SEASTAR_THREAD_TEST_CASE(test_simple_write) {
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-6);
     disk_buf.append_bytes("abcdefghi", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-15);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)15, alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned);
     dev.read<char>(0, buf.get_write(), len_aligned).get();
@@ -74,7 +74,7 @@ SEASTAR_THREAD_TEST_CASE(test_multiple_write) {
     disk_offset_t len_aligned, len_aligned2;
     disk_buf.append_bytes("9876", 4);
     disk_buf.append_bytes("zyxwvutsr", 9);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)13, alignment);
     dev.read<char>(0, buf.get_write(), len_aligned).get();
     strncpy(expected_buf.get_write(), "9876zyxwvutsr", max_siz);
@@ -84,7 +84,7 @@ SEASTAR_THREAD_TEST_CASE(test_multiple_write) {
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned-6);
     disk_buf.append_bytes("abcdefghi", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned-15);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     len_aligned2 = round_up_to_multiple_of_power_of_2(len_aligned+15, alignment);
     strncpy(expected_buf.get_write()+len_aligned, "123456abcdefghi", len_aligned2-len_aligned);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned2);
@@ -96,7 +96,7 @@ SEASTAR_THREAD_TEST_CASE(test_empty_write) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }
 
@@ -106,7 +106,7 @@ SEASTAR_THREAD_TEST_CASE(test_empty_append_bytes) {
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
     disk_buf.append_bytes("123456", 0);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }
 
@@ -118,12 +118,12 @@ SEASTAR_THREAD_TEST_CASE(test_reset_same_offset) {
     auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
     disk_offset_t len_aligned;
     disk_buf.append_bytes("987654", 6);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     disk_buf.reset(0);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
     disk_buf.append_bytes("overwrite", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-9);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)9, alignment);
     strncpy(expected_buf.get_write(), "overwrite", len_aligned);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned);
@@ -139,12 +139,12 @@ SEASTAR_THREAD_TEST_CASE(test_reset_new_offset) {
     auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
     disk_offset_t len_aligned;
     disk_buf.append_bytes("987654", 6);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     disk_buf.reset(6*alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
     disk_buf.append_bytes("newwrite", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-9);
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)6, alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned);
     dev.read<char>(0, buf.get_write(), len_aligned).get();
@@ -171,7 +171,7 @@ SEASTAR_THREAD_TEST_CASE(test_combined) {
     end += 10;
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
 
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     end = round_up_to_multiple_of_power_of_2(end, alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
 
@@ -188,7 +188,7 @@ SEASTAR_THREAD_TEST_CASE(test_combined) {
     end += 6;
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
 
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     end = round_up_to_multiple_of_power_of_2(end, alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
 
@@ -202,6 +202,6 @@ SEASTAR_THREAD_TEST_CASE(test_combined) {
     end = beg = alignment*3;
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 
-    disk_buf.flush_to_disk(dev, true).get();
+    disk_buf.flush_to_disk(dev).get();
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }

@@ -33,7 +33,8 @@ class metadata_to_disk_buffer : protected to_disk_buffer {
     boost::crc_32_type _crc;
 
 public:
-    // Represents buffer that will be written to a block_device at offset @p disk_aligned_write_offset. Total number of bytes appended cannot exceed @p aligned_max_size.
+    // Represents buffer that will be written to a block_device at offset @p disk_aligned_write_offset. Total number of
+    // bytes appended cannot exceed @p aligned_max_size.
     metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
     : to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset) {
         assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
@@ -42,31 +43,19 @@ public:
     using to_disk_buffer::reset;
 
     /**
-     * @brief Clears buffer, leaving it in state as if just after flushing with unflushed data end at @p cluster_beg_offset
+     * @brief Clears buffer, leaving it in state as if just after flushing with unflushed data end at
+     *   @p cluster_beg_offset
      *
      * @param cluster_beg_offset disk offset of the beginning of the cluster
-     * @param cluster_contents pointer to contents of the cluster
      * @param metadata_end_pos position at which valid metadata ends: valid metadata range: [0, @p metadata_end_pos)
-     * @param align_before_buffering whether to align to beginning of the next unflushed data or set it to @p metadata_end_pos
      */
-    void reset_from_bootstrapped_cluster(disk_offset_t cluster_beg_offset, const uint8_t* cluster_contents, size_t metadata_end_pos, bool align_before_buffering) noexcept {
+    void reset_from_bootstrapped_cluster(disk_offset_t cluster_beg_offset, size_t metadata_end_pos) noexcept {
         assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
         assert(metadata_end_pos < _buff.size());
         _disk_write_offset = cluster_beg_offset;
-        _zero_padded_end = 0;
 
-        if (align_before_buffering) {
-            auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
-            _unflushed_data = {aligned_pos, aligned_pos};
-        } else {
-            _unflushed_data = {metadata_end_pos, metadata_end_pos};
-            // to_disk_buffer::flush_to_disk() has to align down the begin offset before write, so we need to prepare data at this offset
-            range<size_t> to_copy = {
-                round_down_to_multiple_of_power_of_2(_unflushed_data.beg, _alignment),
-                _unflushed_data.beg,
-            };
-            std::memcpy(_buff.get_write() + to_copy.beg, cluster_contents + to_copy.beg, to_copy.size());
-        }
+        auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
+        _unflushed_data = {aligned_pos, aligned_pos};
 
         if (bytes_left() > 0) {
             start_new_unflushed_data();
@@ -205,9 +194,11 @@ public:
         return APPENDED;
     }
 
-    append_result append(const ondisk_create_inode_as_dir_entry_header& create_inode_as_dir_entry, const void* entry_name) noexcept {
+    append_result append(const ondisk_create_inode_as_dir_entry_header& create_inode_as_dir_entry,
+            const void* entry_name) noexcept {
         ondisk_type type = CREATE_INODE_AS_DIR_ENTRY;
-        size_t total_size = sizeof(type) + sizeof(create_inode_as_dir_entry) + create_inode_as_dir_entry.entry_name_length;
+        size_t total_size = sizeof(type) + sizeof(create_inode_as_dir_entry) +
+                create_inode_as_dir_entry.entry_name_length;
         if (not fits_for_append(total_size)) {
             return TOO_BIG;
         }
@@ -218,9 +209,11 @@ public:
         return APPENDED;
     }
 
-    append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name, const void* new_name) noexcept {
+    append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name,
+            const void* new_name) noexcept {
         ondisk_type type = RENAME_DIR_ENTRY;
-        size_t total_size = sizeof(type) + sizeof(rename_dir_entry) + rename_dir_entry.entry_old_name_length + rename_dir_entry.entry_new_name_length;
+        size_t total_size = sizeof(type) + sizeof(rename_dir_entry) + rename_dir_entry.entry_old_name_length +
+                rename_dir_entry.entry_new_name_length;
         if (not fits_for_append(total_size)) {
             return TOO_BIG;
         }

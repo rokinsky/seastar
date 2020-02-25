@@ -40,7 +40,8 @@ constexpr off_t min_device_size = 16*MB;
 constexpr size_t alignment = 4*KB;
 
 static future<temporary_buffer<char>> allocate_random_aligned_buffer(size_t size) {
-    return do_with(temporary_buffer<char>::aligned(alignment, size), std::default_random_engine(testing::local_random_engine()), [size](auto& buffer, auto& random_engine) {
+    return do_with(temporary_buffer<char>::aligned(alignment, size),
+            std::default_random_engine(testing::local_random_engine()), [size](auto& buffer, auto& random_engine) {
         return do_for_each(buffer.get_write(), buffer.get_write() + size, [&](char& c) {
             std::uniform_int_distribution<> character(0, sizeof(char) * 8 - 1);
             c = character(random_engine);
