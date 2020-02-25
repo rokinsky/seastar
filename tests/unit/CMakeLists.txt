@@ -259,10 +259,6 @@ seastar_add_test (bootstrap_record
     bootstrap_record_test.cc
     mock_block_device.hh)
 
-seastar_add_test (cluster_allocator
-  KIND BOOST
-  SOURCES cluster_allocator_test.cc)
-
 seastar_add_test (checked_ptr
   SOURCES checked_ptr_test.cc)
 
@@ -312,6 +308,10 @@ seastar_add_test (file_io
 
 seastar_add_test (foreign_ptr
   SOURCES foreign_ptr_test.cc)
+
+seastar_add_test (fs_cluster_allocator
+  KIND BOOST
+  SOURCES fs_cluster_allocator_test.cc)
 
 seastar_add_test (fs_path
   KIND BOOST
