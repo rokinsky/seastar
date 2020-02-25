@@ -34,106 +34,65 @@
 using namespace seastar;
 using namespace seastar::fs;
 
-constexpr size_t alignment = 4*KB;
-constexpr size_t max_siz = 32*MB; // reasonably larger than alignment
+constexpr unit_size_t alignment = 4*KB;
+constexpr unit_size_t max_siz = 32*MB; // reasonably larger than alignment
 
 BOOST_TEST_DONT_PRINT_LOG_VALUE(to_disk_buffer)
 
-SEASTAR_THREAD_TEST_CASE(initially_empty_test) {
+SEASTAR_THREAD_TEST_CASE(test_initially_empty) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }
 
-SEASTAR_THREAD_TEST_CASE(simple_unaligned_write_test) {
+SEASTAR_THREAD_TEST_CASE(test_simple_write) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
     auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
+    auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
     disk_offset_t len_aligned;
-    disk_buf.append_bytes("asdfasdf", 6);
+    disk_buf.append_bytes("12345678", 6);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-6);
-    disk_buf.append_bytes("xyzxyzxyz", 9);
+    disk_buf.append_bytes("abcdefghi", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-15);
-    disk_buf.flush_to_disk(dev, false).get();
-    len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)15, alignment);
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-15);
-    dev.read<char>(0, buf.get_write(), len_aligned).get();
-    BOOST_REQUIRE_EQUAL(strncmp("asdfasxyzxyzxyz", buf.get(), 15), 0);
-}
-
-SEASTAR_THREAD_TEST_CASE(simple_aligned_write_test) {
-    auto dev_impl = make_shared<mock_block_device_impl>();
-    block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
-    auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
-    auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
-    disk_offset_t len_aligned;
-    disk_buf.append_bytes("asdfasdf", 6);
-    disk_buf.append_bytes("xyzxyzxyz", 9);
     disk_buf.flush_to_disk(dev, true).get();
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)15, alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned);
     dev.read<char>(0, buf.get_write(), len_aligned).get();
-    strncpy(expected_buf.get_write(), "asdfasxyzxyzxyz", max_siz);
-    BOOST_REQUIRE_EQUAL(strncmp(expected_buf.get(), buf.get(), len_aligned), 0);
+    strncpy(expected_buf.get_write(), "123456abcdefghi", max_siz);  // fills with null characters
+    BOOST_REQUIRE_EQUAL(std::memcmp(expected_buf.get(), buf.get(), len_aligned), 0);
 }
 
-SEASTAR_THREAD_TEST_CASE(unaligned_aligned_write_test) {
-    auto dev_impl = make_shared<mock_block_device_impl>();
-    block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
-    auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
-    auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
-    disk_offset_t len_aligned;
-    disk_buf.append_bytes("asdfasdf", 6);
-    disk_buf.append_bytes("xyzxyzxyz", 9);
-    disk_buf.flush_to_disk(dev, false).get();
-    len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)15, alignment);
-    dev.read<char>(0, buf.get_write(), len_aligned).get();
-    BOOST_REQUIRE_EQUAL(strncmp("asdfasxyzxyzxyz", buf.get(), 15), 0);
-
-    disk_buf.append_bytes("1234", 4);
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-19);
-    disk_buf.append_bytes("aaaaaaaaa", 9);
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-28);
-    disk_buf.flush_to_disk(dev, true).get();
-    len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)28, alignment);
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned);
-    dev.read<char>(0, buf.get_write(), len_aligned).get();
-    strncpy(expected_buf.get_write(), "asdfasxyzxyzxyz1234aaaaaaaaa", max_siz);
-    BOOST_REQUIRE_EQUAL(strncmp(expected_buf.get(), buf.get(), len_aligned), 0);
-}
-
-SEASTAR_THREAD_TEST_CASE(aligned_unaligned_write_test) {
+SEASTAR_THREAD_TEST_CASE(test_multiple_write) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
     auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
     auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
     disk_offset_t len_aligned, len_aligned2;
-    disk_buf.append_bytes("1234", 4);
-    disk_buf.append_bytes("aaaaaaaaa", 9);
+    disk_buf.append_bytes("9876", 4);
+    disk_buf.append_bytes("zyxwvutsr", 9);
     disk_buf.flush_to_disk(dev, true).get();
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)13, alignment);
     dev.read<char>(0, buf.get_write(), len_aligned).get();
-    strncpy(expected_buf.get_write(), "1234aaaaaaaaa", max_siz);
-    BOOST_REQUIRE_EQUAL(strncmp(expected_buf.get(), buf.get(), len_aligned), 0);
+    strncpy(expected_buf.get_write(), "9876zyxwvutsr", max_siz);
+    BOOST_REQUIRE_EQUAL(std::memcmp(expected_buf.get(), buf.get(), len_aligned), 0);
 
-    disk_buf.append_bytes("asdfasdf", 6);
+    disk_buf.append_bytes("12345678", 6);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned-6);
-    disk_buf.append_bytes("xyzxyzxyz", 9);
+    disk_buf.append_bytes("abcdefghi", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned-15);
-    disk_buf.flush_to_disk(dev, false).get();
-    std::memcpy(expected_buf.get_write()+len_aligned, "asdfasxyzxyzxyz", 15);
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned-15);
+    disk_buf.flush_to_disk(dev, true).get();
     len_aligned2 = round_up_to_multiple_of_power_of_2(len_aligned+15, alignment);
+    strncpy(expected_buf.get_write()+len_aligned, "123456abcdefghi", len_aligned2-len_aligned);
+    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned2);
     dev.read<char>(0, buf.get_write(), len_aligned2).get();
-    BOOST_REQUIRE_EQUAL(strncmp(expected_buf.get(), buf.get(), len_aligned+15), 0);
+    BOOST_REQUIRE_EQUAL(std::memcmp(expected_buf.get(), buf.get(), len_aligned2), 0);
 }
 
-SEASTAR_THREAD_TEST_CASE(empty_aligned_write_test) {
+SEASTAR_THREAD_TEST_CASE(test_empty_write) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
@@ -141,89 +100,86 @@ SEASTAR_THREAD_TEST_CASE(empty_aligned_write_test) {
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }
 
-SEASTAR_THREAD_TEST_CASE(empty_unaligned_write_test) {
+SEASTAR_THREAD_TEST_CASE(test_empty_append_bytes) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
-    disk_buf.flush_to_disk(dev, false).get();
+    disk_buf.append_bytes("123456", 0);
+    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
+    disk_buf.flush_to_disk(dev, true).get();
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }
 
-SEASTAR_THREAD_TEST_CASE(empty_append_bytes_test) {
-    auto dev_impl = make_shared<mock_block_device_impl>();
-    block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
-    disk_buf.append_bytes("qwerty", 0);
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
-    disk_buf.flush_to_disk(dev, false).get();
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
-}
-
-SEASTAR_THREAD_TEST_CASE(reset_same_offset_test) {
+SEASTAR_THREAD_TEST_CASE(test_reset_same_offset) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
     auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
+    auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
     disk_offset_t len_aligned;
-    disk_buf.append_bytes("123450", 6);
-    disk_buf.flush_to_disk(dev,false).get();
+    disk_buf.append_bytes("987654", 6);
+    disk_buf.flush_to_disk(dev, true).get();
     disk_buf.reset(0);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
     disk_buf.append_bytes("overwrite", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-9);
-    disk_buf.flush_to_disk(dev,false).get();
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-9);
+    disk_buf.flush_to_disk(dev, true).get();
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)9, alignment);
+    strncpy(expected_buf.get_write(), "overwrite", len_aligned);
+    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned);
     dev.read<char>(0, buf.get_write(), len_aligned).get();
-    BOOST_REQUIRE_EQUAL(strncmp("overwrite", buf.get(), 9), 0);
-
+    BOOST_REQUIRE_EQUAL(std::memcmp(expected_buf.get(), buf.get(), len_aligned), 0);
 }
 
-SEASTAR_THREAD_TEST_CASE(reset_new_offset_test) {
+SEASTAR_THREAD_TEST_CASE(test_reset_new_offset) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
     auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
+    auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
     disk_offset_t len_aligned;
-    disk_buf.append_bytes("123450", 6);
-    disk_buf.flush_to_disk(dev,false).get();
+    disk_buf.append_bytes("987654", 6);
+    disk_buf.flush_to_disk(dev, true).get();
     disk_buf.reset(6*alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
-    disk_buf.append_bytes("overwrite", 9);
+    disk_buf.append_bytes("newwrite", 9);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-9);
-    disk_buf.flush_to_disk(dev,false).get();
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-9);
+    disk_buf.flush_to_disk(dev, true).get();
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)6, alignment);
+    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz-len_aligned);
     dev.read<char>(0, buf.get_write(), len_aligned).get();
-    BOOST_REQUIRE_EQUAL(strncmp("123450", buf.get(), 6), 0);
+    strncpy(expected_buf.get_write(), "987654", len_aligned);
+    BOOST_REQUIRE_EQUAL(std::memcmp(expected_buf.get(), buf.get(), 6), 0);
     len_aligned = round_up_to_multiple_of_power_of_2((disk_offset_t)9, alignment);
+    strncpy(expected_buf.get_write(), "newwrite", len_aligned);
     dev.read<char>(6*alignment, buf.get_write(), len_aligned).get();
-    BOOST_REQUIRE_EQUAL(strncmp("overwrite", buf.get(), 9), 0);
+    BOOST_REQUIRE_EQUAL(std::memcmp(expected_buf.get(), buf.get(), 6), 0);
 }
 
-SEASTAR_THREAD_TEST_CASE(combined_test) {
+SEASTAR_THREAD_TEST_CASE(test_combined) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
     auto disk_buf = to_disk_buffer(max_siz, alignment, 0);
     auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
     auto inp = temporary_buffer<char>::aligned(alignment, max_siz);
-    strncpy(inp.get_write(), "abcdefghiju8y7t6r5XXq1q2q3YYYY", max_siz); // fills to max_siz with null characters
-    disk_offset_t beg = 0, beg_aligned = 0, end = 0, end_aligned;
+    auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
+    strncpy(inp.get_write(), "abcdefghij12345678**987654****", max_siz); // fills to max_siz with null characters
+    disk_offset_t beg = 0, end = 0;
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
 
     disk_buf.append_bytes(inp.get(), 10);
     end += 10;
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
 
-    disk_buf.flush_to_disk(dev, false).get();
-    end_aligned = round_up_to_multiple_of_power_of_2(end, alignment);
+    disk_buf.flush_to_disk(dev, true).get();
+    end = round_up_to_multiple_of_power_of_2(end, alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
 
-    dev.read<char>(beg_aligned, buf.get_write(), end_aligned-beg_aligned).get();
-    BOOST_REQUIRE_EQUAL(strncmp(inp.get(), buf.get()+beg-beg_aligned, end-beg), 0);
+    dev.read<char>(beg, buf.get_write(), end-beg).get();
+    strncpy(expected_buf.get_write(), "abcdefghij", end-beg);
+    BOOST_REQUIRE_EQUAL(std::memcmp(expected_buf.get(), buf.get(), end-beg), 0);
 
     beg = end;
-    beg_aligned = round_down_to_multiple_of_power_of_2(beg, alignment);
     disk_buf.append_bytes(inp.get()+10, 8);
     end += 8;
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
@@ -233,23 +189,19 @@ SEASTAR_THREAD_TEST_CASE(combined_test) {
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
 
     disk_buf.flush_to_disk(dev, true).get();
-    end_aligned = round_up_to_multiple_of_power_of_2(end, alignment);
-    BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end_aligned);
-
-    dev.read<char>(beg_aligned, buf.get_write(), end_aligned-beg_aligned).get();
-    BOOST_REQUIRE_EQUAL(strncmp(inp.get_write()+10, buf.get()+beg-beg_aligned, 8), 0);
-    BOOST_REQUIRE_EQUAL(strncmp(inp.get_write()+20, buf.get()+beg-beg_aligned+8, 6), 0);
-    BOOST_REQUIRE_EQUAL(strncmp(inp.get_write()+30, buf.get()+beg-beg_aligned+14, end_aligned-end), 0);
-
-    end = end_aligned;
-    disk_buf.append_bytes(inp.get()+26, 4);
-    end += 4;
+    end = round_up_to_multiple_of_power_of_2(end, alignment);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz - end);
+
+    dev.read<char>(beg, buf.get_write(), end-beg).get();
+    std::memset(expected_buf.get_write(), 0, end-beg);
+    strncpy(expected_buf.get_write(), inp.get()+10, 8);
+    strncpy(expected_buf.get_write()+8, inp.get()+20, 6);
+    BOOST_REQUIRE_EQUAL(std::memcmp(expected_buf.get(), buf.get(), end-beg), 0);
 
     disk_buf.reset(alignment*3);
     end = beg = alignment*3;
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 
-    disk_buf.flush_to_disk(dev, false).get();
+    disk_buf.flush_to_disk(dev, true).get();
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }

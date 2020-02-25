@@ -305,6 +305,11 @@ seastar_add_test (fs_path
   KIND BOOST
   SOURCES fs_path_test.cc)
 
+seastar_add_test (fs_to_disk_buffer
+  SOURCES
+    fs_to_disk_buffer_test.cc
+    mock_block_device.hh)
+
 seastar_add_test (fstream
   SOURCES
     fstream_test.cc
@@ -443,11 +448,6 @@ add_custom_command (
 #   DEPENDS ${out_tls_certificate_files}
 #   SOURCES tls_test.cc
 #   WORKING_DIRECTORY ${Seastar_BINARY_DIR})
-
-seastar_add_test (to_disk_buffer
-  SOURCES
-    to_disk_buffer_test.cc
-    mock_block_device.hh)
 
 seastar_add_test (tuple_utils
   KIND BOOST
