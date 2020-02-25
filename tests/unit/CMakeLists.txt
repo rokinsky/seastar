@@ -250,11 +250,6 @@ seastar_add_test (allocator
 seastar_add_app_test (alien
   SOURCES alien_test.cc)
 
-seastar_add_test (bootstrap_record
-  SOURCES
-    bootstrap_record_test.cc
-    mock_block_device.hh)
-
 seastar_add_test (checked_ptr
   SOURCES checked_ptr_test.cc)
 
@@ -308,6 +303,11 @@ seastar_add_test (foreign_ptr
 seastar_add_app_test (fs_block_device
   SOURCES fs_block_device_test.cc
   LIBRARIES seastar_testing)
+
+seastar_add_test (fs_bootstrap_record
+  SOURCES
+    fs_bootstrap_record_test.cc
+    mock_block_device.hh)
 
 seastar_add_test (fs_cluster_allocator
   KIND BOOST
