@@ -347,8 +347,6 @@ seastar_add_test (rpc
     rpc_test.cc)
 
 if (Seastar_EXPERIMENTAL_FS)
-  seastar_add_test (seastarfs
-    SOURCES seastarfs_test.cc)
   seastar_add_test (cluster_allocator
     KIND BOOST
     SOURCES cluster_allocator_test.cc)
@@ -357,6 +355,8 @@ if (Seastar_EXPERIMENTAL_FS)
     LIBRARIES seastar_testing)
   seastar_add_test (fs_bootstrap_record
     SOURCES fs_bootstrap_record_test.cc)
+  seastar_add_test (fs_seastarfs
+    SOURCES fs_seastarfs_test.cc)
 endif()
 
 seastar_add_test (semaphore
