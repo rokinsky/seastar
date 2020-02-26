@@ -51,13 +51,13 @@ public:
     explicit operator bool() const noexcept { return bool(_block_device_impl); }
 
     template <typename CharType>
-    future<size_t> read(uint64_t aligned_pos, CharType* aligned_buffer, size_t aligned_len, const io_priority_class& pc = default_priority_class()) {
-        return _block_device_impl->read(aligned_pos, aligned_buffer, aligned_len, pc);
+    future<size_t> read(uint64_t aligned_offset, CharType* aligned_buffer, size_t aligned_len, const io_priority_class& pc = default_priority_class()) {
+        return _block_device_impl->read(aligned_offset, aligned_buffer, aligned_len, pc);
     }
 
     template <typename CharType>
-    future<size_t> write(uint64_t aligned_pos, const CharType* aligned_buffer, size_t aligned_len, const io_priority_class& pc = default_priority_class()) {
-        return _block_device_impl->write(aligned_pos, aligned_buffer, aligned_len, pc);
+    future<size_t> write(uint64_t aligned_offset, const CharType* aligned_buffer, size_t aligned_len, const io_priority_class& pc = default_priority_class()) {
+        return _block_device_impl->write(aligned_offset, aligned_buffer, aligned_len, pc);
     }
 
     future<> flush() {
@@ -93,7 +93,7 @@ public:
     }
 };
 
-inline future<block_device> open_block_device(sstring name) {
+inline future<block_device> open_block_device(std::string name) {
     return open_file_dma(std::move(name), open_flags::rw).then([](file f) {
         return block_device(make_shared<file_block_device_impl>(std::move(f)));
     });

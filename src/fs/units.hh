@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include "range.hh"
+#include "fs/range.hh"
 
 #include <cstdint>
 
@@ -34,5 +34,7 @@ using disk_range = range<disk_offset_t>;
 
 using file_offset_t = uint64_t;
 using file_range = range<file_offset_t>;
+
+using fs_shard_id_t = uint32_t;
 
 } // namespace seastar::fs
