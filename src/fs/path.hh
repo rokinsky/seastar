@@ -25,13 +25,18 @@
 
 namespace seastar::fs {
 
-// Returns the last component in @p path. WARNING: The last component is empty iff @p path is empty or ends with '/'
-std::string last_component(const std::string& path) {
+// Extracts the last component in @p path. WARNING: The last component is empty iff @p path is empty or ends with '/'
+std::string extract_last_component(std::string& path) {
     auto beg = path.find_last_of('/');
     if (beg == path.npos) {
-        return path;
+        std::string res = std::move(path);
+        path = {};
+        return res;
     }
-    return path.substr(beg + 1);
+
+    auto res = path.substr(beg + 1);
+    path.resize(beg + 1);
+    return res;
 }
 
 } // namespace seastar::fs

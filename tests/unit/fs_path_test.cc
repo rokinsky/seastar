@@ -27,16 +27,64 @@
 using namespace seastar::fs;
 
 BOOST_AUTO_TEST_CASE(last_component_simple) {
-    BOOST_REQUIRE_EQUAL(last_component(""), "");
-    BOOST_REQUIRE_EQUAL(last_component("/"), "");
-    BOOST_REQUIRE_EQUAL(last_component("/foo/bar.txt"), "bar.txt");
-    BOOST_REQUIRE_EQUAL(last_component("/foo/.bar"), ".bar");
-    BOOST_REQUIRE_EQUAL(last_component("/foo/bar/"), "");
-    BOOST_REQUIRE_EQUAL(last_component("/foo/."), ".");
-    BOOST_REQUIRE_EQUAL(last_component("/foo/.."), "..");
-    BOOST_REQUIRE_EQUAL(last_component("bar.txt"), "bar.txt");
-    BOOST_REQUIRE_EQUAL(last_component(".bar"), ".bar");
-    BOOST_REQUIRE_EQUAL(last_component("."), ".");
-    BOOST_REQUIRE_EQUAL(last_component(".."), "..");
-    BOOST_REQUIRE_EQUAL(last_component("//host"), "host");
+    {
+        std::string str = "";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), "");
+        BOOST_REQUIRE_EQUAL(str, "");
+    }
+    {
+        std::string str = "/";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), "");
+        BOOST_REQUIRE_EQUAL(str, "/");
+    }
+    {
+        std::string str = "/foo/bar.txt";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), "bar.txt");
+        BOOST_REQUIRE_EQUAL(str, "/foo/");
+    }
+    {
+        std::string str = "/foo/.bar";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), ".bar");
+        BOOST_REQUIRE_EQUAL(str, "/foo/");
+    }
+    {
+        std::string str = "/foo/bar/";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), "");
+        BOOST_REQUIRE_EQUAL(str, "/foo/bar/");
+    }
+    {
+        std::string str = "/foo/.";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), ".");
+        BOOST_REQUIRE_EQUAL(str, "/foo/");
+    }
+    {
+        std::string str = "/foo/..";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), "..");
+        BOOST_REQUIRE_EQUAL(str, "/foo/");
+    }
+    {
+        std::string str = "bar.txt";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), "bar.txt");
+        BOOST_REQUIRE_EQUAL(str, "");
+    }
+    {
+        std::string str = ".bar";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), ".bar");
+        BOOST_REQUIRE_EQUAL(str, "");
+    }
+    {
+        std::string str = ".";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), ".");
+        BOOST_REQUIRE_EQUAL(str, "");
+    }
+    {
+        std::string str = "..";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), "..");
+        BOOST_REQUIRE_EQUAL(str, "");
+    }
+    {
+        std::string str = "//host";
+        BOOST_REQUIRE_EQUAL(extract_last_component(str), "host");
+        BOOST_REQUIRE_EQUAL(str, "//");
+    }
 }
