@@ -255,10 +255,10 @@ public:
     future<> close_file(inode_t inode) { return make_ready_future(); }
 
     // Creates name (@p path) for a file (@p inode)
-    future<> link(inode_t inode, std::string path);
+    future<> link_file(inode_t inode, std::string path);
 
     // Creates name (@p destination) for a file (not directory) @p source
-    future<> link(std::string source, std::string destination);
+    future<> link_file(std::string source, std::string destination);
 
     future<> unlink_file(std::string path);
 
