@@ -45,7 +45,7 @@ class create_file_operation {
             }
         }
 
-        _entry_name = last_component(path);
+        _entry_name = extract_last_component(path);
         if (_entry_name.empty()) {
             if (is_directory) {
                 return make_exception_future<inode_t>(std::runtime_error("Invalid path"));
@@ -53,10 +53,9 @@ class create_file_operation {
                 return make_exception_future<inode_t>(std::runtime_error("Path has to end with character different than '/'"));
             }
         }
+        assert(path.empty() or path.back() == '/'); // Hence fast-check for "is directory" is done in path_lookup
 
         _perms = perms;
-        path.erase(path.end() - _entry_name.size(), path.end());
-        assert(path.empty() or path.back() == '/'); // Hence fast-check for "is directory" is done in path_lookup
         return _metadata_log.path_lookup(path).then([this](inode_t dir_inode) {
             _dir_inode = dir_inode;
             return with_semaphore(_metadata_log._create_or_delete_lock, 1, [this] {
