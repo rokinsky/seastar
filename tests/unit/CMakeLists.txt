@@ -374,6 +374,10 @@ if (Seastar_EXPERIMENTAL_FS)
     SOURCES fs_path_test.cc)
   seastar_add_test (fs_seastarfs
     SOURCES fs_seastarfs_test.cc)
+  seastar_add_test (fs_to_disk_buffer
+    SOURCES
+      fs_to_disk_buffer_test.cc
+      mock_block_device.hh)
 endif()
 
 seastar_add_test (semaphore
