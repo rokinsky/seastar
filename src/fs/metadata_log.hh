@@ -33,7 +33,6 @@
 #include "seastar/core/file-types.hh"
 #include "seastar/core/future-util.hh"
 #include "seastar/core/future.hh"
-#include "seastar/core/semaphore.hh"
 #include "seastar/core/shared_future.hh"
 #include "seastar/core/shared_ptr.hh"
 #include "seastar/core/temporary_buffer.hh"
@@ -42,6 +41,7 @@
 #include <cstddef>
 #include <exception>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 namespace seastar::fs {
@@ -102,28 +102,91 @@ class metadata_log {
     shard_inode_allocator _inode_allocator;
 
     // Locks used to ensure metadata consistency while allowing concurrent usage.
-    // Whenever one wants to create or delete inode or directory entry _create_or_delete_lock have to be acquired first.
-    // Then appropriate unique lock for the inode / dir entry that will appear / disappear and after that the operation
-    // should take place. Shared locks should be used only to ensure that an inode / dir entry won't disappear / appear,
-    // while some action is performed.
-    // All this is to ensure we won't end up with a deadlock and that assumptions can be "acquired" about
-    // inode's / dir entry's existence without constant checking for it. We assume that inode / dir entry
-    // creation / deletion are not the primary operations that take place, so a global lock can be used for them. Other
-    // operations use shared locks to maximize concurrency.
-    // E.g.
-    // To create file, _create_or_delete_lock is acquired first, then corresponding dir entry is unique-locked and
-    // finally file creation is performed (notice that we do not have to acquire shared lock on the directory to which
-    // we add entry because we hold global lock, so it won't disappear in the meantime).
-    // To make a read or write to a file, a shared lock is acquired on its inode and then the operation is performed.
-    // Motivation:
-    // Global unique lock ensures that only one operation using unique locks on inode / dir entry takes place at any
-    // time. "Local" unique locks ensure that resource is not used by anyone else. Regarding deadlocks, the only place
-    // for a deadlock to appear is while unique lock is taken on an inode / dir entry. As far as, the operation holding
-    // global lock acquires only one locks it's all good. If two are acquired at the same time, an extreme caution
-    // should be used and if possible two unique locks should be avoided.
-    value_shared_lock<inode_t> _inode_locks;
-    value_shared_lock<std::pair<inode_t, std::string>> _dir_entry_locks;
-    semaphore _create_or_delete_lock {1};
+    //
+    // Whenever one wants to create or delete inode or directory entry, one has to acquire appropriate unique lock for
+    // the inode / dir entry that will appear / disappear and only after locking that operation should take place.
+    // Shared locks should be used only to ensure that an inode / dir entry won't disappear / appear, while some action
+    // is performed. Therefore, unique locks ensure that resource is not used by anyone else.
+    //
+    // IMPORTANT: if an operation needs to acquire more than one lock, it has to be done with *one* call to
+    //   locks::with_locks() because it is ensured there that a deadlock-free locking order is used (for details see
+    //   that function).
+    //
+    // Examples:
+    // - To create file we have to take shared lock (SL) on the directory to which we add a dir entry and
+    //   unique lock (UL) on the added entry in this directory. SL is taken because the directory should not disappear.
+    //   UL is taken, because we do not want the entry to appear while we are creating it.
+    // - To read or write to a file, a SL is acquired on its inode and then the operation is performed.
+    class locks {
+        value_shared_lock<inode_t> _inode_locks;
+        value_shared_lock<std::pair<inode_t, std::string>> _dir_entry_locks;
+
+    public:
+        struct shared {
+            inode_t inode;
+            std::optional<std::string> dir_entry;
+        };
+
+        template<class T>
+        static constexpr bool is_shared = std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>, shared>;
+
+        struct unique {
+            inode_t inode;
+            std::optional<std::string> dir_entry;
+        };
+
+        template<class T>
+        static constexpr bool is_unique = std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>, unique>;
+
+        template<class Kind, class Func>
+        auto with_lock(Kind kind, Func&& func) {
+            static_assert(is_shared<Kind> or is_unique<Kind>);
+            if constexpr (is_shared<Kind>) {
+                if (kind.dir_entry.has_value()) {
+                    return _dir_entry_locks.with_shared_on({kind.inode, std::move(*kind.dir_entry)},
+                            std::forward<Func>(func));
+                } else {
+                    return _inode_locks.with_shared_on(kind.inode, std::forward<Func>(func));
+                }
+            } else {
+                if (kind.dir_entry.has_value()) {
+                    return _dir_entry_locks.with_lock_on({kind.inode, std::move(*kind.dir_entry)},
+                            std::forward<Func>(func));
+                } else {
+                    return _inode_locks.with_lock_on(kind.inode, std::forward<Func>(func));
+                }
+            }
+        }
+
+    private:
+        template<class Kind1, class Kind2, class Func>
+        auto with_locks_in_order(Kind1 kind1, Kind2 kind2, Func func) {
+            // Func is not an universal reference because we will have to store it
+            return with_lock(std::move(kind1), [this, kind2 = std::move(kind2), func = std::move(func)] () mutable {
+                return with_lock(std::move(kind2), std::move(func));
+            });
+        };
+
+    public:
+
+        template<class Kind1, class Kind2, class Func>
+        auto with_locks(Kind1 kind1, Kind2 kind2, Func&& func) {
+            static_assert(is_shared<Kind1> or is_unique<Kind1>);
+            static_assert(is_shared<Kind2> or is_unique<Kind2>);
+
+            // Locking order is as follows: kind with lower tuple (inode, dir_entry) goes first.
+            // This order is linear and we always lock in one direction, so the graph of locking relations (A -> B iff
+            // lock on A is acquired and lock on B is acquired / being acquired) makes a DAG. Thus, deadlock is
+            // impossible, as it would require a cycle to appear.
+            std::pair<inode_t, std::optional<std::string>&> k1 {kind1.inode, kind1.dir_entry};
+            std::pair<inode_t, std::optional<std::string>&> k2 {kind2.inode, kind2.dir_entry};
+            if (k1 < k2) {
+                return with_locks_in_order(std::move(kind1), std::move(kind2), std::forward<Func>(func));
+            } else {
+                return with_locks_in_order(std::move(kind2), std::move(kind1), std::forward<Func>(func));
+            }
+        }
+    } _locks;
 
     // TODO: for compaction: keep some set(?) of inode_data_vec, so that we can keep track of clusters that have lowest
     //       utilization (up-to-date data)
@@ -139,7 +202,8 @@ public:
     metadata_log(const metadata_log&) = delete;
     metadata_log& operator=(const metadata_log&) = delete;
 
-    future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters, fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id);
+    future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters,
+            fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id);
 
 private:
     void write_update(inode_info::file& file, inode_data_vec new_data_vec);
@@ -223,9 +287,7 @@ public:
                     if (it == _inodes.end()) {
                         return make_ready_future<stop_iteration>(stop_iteration::yes); // Directory disappeared
                     }
-                    if (not it->second.is_directory()) {
-                        return make_ready_future<stop_iteration>(stop_iteration::yes); // Directory became a file
-                    }
+                    assert(it->second.is_directory() and "Directory cannot become a file");
                     auto& dir = it->second.get_directory();
 
                     auto entry_it = dir.entries.upper_bound(prev_entry);

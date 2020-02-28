@@ -53,37 +53,37 @@ class create_file_operation {
                 return make_exception_future<inode_t>(std::runtime_error("Path has to end with character different than '/'"));
             }
         }
-        assert(path.empty() or path.back() == '/'); // Hence fast-check for "is directory" is done in path_lookup
+        assert(path.empty() or path.back() == '/'); // Hence fast-checking for "is directory" is done in path_lookup
 
         _perms = perms;
         return _metadata_log.path_lookup(path).then([this](inode_t dir_inode) {
             _dir_inode = dir_inode;
-            return with_semaphore(_metadata_log._create_or_delete_lock, 1, [this] {
-                // We do not have to shared lock dir_inode because we hold global lock
+            auto dir_it = _metadata_log._inodes.find(_dir_inode);
+            if (dir_it == _metadata_log._inodes.end()) {
+                return make_exception_future<inode_t>(operation_became_invalid_exception());
+            }
+            assert(dir_it->second.is_directory() and "Directory cannot become file or there is a BUG in path_lookup");
+            _dir_info = &dir_it->second.get_directory();
+            return _metadata_log._locks.with_locks(metadata_log::locks::shared {dir_inode},
+                    metadata_log::locks::unique {dir_inode, _entry_name}, [this] {
                 return create_file_in_directory();
             });
         });
     }
 
     future<inode_t> create_file_in_directory() {
-        auto dir_it = _metadata_log._inodes.find(_dir_inode);
-        if (dir_it == _metadata_log._inodes.end() or not dir_it->second.is_directory()) {
+        if (_metadata_log._inodes.count(_dir_inode) != 1) {
             return make_exception_future<inode_t>(operation_became_invalid_exception());
         }
 
-        _dir_info = &dir_it->second.get_directory();
-        return _metadata_log._dir_entry_locks.with_lock_on({_dir_inode, _entry_name}, [this] {
-            return do_create_file_in_directory();
-        });
-    }
-
-    future<inode_t> do_create_file_in_directory() {
         if (_dir_info->entries.count(_entry_name) != 0) {
             return make_exception_future<inode_t>(file_already_exists_exception());
         }
 
         decltype(_ondisk_entry.entry_name_length) entry_name_length;
         if (_entry_name.size() > std::numeric_limits<decltype(entry_name_length)>::max()) {
+            // TODO: add an assert that the culster_size is not too small as it would cause to allocate all clusters
+            //       and then return error ENOSPACE
             return make_exception_future<inode_t>(filename_too_long_exception());
         }
         entry_name_length = _entry_name.size();
