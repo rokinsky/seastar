@@ -654,7 +654,7 @@ if (Seastar_EXPERIMENTAL_FS)
   target_sources(seastar
     PRIVATE
     # SeastarFS source files
-    include/seastar/fs/block_device.hh 
+    include/seastar/fs/block_device.hh
     include/seastar/fs/file.hh
     include/seastar/fs/overloaded.hh
     include/seastar/fs/temporary_file.hh
@@ -667,9 +667,18 @@ if (Seastar_EXPERIMENTAL_FS)
     src/fs/crc.hh
     src/fs/file.cc
     src/fs/inode.hh
+    src/fs/inode_info.hh
+    src/fs/metadata_disk_entries.hh
+    src/fs/metadata_log.cc
+    src/fs/metadata_log.hh
+    src/fs/metadata_log_bootstrap.hh
+    src/fs/metadata_log_operations/create_file.hh
+    src/fs/metadata_to_disk_buffer.hh
     src/fs/path.hh
     src/fs/range.hh
+    src/fs/to_disk_buffer.hh
     src/fs/units.hh
+    src/fs/unix_metadata.hh
     src/fs/value_shared_lock.hh
   )
 endif()
