@@ -43,7 +43,7 @@ public:
     auto with_shared_on(const Value& val, Func&& func) {
         auto it = _locks.emplace(val, lock_info {}).first;
         ++it->second.users_num;
-        return with_shared(it->second.lock, func).finally([this, it] {
+        return with_shared(it->second.lock, std::forward<Func>(func)).finally([this, it] {
             if (--it->second.users_num == 0) {
                 _locks.erase(it);
             }
@@ -54,7 +54,7 @@ public:
     auto with_lock_on(const Value& val, Func&& func) {
         auto it = _locks.emplace(val, lock_info {}).first;
         ++it->second.users_num;
-        return with_lock(it->second.lock, func).finally([this, it] {
+        return with_lock(it->second.lock, std::forward<Func>(func)).finally([this, it] {
             if (--it->second.users_num == 0) {
                 _locks.erase(it);
             }
