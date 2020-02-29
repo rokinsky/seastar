@@ -25,6 +25,7 @@
 #include "fs/inode.hh"
 #include "fs/inode_info.hh"
 #include "fs/metadata_disk_entries.hh"
+#include "fs/metadata_to_disk_buffer.hh"
 #include "fs/units.hh"
 #include "fs/metadata_log.hh"
 #include "seastar/core/do_with.hh"
@@ -134,8 +135,8 @@ class metadata_log_bootstrap {
                 return bootstrap_cluster(curr_cluster);
             }).then([this, &last_cluster] {
                 // Initialize _curr_cluster_buff
-                _metadata_log._curr_cluster_buff = make_lw_shared<metadata_to_disk_buffer>(_metadata_log._cluster_size,
-                        _metadata_log._alignment, 0);
+                _metadata_log._curr_cluster_buff = _metadata_log._curr_cluster_buff->create_new(
+                        _metadata_log._cluster_size, _metadata_log._alignment, 0);
                 _metadata_log._curr_cluster_buff->reset_from_bootstrapped_cluster(cluster_id_to_offset(last_cluster,
                         _metadata_log._cluster_size), _curr_cluster.curr_pos());
             });

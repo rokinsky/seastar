@@ -51,18 +51,22 @@
 
 namespace seastar::fs {
 
-metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment)
+metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment,
+    shared_ptr<metadata_to_disk_buffer> cluster_buff)
 : _device(std::move(device))
 , _cluster_size(cluster_size)
 , _alignment(alignment)
+, _curr_cluster_buff(std::move(cluster_buff))
 , _cluster_allocator({}, {})
 , _inode_allocator(1, 0) {
     assert(is_power_of_2(alignment));
     assert(cluster_size > 0 and cluster_size % alignment == 0);
 }
 
-future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters, fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id) {
-    return metadata_log_bootstrap::bootstrap(*this, root_dir, first_metadata_cluster_id, available_clusters, fs_shards_pool_size, fs_shard_id);
+future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters,
+        fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id) {
+    return metadata_log_bootstrap::bootstrap(*this, root_dir, first_metadata_cluster_id, available_clusters,
+            fs_shards_pool_size, fs_shard_id);
 }
 
 void metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata) {
@@ -196,7 +200,7 @@ future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
     schedule_curr_cluster_flush();
 
     // Make next cluster the current cluster to allow writing of next metadata entries before flushing finishes
-    _curr_cluster_buff = make_lw_shared<metadata_to_disk_buffer>(_cluster_size, _alignment, cluster_id_to_offset(*next_cluster, _cluster_size));
+    _curr_cluster_buff = make_shared<metadata_to_disk_buffer>(_cluster_size, _alignment, cluster_id_to_offset(*next_cluster, _cluster_size));
 
     return _previous_flushes.get_future();
 }
