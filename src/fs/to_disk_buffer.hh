@@ -35,32 +35,28 @@ class to_disk_buffer {
 protected:
     temporary_buffer<uint8_t> _buff;
     const unit_size_t _alignment;
-    disk_offset_t _disk_write_offset; // disk offset that corresponds to _buff.begin()
+    disk_offset_t _cluster_beg_offset; // disk offset that corresponds to _buff.begin()
     range<size_t> _unflushed_data; // range of unflushed bytes in _buff
 
 public:
-    // Represents buffer that will be written to a block_device at offset @p disk_aligned_write_offset. Total number of
-    // bytes appended cannot exceed @p aligned_max_size.
-    to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
+    // Represents buffer that will be written to a block_device. Method init() should be called after constructor to
+    // finish construction. Total number of bytes appended cannot exceed @p aligned_max_size.
+    to_disk_buffer(size_t aligned_max_size, unit_size_t alignment)
     : _buff(decltype(_buff)::aligned(alignment, aligned_max_size))
     , _alignment(alignment)
-    , _disk_write_offset(disk_aligned_write_offset)
     , _unflushed_data {0, 0} {
         assert(is_power_of_2(alignment));
-        assert(mod_by_power_of_2(disk_aligned_write_offset, alignment) == 0);
         assert(mod_by_power_of_2(aligned_max_size, alignment) == 0);
+    }
+
+    // @p cluster_beg_offset is the disk offset of the beginning of the cluster
+    virtual void init(disk_offset_t cluster_beg_offset) {
+        _cluster_beg_offset = cluster_beg_offset;
+        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
         start_new_unflushed_data();
     }
 
     virtual ~to_disk_buffer() = default;
-
-    // Clears buffer, leaving it in state as if it was just constructed
-    virtual void reset(disk_offset_t new_disk_aligned_write_offset) noexcept {
-        assert(mod_by_power_of_2(new_disk_aligned_write_offset, _alignment) == 0);
-        _disk_write_offset = new_disk_aligned_write_offset;
-        _unflushed_data = {0, 0};
-        start_new_unflushed_data();
-    }
 
     /**
      * @brief Writes buffered (unflushed) data to disk and starts a new unflushed data if there is enough space
@@ -95,7 +91,7 @@ public:
             start_new_unflushed_data();
         }
 
-        return device.write(_disk_write_offset + real_write.beg, _buff.get_write() + real_write.beg, real_write.size())
+        return device.write(_cluster_beg_offset + real_write.beg, _buff.get_write() + real_write.beg, real_write.size())
                 .then([real_write](size_t written_bytes) {
             if (written_bytes != real_write.size()) {
                 return make_exception_future<>(std::runtime_error("Partial write"));

@@ -200,7 +200,8 @@ future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
     schedule_curr_cluster_flush();
 
     // Make next cluster the current cluster to allow writing of next metadata entries before flushing finishes
-    _curr_cluster_buff = make_shared<metadata_to_disk_buffer>(_cluster_size, _alignment, cluster_id_to_offset(*next_cluster, _cluster_size));
+    _curr_cluster_buff->virtual_constructor(_cluster_size, _alignment);
+    _curr_cluster_buff->init(cluster_id_to_offset(*next_cluster, _cluster_size));
 
     return _previous_flushes.get_future();
 }
