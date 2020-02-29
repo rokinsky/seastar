@@ -22,7 +22,7 @@
 #pragma once
 
 #include "fs/metadata_to_disk_buffer.hh"
-#include <bits/stdint-uintn.h>
+#include <seastar/core/temporary_buffer.hh>
 #include <stdint.h>
 #include <variant>
 #include <vector>
@@ -31,28 +31,28 @@ namespace seastar::fs {
 
 struct ondisk_small_write {
     ondisk_small_write_header header;
-    std::vector<uint8_t> data;
+    temporary_buffer<uint8_t> data;
 };
 
 struct ondisk_add_dir_entry {
     ondisk_add_dir_entry_header header;
-    std::vector<uint8_t> entry_name;
+    temporary_buffer<uint8_t> entry_name;
 };
 
 struct ondisk_create_inode_as_dir_entry {
     ondisk_create_inode_as_dir_entry_header header;
-    std::vector<uint8_t> entry_name;
+    temporary_buffer<uint8_t> entry_name;
 };
 
 struct ondisk_delete_dir_entry {
     ondisk_delete_dir_entry_header header;
-    std::vector<uint8_t> entry_name;
+    temporary_buffer<uint8_t> entry_name;
 };
 
 struct ondisk_rename_dir_entry {
     ondisk_rename_dir_entry_header header;
-    std::vector<uint8_t> old_name;
-    std::vector<uint8_t> new_name;
+    temporary_buffer<uint8_t> old_name;
+    temporary_buffer<uint8_t> new_name;
 };
 
 class mock_metadata_to_disk_buffer : public metadata_to_disk_buffer {
@@ -61,7 +61,7 @@ public:
         : metadata_to_disk_buffer(aligned_max_size, alignment) {}
 
     // keep container with all buffers created by virtual_constructor
-    inline static thread_local std::vector<shared_ptr<metadata_to_disk_buffer>> created_buffers;
+    inline static thread_local std::vector<shared_ptr<mock_metadata_to_disk_buffer>> created_buffers;
 
     virtual shared_ptr<metadata_to_disk_buffer> virtual_constructor(size_t aligned_max_size,
             unit_size_t alignment) const override {
@@ -236,9 +236,9 @@ public:
     }
 
 private:
-    std::vector<uint8_t> copy_data(const void* data, size_t length) {
+    temporary_buffer<uint8_t> copy_data(const void* data, size_t length) {
         const uint8_t* data_bytes = static_cast<const uint8_t*>(data);
-        return std::vector<uint8_t>(data_bytes, data_bytes + length);
+        return temporary_buffer<uint8_t>(data_bytes, length);
     }
 
 public:
