@@ -60,9 +60,14 @@ public:
     mock_metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
         : metadata_to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset) {}
 
+    // keep container with all buffers created by create_new
+    static std::vector<shared_ptr<metadata_to_disk_buffer>> created_buffers;
+
     virtual shared_ptr<metadata_to_disk_buffer> create_new(size_t aligned_max_size, unit_size_t alignment,
             disk_offset_t disk_aligned_write_offset) const override {
-        return make_shared<mock_metadata_to_disk_buffer>(aligned_max_size, alignment, disk_aligned_write_offset);
+        auto new_buffer = make_shared<mock_metadata_to_disk_buffer>(aligned_max_size, alignment, disk_aligned_write_offset);
+        mock_metadata_to_disk_buffer::created_buffers.emplace_back(new_buffer);
+        return new_buffer;
     }
 
     struct action {
@@ -269,5 +274,7 @@ public:
     }
 
 };
+
+std::vector<shared_ptr<metadata_to_disk_buffer>> mock_metadata_to_disk_buffer::created_buffers = {};
 
 } // namespace seastar::fs
