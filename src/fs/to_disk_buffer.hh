@@ -55,7 +55,7 @@ public:
     virtual ~to_disk_buffer() = default;
 
     // Clears buffer, leaving it in state as if it was just constructed
-    void reset(disk_offset_t new_disk_aligned_write_offset) noexcept {
+    virtual void reset(disk_offset_t new_disk_aligned_write_offset) noexcept {
         assert(mod_by_power_of_2(new_disk_aligned_write_offset, _alignment) == 0);
         _disk_write_offset = new_disk_aligned_write_offset;
         _unflushed_data = {0, 0};
@@ -72,7 +72,7 @@ public:
      *
      * @param device output device
      */
-    future<> flush_to_disk(block_device device) {
+    virtual future<> flush_to_disk(block_device device) {
         prepare_unflushed_data_for_flush();
         // Data layout overview:
         // |.........................|00000000000000000000000|
@@ -120,7 +120,7 @@ public:
     }
 
     // Returns maximum number of bytes that may be written to buffer without calling reset()
-    size_t bytes_left() const noexcept { return _buff.size() - _unflushed_data.end; }
+    virtual size_t bytes_left() const noexcept { return _buff.size() - _unflushed_data.end; }
 
     virtual size_t bytes_left_after_flush_if_done_now() const noexcept {
         return _buff.size() - round_up_to_multiple_of_power_of_2(_unflushed_data.end, _alignment);
