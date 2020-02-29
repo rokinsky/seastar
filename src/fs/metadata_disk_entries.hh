@@ -186,4 +186,33 @@ struct ondisk_rename_dir_entry_header {
     // After header come: first old_name, then new_name
 } __attribute__((packed));
 
+template<typename T>
+inline size_t get_ondisk_entry_size(const T& entry) {
+    static_assert(std::is_same_v<T, ondisk_next_metadata_cluster> ||
+            std::is_same_v<T, ondisk_create_inode> ||
+            std::is_same_v<T, ondisk_update_metadata> ||
+            std::is_same_v<T, ondisk_delete_inode> ||
+            std::is_same_v<T, ondisk_medium_write> ||
+            std::is_same_v<T, ondisk_large_write> ||
+            std::is_same_v<T, ondisk_large_write_without_mtime> ||
+            std::is_same_v<T, ondisk_truncate> ||
+            std::is_same_v<T, ondisk_mtime_update>, "ondisk entry size not defined for given type");
+    return sizeof(ondisk_type) + sizeof(entry);
+}
+inline size_t get_ondisk_entry_size(const ondisk_small_write_header& entry) {
+    return sizeof(ondisk_type) + sizeof(entry) + entry.length;
+}
+inline size_t get_ondisk_entry_size(const ondisk_add_dir_entry_header& entry) {
+    return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
+}
+inline size_t get_ondisk_entry_size(const ondisk_create_inode_as_dir_entry_header& entry) {
+    return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
+}
+inline size_t get_ondisk_entry_size(const ondisk_delete_dir_entry_header& entry) {
+    return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
+}
+inline size_t get_ondisk_entry_size(const ondisk_rename_dir_entry_header& entry) {
+    return sizeof(ondisk_type) + sizeof(entry) + entry.entry_old_name_length + entry.entry_new_name_length;
+}
+
 } // namespace seastar::fs

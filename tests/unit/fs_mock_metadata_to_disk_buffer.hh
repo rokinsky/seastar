@@ -172,11 +172,10 @@ private:
     void prepare_unflushed_data_for_flush() noexcept override {}
 
     append_result check_and_move_bytes_count(size_t data_len) {
-        size_t len = data_len + sizeof(ondisk_type);
-        if (!fits_for_append(len)) {
+        if (!fits_for_append(data_len)) {
             return TOO_BIG;
         }
-        move_bytes_count(len);
+        move_bytes_count(data_len);
         return APPENDED;
     }
 
@@ -186,53 +185,77 @@ public:
     using metadata_to_disk_buffer::append_result;
 
     append_result append(const ondisk_next_metadata_cluster& next_metadata_cluster) noexcept override {
-        actions.emplace_back(action::append {ondisk_next_metadata_cluster {next_metadata_cluster}});
-        size_t len = sizeof(ondisk_type) + sizeof(ondisk_next_metadata_cluster);
-        if (bytes_left() > len) {
+        size_t len = get_ondisk_entry_size(next_metadata_cluster);
+        if (bytes_left() < len) {
             return TOO_BIG;
         }
+        actions.emplace_back(action::append {ondisk_next_metadata_cluster {next_metadata_cluster}});
         move_bytes_count(len);
         return APPENDED;
     }
 
     append_result append(const ondisk_create_inode& create_inode) noexcept override {
-        actions.emplace_back(action::append {ondisk_create_inode {create_inode}});
-        return check_and_move_bytes_count(sizeof(create_inode));
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(create_inode));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_create_inode {create_inode}});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_update_metadata& update_metadata) noexcept override {
-        actions.emplace_back(action::append {ondisk_update_metadata {update_metadata}});
-        return check_and_move_bytes_count(sizeof(update_metadata));
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(update_metadata));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_update_metadata {update_metadata}});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_delete_inode& delete_inode) noexcept override {
-        actions.emplace_back(action::append {ondisk_delete_inode {delete_inode}});
-        return check_and_move_bytes_count(sizeof(delete_inode));
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(delete_inode));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_delete_inode {delete_inode}});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_medium_write& medium_write) noexcept override {
-        actions.emplace_back(action::append {ondisk_medium_write {medium_write}});
-        return check_and_move_bytes_count(sizeof(medium_write));
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(medium_write));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_medium_write {medium_write}});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_large_write& large_write) noexcept override {
-        actions.emplace_back(action::append {ondisk_large_write {large_write}});
-        return check_and_move_bytes_count(sizeof(large_write));
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(large_write));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_large_write {large_write}});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_large_write_without_mtime& large_write_without_mtime) noexcept override {
-        actions.emplace_back(action::append {ondisk_large_write_without_mtime {large_write_without_mtime}});
-        return check_and_move_bytes_count(sizeof(large_write_without_mtime));
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(large_write_without_mtime));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_large_write_without_mtime {large_write_without_mtime}});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_truncate& truncate) noexcept override {
-        actions.emplace_back(action::append {ondisk_truncate {truncate}});
-        return check_and_move_bytes_count(sizeof(truncate));
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(truncate));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_truncate {truncate}});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_mtime_update& mtime_update) noexcept override {
-        actions.emplace_back(action::append {ondisk_mtime_update {mtime_update}});
-        return check_and_move_bytes_count(sizeof(mtime_update));
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(mtime_update));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_mtime_update {mtime_update}});
+        }
+        return ret;
     }
 
 private:
@@ -243,47 +266,61 @@ private:
 
 public:
     append_result append(const ondisk_small_write_header& small_write, const void* data) noexcept override {
-        actions.emplace_back(action::append {ondisk_small_write {
-                small_write,
-                copy_data(data, small_write.length)
-            }});
-        return check_and_move_bytes_count(sizeof(small_write) + small_write.length);
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(small_write));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_small_write {
+                    small_write,
+                    copy_data(data, small_write.length)
+                }});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_add_dir_entry_header& add_dir_entry, const void* entry_name) noexcept override {
-        actions.emplace_back(action::append {ondisk_add_dir_entry {
-                add_dir_entry,
-                copy_data(entry_name, add_dir_entry.entry_name_length)
-            }});
-        return check_and_move_bytes_count(sizeof(add_dir_entry) + add_dir_entry.entry_name_length);
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(add_dir_entry));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_add_dir_entry {
+                    add_dir_entry,
+                    copy_data(entry_name, add_dir_entry.entry_name_length)
+                }});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_create_inode_as_dir_entry_header& create_inode_as_dir_entry,
             const void* entry_name) noexcept override {
-        actions.emplace_back(action::append {ondisk_create_inode_as_dir_entry {
-                create_inode_as_dir_entry,
-                copy_data(entry_name, create_inode_as_dir_entry.entry_name_length)
-            }});
-        return check_and_move_bytes_count(sizeof(create_inode_as_dir_entry) + create_inode_as_dir_entry.entry_name_length);
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(create_inode_as_dir_entry));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_create_inode_as_dir_entry {
+                    create_inode_as_dir_entry,
+                    copy_data(entry_name, create_inode_as_dir_entry.entry_name_length)
+                }});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name,
             const void* new_name) noexcept override {
-        actions.emplace_back(action::append {ondisk_rename_dir_entry {
-                rename_dir_entry,
-                copy_data(old_name, rename_dir_entry.entry_old_name_length),
-                copy_data(new_name, rename_dir_entry.entry_new_name_length)
-            }});
-        return check_and_move_bytes_count(sizeof(rename_dir_entry) + rename_dir_entry.entry_old_name_length
-                + rename_dir_entry.entry_new_name_length);
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(rename_dir_entry));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_rename_dir_entry {
+                    rename_dir_entry,
+                    copy_data(old_name, rename_dir_entry.entry_old_name_length),
+                    copy_data(new_name, rename_dir_entry.entry_new_name_length)
+                }});
+        }
+        return ret;
     }
 
     append_result append(const ondisk_delete_dir_entry_header& delete_dir_entry, const void* entry_name) noexcept override {
-        actions.emplace_back(action::append {ondisk_delete_dir_entry {
-                delete_dir_entry,
-                copy_data(entry_name, delete_dir_entry.entry_name_length)
-            }});
-        return check_and_move_bytes_count(sizeof(delete_dir_entry) + delete_dir_entry.entry_name_length);
+        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(delete_dir_entry));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_delete_dir_entry {
+                    delete_dir_entry,
+                    copy_data(entry_name, delete_dir_entry.entry_name_length)
+                }});
+        }
+        return ret;
     }
 
 };
