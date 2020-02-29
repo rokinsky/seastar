@@ -185,10 +185,14 @@ public:
     using metadata_to_disk_buffer::bytes_left;
     using metadata_to_disk_buffer::append_result;
 
-    // TODO: fix
     append_result append(const ondisk_next_metadata_cluster& next_metadata_cluster) noexcept override {
         actions.emplace_back(action::append {ondisk_next_metadata_cluster {next_metadata_cluster}});
-        return check_and_move_bytes_count(sizeof(next_metadata_cluster));
+        size_t len = sizeof(ondisk_type) + sizeof(ondisk_next_metadata_cluster);
+        if (bytes_left() > len) {
+            return TOO_BIG;
+        }
+        move_bytes_count(len);
+        return APPENDED;
     }
 
     append_result append(const ondisk_create_inode& create_inode) noexcept override {
