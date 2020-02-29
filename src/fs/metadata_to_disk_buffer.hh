@@ -33,31 +33,30 @@ class metadata_to_disk_buffer : protected to_disk_buffer {
     boost::crc_32_type _crc;
 
 public:
-    // Represents buffer that will be written to a block_device at offset @p disk_aligned_write_offset. Total number of
-    // bytes appended cannot exceed @p aligned_max_size.
-    metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
-    : to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset) {
+    // Represents buffer that will be written to a block_device. Method init() should be called after constructor to
+    // finish construction. Total number of bytes appended cannot exceed @p aligned_max_size.
+    metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment)
+    : to_disk_buffer(aligned_max_size, alignment) {
         assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
     }
 
-    virtual shared_ptr<metadata_to_disk_buffer> create_new(size_t aligned_max_size, unit_size_t alignment,
-            disk_offset_t disk_aligned_write_offset) const {
-        return make_shared<metadata_to_disk_buffer>(aligned_max_size, alignment, disk_aligned_write_offset);
+    using to_disk_buffer::init; // Explicitly stated that stays the same
+
+    virtual shared_ptr<metadata_to_disk_buffer> virtual_constructor(size_t aligned_max_size, unit_size_t alignment) const {
+        return make_shared<metadata_to_disk_buffer>(aligned_max_size, alignment);
     }
 
-    using to_disk_buffer::reset;
-
     /**
-     * @brief Clears buffer, leaving it in state as if just after flushing with unflushed data end at
+     * @brief Inits object, leaving it in state as if just after flushing with unflushed data end at
      *   @p cluster_beg_offset
      *
      * @param cluster_beg_offset disk offset of the beginning of the cluster
      * @param metadata_end_pos position at which valid metadata ends: valid metadata range: [0, @p metadata_end_pos)
      */
-    virtual void reset_from_bootstrapped_cluster(disk_offset_t cluster_beg_offset, size_t metadata_end_pos) noexcept {
+    virtual void init_from_bootstrapped_cluster(disk_offset_t cluster_beg_offset, size_t metadata_end_pos) noexcept {
         assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
         assert(metadata_end_pos < _buff.size());
-        _disk_write_offset = cluster_beg_offset;
+        _cluster_beg_offset = cluster_beg_offset;
 
         auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
         _unflushed_data = {aligned_pos, aligned_pos};
@@ -121,12 +120,13 @@ public:
 
     using to_disk_buffer::bytes_left;
 
-private:
+protected:
     bool fits_for_append(size_t bytes_no) const noexcept {
         // We need to reserve space for the next metadata cluster entry
         return (bytes_left() >= bytes_no + sizeof(ondisk_type) + sizeof(ondisk_next_metadata_cluster));
     }
 
+private:
     template<class T>
     append_result append_simple(ondisk_type type, const T& entry) noexcept {
         size_t total_size = sizeof(type) + sizeof(entry);
