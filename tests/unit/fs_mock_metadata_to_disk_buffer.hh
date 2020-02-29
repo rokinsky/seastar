@@ -56,16 +56,13 @@ struct ondisk_rename_dir_entry {
 };
 
 class mock_metadata_to_disk_buffer : public metadata_to_disk_buffer {
-    bool _use_device;
-
 public:
-    mock_metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset,
-            bool use_device = false)
-        : metadata_to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset), _use_device(use_device) {}
+    mock_metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment, disk_offset_t disk_aligned_write_offset)
+        : metadata_to_disk_buffer(aligned_max_size, alignment, disk_aligned_write_offset) {}
 
     virtual shared_ptr<metadata_to_disk_buffer> create_new(size_t aligned_max_size, unit_size_t alignment,
             disk_offset_t disk_aligned_write_offset) const override {
-        return make_shared<mock_metadata_to_disk_buffer>(aligned_max_size, alignment, disk_aligned_write_offset, _use_device);
+        return make_shared<mock_metadata_to_disk_buffer>(aligned_max_size, alignment, disk_aligned_write_offset);
     }
 
     struct action {
@@ -157,7 +154,7 @@ public:
 
     future<> flush_to_disk(block_device device) override {
         actions.emplace_back(action::flush_to_disk {});
-        return _use_device ? metadata_to_disk_buffer::flush_to_disk(std::move(device)) : now();
+        return metadata_to_disk_buffer::flush_to_disk(std::move(device));
     }
 
 private:
