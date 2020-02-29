@@ -79,4 +79,11 @@ SEASTAR_THREAD_TEST_CASE(mock_metadata_to_disk_buffer_test) {
     metadata_log log(dev, cluster_size, alignment, std::move(tmp_buff));
 
     log.bootstrap(0, 3, {3, 10}, 4, 0).get();
+
+    log.create_file("/test", file_permissions::default_dir_permissions).get();
+
+    auto &created_buffers = mock_metadata_to_disk_buffer::created_buffers;
+    BOOST_REQUIRE_EQUAL(created_buffers.size(), 1);
+    auto &buff = created_buffers[0];
+    BOOST_CHECK(buff->is_append_type<ondisk_create_inode_as_dir_entry>(0));
 }
