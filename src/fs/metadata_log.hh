@@ -92,7 +92,7 @@ class metadata_log {
     const unit_size_t _alignment;
 
     // Takes care of writing current cluster of serialized metadata log entries to device
-    lw_shared_ptr<metadata_to_disk_buffer> _curr_cluster_buff;
+    shared_ptr<metadata_to_disk_buffer> _curr_cluster_buff;
     shared_future<> _previous_flushes = now();
 
     // In memory metadata
@@ -197,7 +197,8 @@ class metadata_log {
     friend class create_file_operation;
 
 public:
-    metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment);
+    metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment,
+            shared_ptr<metadata_to_disk_buffer> cluster_buff);
 
     metadata_log(const metadata_log&) = delete;
     metadata_log& operator=(const metadata_log&) = delete;
