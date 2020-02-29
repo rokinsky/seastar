@@ -135,9 +135,9 @@ class metadata_log_bootstrap {
                 return bootstrap_cluster(curr_cluster);
             }).then([this, &last_cluster] {
                 // Initialize _curr_cluster_buff
-                _metadata_log._curr_cluster_buff = _metadata_log._curr_cluster_buff->create_new(
-                        _metadata_log._cluster_size, _metadata_log._alignment, 0);
-                _metadata_log._curr_cluster_buff->reset_from_bootstrapped_cluster(cluster_id_to_offset(last_cluster,
+                _metadata_log._curr_cluster_buff = _metadata_log._curr_cluster_buff->virtual_constructor(
+                        _metadata_log._cluster_size, _metadata_log._alignment);
+                _metadata_log._curr_cluster_buff->init_from_bootstrapped_cluster(cluster_id_to_offset(last_cluster,
                         _metadata_log._cluster_size), _curr_cluster.curr_pos());
             });
         }).then([this, fs_shards_pool_size, fs_shard_id] {
@@ -495,8 +495,10 @@ public:
         metadata_log._inodes.clear();
         metadata_log._previous_flushes = now();
 
-        return metadata_log_bootstrap(metadata_log, available_clusters).bootstrap(first_metadata_cluster_id,
-                fs_shards_pool_size, fs_shard_id);
+        return do_with(metadata_log_bootstrap(metadata_log, available_clusters),
+                [first_metadata_cluster_id, fs_shards_pool_size, fs_shard_id](metadata_log_bootstrap& bootstrap) {
+                    return bootstrap.bootstrap(first_metadata_cluster_id, fs_shards_pool_size, fs_shard_id);
+                });
     }
 };
 
