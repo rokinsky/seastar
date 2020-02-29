@@ -369,9 +369,9 @@ if (Seastar_EXPERIMENTAL_FS)
   seastar_add_test (fs_cluster_allocator
     KIND BOOST
     SOURCES fs_cluster_allocator_test.cc)
-  seastar_add_test (fs_create_dir
+  seastar_add_test (fs_mock_metadata_to_disk_buffer
     SOURCES
-      fs_create_dir.cc
+      fs_mock_metadata_to_disk_buffer_test.cc
       fs_mock_metadata_to_disk_buffer.hh)
   seastar_add_test (fs_path
     KIND BOOST
