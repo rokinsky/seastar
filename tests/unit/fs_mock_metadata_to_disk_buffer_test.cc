@@ -88,19 +88,19 @@ SEASTAR_THREAD_TEST_CASE(actions_index_test) {
     BOOST_REQUIRE_EQUAL(buf.append(ondisk_mtime_update {4, 26}), APPENDED);
     buf.flush_to_disk(dev).get();
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_next_metadata_cluster>(0), true);
-    BOOST_REQUIRE_EQUAL(buf.is_type<flush_to_disk>(1), true);
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_create_inode>(2), true);
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_update_metadata>(3), true);
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_delete_inode>(4), true);
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_medium_write>(5), true);
-    BOOST_REQUIRE_EQUAL(buf.is_type<flush_to_disk>(6), true);
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_large_write>(7), true);
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_large_write_without_mtime>(8), true);
-    BOOST_REQUIRE_EQUAL(buf.is_type<flush_to_disk>(9), true);
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_truncate>(10), true);
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_mtime_update>(11), true);
-    BOOST_REQUIRE_EQUAL(buf.is_type<flush_to_disk>(12), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_next_metadata_cluster>(0));
+    BOOST_CHECK(buf.is_type<flush_to_disk>(1));
+    BOOST_CHECK(buf.is_append_type<ondisk_create_inode>(2));
+    BOOST_CHECK(buf.is_append_type<ondisk_update_metadata>(3));
+    BOOST_CHECK(buf.is_append_type<ondisk_delete_inode>(4));
+    BOOST_CHECK(buf.is_append_type<ondisk_medium_write>(5));
+    BOOST_CHECK(buf.is_type<flush_to_disk>(6));
+    BOOST_CHECK(buf.is_append_type<ondisk_large_write>(7));
+    BOOST_CHECK(buf.is_append_type<ondisk_large_write_without_mtime>(8));
+    BOOST_CHECK(buf.is_type<flush_to_disk>(9));
+    BOOST_CHECK(buf.is_append_type<ondisk_truncate>(10));
+    BOOST_CHECK(buf.is_append_type<ondisk_mtime_update>(11));
+    BOOST_CHECK(buf.is_type<flush_to_disk>(12));
 }
 
 // the folowing test checks that constructed buffers are distinct and correctly added to created_buffers vector
@@ -139,7 +139,7 @@ SEASTAR_THREAD_TEST_CASE(flush_action_test) {
 
     buf.flush_to_disk(dev).get();
 
-    BOOST_REQUIRE_EQUAL(buf.is_type<flush_to_disk>(0), true);
+    BOOST_CHECK(buf.is_type<flush_to_disk>(0));
 }
 
 SEASTAR_THREAD_TEST_CASE(next_metadata_cluster_test) {
@@ -152,7 +152,7 @@ SEASTAR_THREAD_TEST_CASE(next_metadata_cluster_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(next_metadata_cluster_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_next_metadata_cluster>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_next_metadata_cluster>(0));
     auto &elem = buf.get_by_append_type<ondisk_next_metadata_cluster>(0);
     BOOST_REQUIRE_EQUAL(elem.cluster_id, next_metadata_cluster_op.cluster_id);
 }
@@ -167,7 +167,7 @@ SEASTAR_THREAD_TEST_CASE(create_inode_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(create_inode_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_create_inode>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_create_inode>(0));
     auto &elem = buf.get_by_append_type<ondisk_create_inode>(0);
     BOOST_REQUIRE_EQUAL(elem.inode, create_inode_op.inode);
     BOOST_REQUIRE_EQUAL(elem.is_directory, create_inode_op.is_directory);
@@ -184,7 +184,7 @@ SEASTAR_THREAD_TEST_CASE(update_metadata_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(update_metadata_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_update_metadata>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_update_metadata>(0));
     auto &elem = buf.get_by_append_type<ondisk_update_metadata>(0);
     BOOST_REQUIRE_EQUAL(elem.inode, update_metadata_op.inode);
     BOOST_CHECK(std::memcmp(&elem.metadata, &update_metadata_op.metadata, sizeof(elem.metadata)) == 0);
@@ -200,7 +200,7 @@ SEASTAR_THREAD_TEST_CASE(delete_inode_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(delete_inode_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_delete_inode>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_delete_inode>(0));
     auto &elem = buf.get_by_append_type<ondisk_delete_inode>(0);
     BOOST_REQUIRE_EQUAL(elem.inode, delete_inode_op.inode);
 }
@@ -216,7 +216,7 @@ SEASTAR_THREAD_TEST_CASE(small_write_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(small_write_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_small_write>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_small_write>(0));
     auto &elem = buf.get_by_append_type<ondisk_small_write>(0);
     BOOST_REQUIRE_EQUAL(elem.header.inode, small_write_op.inode);
     BOOST_REQUIRE_EQUAL(elem.header.offset, small_write_op.offset);
@@ -235,7 +235,7 @@ SEASTAR_THREAD_TEST_CASE(medium_write_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(medium_write_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_medium_write>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_medium_write>(0));
     auto &elem = buf.get_by_append_type<ondisk_medium_write>(0);
     BOOST_REQUIRE_EQUAL(elem.inode, medium_write_op.inode);
     BOOST_REQUIRE_EQUAL(elem.offset, medium_write_op.offset);
@@ -254,7 +254,7 @@ SEASTAR_THREAD_TEST_CASE(large_write_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(large_write_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_large_write>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_large_write>(0));
     auto &elem = buf.get_by_append_type<ondisk_large_write>(0);
     BOOST_REQUIRE_EQUAL(elem.inode, large_write_op.inode);
     BOOST_REQUIRE_EQUAL(elem.offset, large_write_op.offset);
@@ -272,7 +272,7 @@ SEASTAR_THREAD_TEST_CASE(large_write_without_mtime_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(large_write_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_large_write_without_mtime>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_large_write_without_mtime>(0));
     auto &elem = buf.get_by_append_type<ondisk_large_write_without_mtime>(0);
     BOOST_REQUIRE_EQUAL(elem.inode, large_write_op.inode);
     BOOST_REQUIRE_EQUAL(elem.offset, large_write_op.offset);
@@ -289,7 +289,7 @@ SEASTAR_THREAD_TEST_CASE(truncate_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(truncate_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_truncate>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_truncate>(0));
     auto &elem = buf.get_by_append_type<ondisk_truncate>(0);
     BOOST_REQUIRE_EQUAL(elem.inode, truncate_op.inode);
     BOOST_REQUIRE_EQUAL(elem.size, truncate_op.size);
@@ -306,7 +306,7 @@ SEASTAR_THREAD_TEST_CASE(mtime_update_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(mtime_update_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_mtime_update>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_mtime_update>(0));
     auto &elem = buf.get_by_append_type<ondisk_mtime_update>(0);
     BOOST_REQUIRE_EQUAL(elem.inode, mtime_update_op.inode);
     BOOST_REQUIRE_EQUAL(elem.mtime_ns, mtime_update_op.mtime_ns);
@@ -323,7 +323,7 @@ SEASTAR_THREAD_TEST_CASE(add_dir_entry_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(add_dir_entry_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_add_dir_entry>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_add_dir_entry>(0));
     auto &elem = buf.get_by_append_type<ondisk_add_dir_entry>(0);
     BOOST_REQUIRE_EQUAL(elem.header.dir_inode, add_dir_entry_op.dir_inode);
     BOOST_REQUIRE_EQUAL(elem.header.entry_inode, add_dir_entry_op.entry_inode);
@@ -344,7 +344,7 @@ SEASTAR_THREAD_TEST_CASE(create_inode_as_dir_entry_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(create_inode_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_create_inode_as_dir_entry>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_create_inode_as_dir_entry>(0));
     auto &elem = buf.get_by_append_type<ondisk_create_inode_as_dir_entry>(0);
     BOOST_CHECK(std::memcmp(&elem.header.entry_inode, &create_inode_op.entry_inode,
             sizeof(elem.header.entry_inode)) == 0);
@@ -364,7 +364,7 @@ SEASTAR_THREAD_TEST_CASE(delete_dir_entry_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(delete_entry_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_delete_dir_entry>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_delete_dir_entry>(0));
     auto &elem = buf.get_by_append_type<ondisk_delete_dir_entry>(0);
     BOOST_REQUIRE_EQUAL(elem.header.dir_inode, delete_entry_op.dir_inode);
     BOOST_REQUIRE_EQUAL(elem.header.entry_name_length, delete_entry_op.entry_name_length);
@@ -387,7 +387,7 @@ SEASTAR_THREAD_TEST_CASE(rename_dir_entry_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size -
             get_ondisk_entry_size(rename_op));
 
-    BOOST_REQUIRE_EQUAL(buf.is_append_type<ondisk_rename_dir_entry>(0), true);
+    BOOST_CHECK(buf.is_append_type<ondisk_rename_dir_entry>(0));
     auto &elem = buf.get_by_append_type<ondisk_rename_dir_entry>(0);
     BOOST_REQUIRE_EQUAL(elem.header.dir_inode, rename_op.dir_inode);
     BOOST_REQUIRE_EQUAL(elem.header.new_dir_inode, rename_op.new_dir_inode);
