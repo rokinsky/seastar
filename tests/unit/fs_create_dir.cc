@@ -41,7 +41,7 @@ using start_new_unflushed_data         = mock_metadata_to_disk_buffer::action::s
 using prepare_unflushed_data_for_flush = mock_metadata_to_disk_buffer::action::prepare_unflushed_data_for_flush;
 
 SEASTAR_THREAD_TEST_CASE(mock_metadata_to_disk_buffer_test) {
-	constexpr size_t buff_size = 1 * MB;
+    constexpr size_t buff_size = 1 * MB;
     mock_metadata_to_disk_buffer buf(buff_size, 4096, 0);
 
     constexpr size_t reset_offset = 4096;
@@ -69,4 +69,10 @@ SEASTAR_THREAD_TEST_CASE(mock_metadata_to_disk_buffer_test) {
     BOOST_REQUIRE_EQUAL(write_header.length, write_op.length);
     BOOST_REQUIRE_EQUAL(write_header.mtime_ns, write_op.mtime_ns);
     BOOST_REQUIRE_EQUAL(std::string(write_data.data(), write_data.data() + write_str.size()), write_str);
+
+    auto buf2 = buf.create_new(buff_size, 4096, 4096);
+    auto buf3 = buf2->create_new(buff_size, 4096, 8192);
+    BOOST_REQUIRE_EQUAL(mock_metadata_to_disk_buffer::created_buffers.size(), 2);
+    BOOST_CHECK(mock_metadata_to_disk_buffer::created_buffers[0] == buf2);
+    BOOST_CHECK(mock_metadata_to_disk_buffer::created_buffers[1] == buf3);
 }
