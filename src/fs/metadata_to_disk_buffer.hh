@@ -38,6 +38,10 @@ public:
     metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment)
     : to_disk_buffer(aligned_max_size, alignment) {
         assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
+        assert(alignment >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint) + sizeof(ondisk_type) +
+                sizeof(ondisk_next_metadata_cluster) and
+                "We always need to be able to pack at least a checkpoint and next_metadata_cluster entry to the last "
+                "data flush in the cluster");
     }
 
     using to_disk_buffer::init; // Explicitly stated that stays the same
@@ -60,21 +64,23 @@ public:
 
         auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
         _unflushed_data = {aligned_pos, aligned_pos};
-
-        if (bytes_left() > 0) {
-            start_new_unflushed_data();
-        }
+        start_new_unflushed_data();
     }
 
 protected:
     void start_new_unflushed_data() noexcept override {
+        if (bytes_left() < sizeof(ondisk_type) + sizeof(ondisk_checkpoint) + sizeof(ondisk_type) +
+                sizeof(ondisk_next_metadata_cluster)) {
+            assert(bytes_left() == 0); // alignment has to be big enough to hold checkpoint and next_metadata_cluster
+            return; // No more space
+        }
+
         ondisk_type type = INVALID;
         ondisk_checkpoint checkpoint;
         memset(&checkpoint, 0, sizeof(checkpoint));
 
-        assert(bytes_left() >= sizeof(type) + sizeof(checkpoint));
-        append_bytes(&type, sizeof(type));
-        append_bytes(&checkpoint, sizeof(checkpoint));
+        to_disk_buffer::append_bytes(&type, sizeof(type));
+        to_disk_buffer::append_bytes(&checkpoint, sizeof(checkpoint));
 
         _crc.reset();
     }

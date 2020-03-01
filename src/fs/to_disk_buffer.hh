@@ -87,9 +87,7 @@ public:
 
         // Make sure the buffer is usable before returning from this function
         _unflushed_data = {real_write.end, real_write.end};
-        if (bytes_left() > 0) {
-            start_new_unflushed_data();
-        }
+        start_new_unflushed_data();
 
         return device.write(_cluster_beg_offset + real_write.beg, _buff.get_write() + real_write.beg, real_write.size())
                 .then([real_write](size_t written_bytes) {
