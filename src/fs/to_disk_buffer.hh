@@ -34,15 +34,17 @@ namespace seastar::fs {
 class to_disk_buffer {
 protected:
     temporary_buffer<uint8_t> _buff;
+    const size_t _max_size;
     const unit_size_t _alignment;
     disk_offset_t _cluster_beg_offset; // disk offset that corresponds to _buff.begin()
     range<size_t> _unflushed_data; // range of unflushed bytes in _buff
 
 public:
-    // Represents buffer that will be written to a block_device. Method init() should be called after constructor to
-    // finish construction. Total number of bytes appended cannot exceed @p aligned_max_size.
+    // Represents buffer that will be written to a block_device. Method init() should be called just after constructor
+    // in order to finish construction. Total number of bytes appended cannot exceed @p aligned_max_size.
     to_disk_buffer(size_t aligned_max_size, unit_size_t alignment)
-    : _buff(decltype(_buff)::aligned(alignment, aligned_max_size))
+    : _buff()
+    , _max_size(aligned_max_size)
     , _alignment(alignment)
     , _unflushed_data {0, 0} {
         assert(is_power_of_2(alignment));
@@ -51,8 +53,9 @@ public:
 
     // @p cluster_beg_offset is the disk offset of the beginning of the cluster
     virtual void init(disk_offset_t cluster_beg_offset) {
-        _cluster_beg_offset = cluster_beg_offset;
         assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
+        _cluster_beg_offset = cluster_beg_offset;
+        _buff = decltype(_buff)::aligned(_alignment, _max_size);
         start_new_unflushed_data();
     }
 
@@ -114,10 +117,10 @@ public:
     }
 
     // Returns maximum number of bytes that may be written to buffer without calling reset()
-    virtual size_t bytes_left() const noexcept { return _buff.size() - _unflushed_data.end; }
+    virtual size_t bytes_left() const noexcept { return _max_size - _unflushed_data.end; }
 
     virtual size_t bytes_left_after_flush_if_done_now() const noexcept {
-        return _buff.size() - round_up_to_multiple_of_power_of_2(_unflushed_data.end, _alignment);
+        return _max_size - round_up_to_multiple_of_power_of_2(_unflushed_data.end, _alignment);
     }
 };
 
