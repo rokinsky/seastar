@@ -327,6 +327,27 @@ future<> metadata_log::create_directory(std::string path, file_permissions perms
     return create_file_operation::perform(*this, std::move(path), std::move(perms), true).discard_result();
 }
 
+future<inode_t> metadata_log::open_file(std::string path) {
+    return path_lookup(path).then([this](inode_t file_inode) {
+        auto file_it = _inodes.find(file_inode);
+        if (file_it == _inodes.end()) {
+            return make_exception_future<inode_t>(operation_became_invalid_exception());
+        } else if (file_it->second.is_directory()) {
+            return make_exception_future<inode_t>(is_directory_exception());
+        }
+        inode_info* file_info = &file_it->second;
+        // TODO: can be replaced by sth like _file_info.during_delete
+        return _locks.with_lock(metadata_log::locks::shared {file_inode},
+                [this, file_info = std::move(file_info), file_inode] {
+            if (_inodes.count(file_inode) != 1) {
+                return make_exception_future<inode_t>(operation_became_invalid_exception());
+            }
+            file_info->opened_files_count++;
+            return make_ready_future<inode_t>(file_inode);
+        });
+    });
+}
+
 // TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE,
 // then it should be possible to compact some data (e.g. by truncating a file) via top-level interface and retrying the flush()
 // without a ENOSPACE error. In particular if we delete all files after ENOSPACE it should be successful. It becomes especially
