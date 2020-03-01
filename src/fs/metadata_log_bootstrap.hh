@@ -491,9 +491,15 @@ public:
     static future<> bootstrap(metadata_log& metadata_log, inode_t root_dir, cluster_id_t first_metadata_cluster_id,
             cluster_range available_clusters, fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id) {
         // Clear the metadata log
-        metadata_log._root_dir = root_dir;
         metadata_log._inodes.clear();
         metadata_log._previous_flushes = now();
+        metadata_log._root_dir = root_dir;
+        metadata_log._inodes.emplace(root_dir, inode_info {
+            0,
+            0,
+            {}, // TODO: change it to something meaningful
+            inode_info::directory {}
+        });
 
         return do_with(metadata_log_bootstrap(metadata_log, available_clusters),
                 [first_metadata_cluster_id, fs_shards_pool_size, fs_shard_id](metadata_log_bootstrap& bootstrap) {
