@@ -6,3 +6,11 @@ build.ninja
 cscope.*
 __pycache__/
 cmake/Cooking.cmake
+.clangd
+build.diff
+.cooking_memory
+compile_commands.json
+compile_flags.txt*
+tester
+.vscode
+.clang-format
