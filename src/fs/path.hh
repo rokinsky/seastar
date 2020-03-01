@@ -26,7 +26,7 @@
 namespace seastar::fs {
 
 // Extracts the last component in @p path. WARNING: The last component is empty iff @p path is empty or ends with '/'
-std::string extract_last_component(std::string& path) {
+inline std::string extract_last_component(std::string& path) {
     auto beg = path.find_last_of('/');
     if (beg == path.npos) {
         std::string res = std::move(path);
