@@ -82,4 +82,8 @@ SEASTAR_THREAD_TEST_CASE(mock_metadata_to_disk_buffer_test) {
     BOOST_REQUIRE_EQUAL(created_buffers.size(), 1);
     auto &buff = created_buffers[0];
     BOOST_CHECK(buff->is_append_type<ondisk_create_inode_as_dir_entry>(0));
+    auto &ondisk_file_header = buff->get_by_append_type<ondisk_create_inode_as_dir_entry>(0).header;
+
+    inode_t file_inode = log.open_file("/test").get0();
+    BOOST_REQUIRE_EQUAL(file_inode, ondisk_file_header.entry_inode.inode);
 }
