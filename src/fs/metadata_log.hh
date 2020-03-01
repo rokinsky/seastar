@@ -70,6 +70,10 @@ struct filename_too_long_exception : public fs_exception {
     const char* what() const noexcept override { return "Filename too long"; }
 };
 
+struct is_directory_exception : public fs_exception {
+    const char* what() const noexcept override { return "Is a directory"; }
+};
+
 struct path_lookup_exception : public fs_exception {
     const char* what() const noexcept override = 0;
 };
@@ -313,7 +317,7 @@ public:
     future<> create_directory(std::string path, file_permissions perms);
 
     // TODO: what about permissions, uid, gid etc.
-    future<inode_t> open_file(std::string path) { return make_ready_future<inode_t>(0); }
+    future<inode_t> open_file(std::string path);
 
     future<> close_file(inode_t inode) { return make_ready_future(); }
 
