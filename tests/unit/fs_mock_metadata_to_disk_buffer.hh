@@ -121,24 +121,8 @@ public:
         return std::get<T>(get_by_type<action::append>(idx).entry);
     }
 
-    void init(disk_offset_t cluster_beg_offset) noexcept override {
-        _cluster_beg_offset = cluster_beg_offset;
-        _unflushed_data = {0, 0};
-        start_new_unflushed_data();
-    }
-
-    void init_from_bootstrapped_cluster(disk_offset_t cluster_beg_offset, size_t metadata_end_pos) noexcept override {
-        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
-        assert(metadata_end_pos < _buff.size());
-        _cluster_beg_offset = cluster_beg_offset;
-
-        auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
-        _unflushed_data = {aligned_pos, aligned_pos};
-
-        if (bytes_left() > 0) {
-            start_new_unflushed_data();
-        }
-    }
+    using metadata_to_disk_buffer::init;
+    using metadata_to_disk_buffer::init_from_bootstrapped_cluster;
 
     future<> flush_to_disk([[maybe_unused]] block_device device) override {
         actions.emplace_back(action::flush_to_disk {});
@@ -166,6 +150,11 @@ private:
     }
 
     void start_new_unflushed_data() noexcept override {
+        if (bytes_left() < sizeof(ondisk_type) + sizeof(ondisk_checkpoint) + sizeof(ondisk_type) +
+                sizeof(ondisk_next_metadata_cluster)) {
+            assert(bytes_left() == 0); // alignment has to be big enough to hold checkpoint and next_metadata_cluster
+            return; // No more space
+        }
         move_bytes_count(sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
     }
 
@@ -260,8 +249,7 @@ public:
 
 private:
     temporary_buffer<uint8_t> copy_data(const void* data, size_t length) {
-        const uint8_t* data_bytes = static_cast<const uint8_t*>(data);
-        return temporary_buffer<uint8_t>(data_bytes, length);
+        return temporary_buffer<uint8_t>(static_cast<const uint8_t*>(data), length);
     }
 
 public:
