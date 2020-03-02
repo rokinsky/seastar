@@ -492,7 +492,7 @@ public:
             cluster_range available_clusters, fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id) {
         // Clear the metadata log
         metadata_log._inodes.clear();
-        metadata_log._previous_flushes = now();
+        metadata_log._background_futures = now();
         metadata_log._root_dir = root_dir;
         metadata_log._inodes.emplace(root_dir, inode_info {
             0,
