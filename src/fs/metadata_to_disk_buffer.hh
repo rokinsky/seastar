@@ -117,7 +117,7 @@ public:
 
     virtual append_result append(const ondisk_next_metadata_cluster& next_metadata_cluster) noexcept {
         ondisk_type type = NEXT_METADATA_CLUSTER;
-        if (bytes_left() < get_ondisk_entry_size(next_metadata_cluster)) {
+        if (bytes_left() < ondisk_entry_size(next_metadata_cluster)) {
             return TOO_BIG;
         }
 
@@ -137,7 +137,7 @@ protected:
 private:
     template<class T>
     append_result append_simple(ondisk_type type, const T& entry) noexcept {
-        if (not fits_for_append(get_ondisk_entry_size(entry))) {
+        if (not fits_for_append(ondisk_entry_size(entry))) {
             return TOO_BIG;
         }
 
@@ -182,7 +182,7 @@ public:
 
     virtual append_result append(const ondisk_small_write_header& small_write, const void* data) noexcept {
         ondisk_type type = SMALL_WRITE;
-        if (not fits_for_append(get_ondisk_entry_size(small_write))) {
+        if (not fits_for_append(ondisk_entry_size(small_write))) {
             return TOO_BIG;
         }
 
@@ -194,7 +194,7 @@ public:
 
     virtual append_result append(const ondisk_add_dir_entry_header& add_dir_entry, const void* entry_name) noexcept {
         ondisk_type type = ADD_DIR_ENTRY;
-        if (not fits_for_append(get_ondisk_entry_size(add_dir_entry))) {
+        if (not fits_for_append(ondisk_entry_size(add_dir_entry))) {
             return TOO_BIG;
         }
 
@@ -207,7 +207,7 @@ public:
     virtual append_result append(const ondisk_create_inode_as_dir_entry_header& create_inode_as_dir_entry,
             const void* entry_name) noexcept {
         ondisk_type type = CREATE_INODE_AS_DIR_ENTRY;
-        if (not fits_for_append(get_ondisk_entry_size(create_inode_as_dir_entry))) {
+        if (not fits_for_append(ondisk_entry_size(create_inode_as_dir_entry))) {
             return TOO_BIG;
         }
 
@@ -220,7 +220,7 @@ public:
     virtual append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name,
             const void* new_name) noexcept {
         ondisk_type type = RENAME_DIR_ENTRY;
-        if (not fits_for_append(get_ondisk_entry_size(rename_dir_entry))) {
+        if (not fits_for_append(ondisk_entry_size(rename_dir_entry))) {
             return TOO_BIG;
         }
 
@@ -233,7 +233,7 @@ public:
 
     virtual append_result append(const ondisk_delete_dir_entry_header& delete_dir_entry, const void* entry_name) noexcept {
         ondisk_type type = DELETE_DIR_ENTRY;
-        if (not fits_for_append(get_ondisk_entry_size(delete_dir_entry))) {
+        if (not fits_for_append(ondisk_entry_size(delete_dir_entry))) {
             return TOO_BIG;
         }
 

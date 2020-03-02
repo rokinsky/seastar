@@ -94,8 +94,8 @@ void metadata_log::memory_only_update_metadata(inode_t inode, unix_metadata meta
 void metadata_log::memory_only_delete_inode(inode_t inode) {
     auto it = _inodes.find(inode);
     assert(it != _inodes.end());
-    assert(it->second.opened_files_count == 0);
-    assert(it->second.directories_containing_file == 0);
+    assert(not it->second.is_open());
+    assert(not it->second.is_linked());
 
     std::visit(overloaded {
         [](const inode_info::directory& dir) {
@@ -152,7 +152,7 @@ void metadata_log::memory_only_add_dir_entry(inode_info::directory& dir, inode_t
     auto it = _inodes.find(entry_inode);
     assert(it != _inodes.end());
     // Directory may only be linked once (to avoid creating cycles)
-    assert(not it->second.is_directory() or it->second.directories_containing_file == 0);
+    assert(not it->second.is_directory() or not it->second.is_linked());
 
     bool inserted = dir.entries.emplace(std::move(entry_name), entry_inode).second;
     assert(inserted);
@@ -165,7 +165,7 @@ void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, std:
 
     auto entry_it = _inodes.find(it->second);
     assert(entry_it != _inodes.end());
-    assert(entry_it->second.directories_containing_file > 0);
+    assert(entry_it->second.is_linked());
 
     --entry_it->second.directories_containing_file;
     dir.entries.erase(it);
@@ -359,18 +359,20 @@ future<> metadata_log::close_file(inode_t inode) {
         if (not inode_exists(inode)) {
             return make_exception_future(operation_became_invalid_exception());
         }
+
+        assert(file_info->is_open());
+
         --file_info->opened_files_count;
-        if (file_info->is_unlinked()) {
+        if (not file_info->is_linked()) {
             // Unlinked and not open file should be removed
             _background_futures = when_all_succeed(_background_futures.get_future(), [this, inode, file_info] {
                 // Inode removal operation is started in background
                 return _locks.with_lock(metadata_log::locks::unique {inode}, [this, inode, file_info] {
-                    if (not inode_exists(inode) or not file_info->is_unlinked()) {
-                        return now();
+                    if (not inode_exists(inode) or file_info->is_linked()) {
+                        return now(); // Scheduled delete became invalid
                     }
                     ondisk_delete_inode ondisk_entry {inode};
 
-                    // TODO: should we catch exceptions?
                     return append_ondisk_entry(ondisk_entry).then([this, inode] {
                         memory_only_delete_inode(inode);
                     });

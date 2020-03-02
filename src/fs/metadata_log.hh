@@ -212,7 +212,7 @@ public:
             fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id);
 
 private:
-    bool inode_exists(inode_t inode) const {
+    bool inode_exists(inode_t inode) const noexcept {
         return _inodes.count(inode) != 0;
     }
 
