@@ -136,6 +136,10 @@ struct inode_info {
 
     std::variant<directory, file> contents;
 
+    bool is_unlinked() const {
+        return opened_files_count == 0 and directories_containing_file == 0;
+    }
+
     constexpr bool is_directory() const noexcept { return std::holds_alternative<directory>(contents); }
 
     // These are noexcept because invalid access is a bug not an error
