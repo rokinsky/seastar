@@ -121,8 +121,20 @@ public:
         return std::get<T>(get_by_type<action::append>(idx).entry);
     }
 
-    using metadata_to_disk_buffer::init;
-    using metadata_to_disk_buffer::init_from_bootstrapped_cluster;
+    void init([[maybe_unused]] disk_offset_t cluster_beg_offset) override {
+        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
+        start_new_unflushed_data();
+    }
+
+    void init_from_bootstrapped_cluster([[maybe_unused]] disk_offset_t cluster_beg_offset,
+            size_t metadata_end_pos) noexcept override {
+        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
+        assert(metadata_end_pos < _max_size);
+
+        auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
+        _unflushed_data = {aligned_pos, aligned_pos};
+        start_new_unflushed_data();
+    }
 
     future<> flush_to_disk([[maybe_unused]] block_device device) override {
         actions.emplace_back(action::flush_to_disk {});
