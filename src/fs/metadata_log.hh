@@ -211,6 +211,10 @@ public:
             fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id);
 
 private:
+    bool inode_exists(inode_t inode) const {
+        return _inodes.count(inode) != 0;
+    }
+
     void write_update(inode_info::file& file, inode_data_vec new_data_vec);
 
     // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap

@@ -339,7 +339,7 @@ future<inode_t> metadata_log::open_file(std::string path) {
         // TODO: can be replaced by sth like _file_info.during_delete
         return _locks.with_lock(metadata_log::locks::shared {file_inode},
                 [this, file_info = std::move(file_info), file_inode] {
-            if (_inodes.count(file_inode) != 1) {
+            if (not inode_exists(file_inode)) {
                 return make_exception_future<inode_t>(operation_became_invalid_exception());
             }
             ++file_info->opened_files_count;
