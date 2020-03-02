@@ -136,8 +136,12 @@ struct inode_info {
 
     std::variant<directory, file> contents;
 
-    bool is_unlinked() const {
-        return opened_files_count == 0 and directories_containing_file == 0;
+    bool is_linked() const noexcept {
+        return directories_containing_file != 0;
+    }
+
+    bool is_open() const noexcept {
+        return opened_files_count != 0;
     }
 
     constexpr bool is_directory() const noexcept { return std::holds_alternative<directory>(contents); }

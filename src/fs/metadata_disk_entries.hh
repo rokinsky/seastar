@@ -187,7 +187,7 @@ struct ondisk_rename_dir_entry_header {
 } __attribute__((packed));
 
 template<typename T>
-constexpr size_t get_ondisk_entry_size(const T& entry) noexcept {
+constexpr size_t ondisk_entry_size(const T& entry) noexcept {
     static_assert(std::is_same_v<T, ondisk_next_metadata_cluster> or
             std::is_same_v<T, ondisk_create_inode> or
             std::is_same_v<T, ondisk_update_metadata> or
@@ -199,19 +199,19 @@ constexpr size_t get_ondisk_entry_size(const T& entry) noexcept {
             std::is_same_v<T, ondisk_mtime_update>, "ondisk entry size not defined for given type");
     return sizeof(ondisk_type) + sizeof(entry);
 }
-constexpr size_t get_ondisk_entry_size(const ondisk_small_write_header& entry) noexcept {
+constexpr size_t ondisk_entry_size(const ondisk_small_write_header& entry) noexcept {
     return sizeof(ondisk_type) + sizeof(entry) + entry.length;
 }
-constexpr size_t get_ondisk_entry_size(const ondisk_add_dir_entry_header& entry) noexcept {
+constexpr size_t ondisk_entry_size(const ondisk_add_dir_entry_header& entry) noexcept {
     return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
 }
-constexpr size_t get_ondisk_entry_size(const ondisk_create_inode_as_dir_entry_header& entry) noexcept {
+constexpr size_t ondisk_entry_size(const ondisk_create_inode_as_dir_entry_header& entry) noexcept {
     return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
 }
-constexpr size_t get_ondisk_entry_size(const ondisk_delete_dir_entry_header& entry) noexcept {
+constexpr size_t ondisk_entry_size(const ondisk_delete_dir_entry_header& entry) noexcept {
     return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
 }
-constexpr size_t get_ondisk_entry_size(const ondisk_rename_dir_entry_header& entry) noexcept {
+constexpr size_t ondisk_entry_size(const ondisk_rename_dir_entry_header& entry) noexcept {
     return sizeof(ondisk_type) + sizeof(entry) + entry.entry_old_name_length + entry.entry_new_name_length;
 }
 

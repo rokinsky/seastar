@@ -23,7 +23,7 @@
 
 #include "fs/metadata_to_disk_buffer.hh"
 #include <seastar/core/temporary_buffer.hh>
-#include <stdint.h>
+#include <cstdint>
 #include <variant>
 #include <vector>
 
@@ -60,13 +60,13 @@ public:
     mock_metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment)
         : metadata_to_disk_buffer(aligned_max_size, alignment) {}
 
-    // keep container with all buffers created by virtual_constructor
-    inline static thread_local std::vector<shared_ptr<mock_metadata_to_disk_buffer>> created_buffers;
+    // A container with all the buffers created by virtual_constructor
+    inline static thread_local std::vector<shared_ptr<mock_metadata_to_disk_buffer>> virtually_constructed_buffers;
 
     virtual shared_ptr<metadata_to_disk_buffer> virtual_constructor(size_t aligned_max_size,
             unit_size_t alignment) const override {
         auto new_buffer = make_shared<mock_metadata_to_disk_buffer>(aligned_max_size, alignment);
-        mock_metadata_to_disk_buffer::created_buffers.emplace_back(new_buffer);
+        virtually_constructed_buffers.emplace_back(new_buffer);
         return new_buffer;
     }
 
@@ -113,7 +113,7 @@ public:
 
     template<typename T>
     bool is_append_type(size_t idx) {
-        return is_type<action::append>(idx) && std::holds_alternative<T>(get_by_type<action::append>(idx).entry);
+        return is_type<action::append>(idx) and std::holds_alternative<T>(get_by_type<action::append>(idx).entry);
     }
 
     template<typename T>
@@ -148,17 +148,23 @@ public:
 
         // Make sure the buffer is usable before returning from this function
         _unflushed_data = {real_write.end, real_write.end};
-        if (bytes_left() > 0) {
-            start_new_unflushed_data();
-        }
+        start_new_unflushed_data();
 
         return now();
     }
 
 private:
-    void move_bytes_count(size_t len) {
+    void mock_append_bytes(size_t len) {
         assert(len <= bytes_left());
         _unflushed_data.end += len;
+    }
+
+    append_result mock_append(size_t data_len) {
+        if (not fits_for_append(data_len)) {
+            return TOO_BIG;
+        }
+        mock_append_bytes(data_len);
+        return APPENDED;
     }
 
     void start_new_unflushed_data() noexcept override {
@@ -167,18 +173,10 @@ private:
             assert(bytes_left() == 0); // alignment has to be big enough to hold checkpoint and next_metadata_cluster
             return; // No more space
         }
-        move_bytes_count(sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
+        mock_append_bytes(sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
     }
 
     void prepare_unflushed_data_for_flush() noexcept override {}
-
-    append_result check_and_move_bytes_count(size_t data_len) {
-        if (not fits_for_append(data_len)) {
-            return TOO_BIG;
-        }
-        move_bytes_count(data_len);
-        return APPENDED;
-    }
 
 public:
     using metadata_to_disk_buffer::bytes_left_after_flush_if_done_now;
@@ -186,17 +184,17 @@ public:
     using metadata_to_disk_buffer::append_result;
 
     append_result append(const ondisk_next_metadata_cluster& next_metadata_cluster) noexcept override {
-        size_t len = get_ondisk_entry_size(next_metadata_cluster);
+        size_t len = ondisk_entry_size(next_metadata_cluster);
         if (bytes_left() < len) {
             return TOO_BIG;
         }
         actions.emplace_back(action::append {ondisk_next_metadata_cluster {next_metadata_cluster}});
-        move_bytes_count(len);
+        mock_append_bytes(len);
         return APPENDED;
     }
 
     append_result append(const ondisk_create_inode& create_inode) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(create_inode));
+        append_result ret = mock_append(ondisk_entry_size(create_inode));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_create_inode {create_inode}});
         }
@@ -204,7 +202,7 @@ public:
     }
 
     append_result append(const ondisk_update_metadata& update_metadata) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(update_metadata));
+        append_result ret = mock_append(ondisk_entry_size(update_metadata));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_update_metadata {update_metadata}});
         }
@@ -212,7 +210,7 @@ public:
     }
 
     append_result append(const ondisk_delete_inode& delete_inode) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(delete_inode));
+        append_result ret = mock_append(ondisk_entry_size(delete_inode));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_delete_inode {delete_inode}});
         }
@@ -220,7 +218,7 @@ public:
     }
 
     append_result append(const ondisk_medium_write& medium_write) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(medium_write));
+        append_result ret = mock_append(ondisk_entry_size(medium_write));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_medium_write {medium_write}});
         }
@@ -228,7 +226,7 @@ public:
     }
 
     append_result append(const ondisk_large_write& large_write) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(large_write));
+        append_result ret = mock_append(ondisk_entry_size(large_write));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_large_write {large_write}});
         }
@@ -236,7 +234,7 @@ public:
     }
 
     append_result append(const ondisk_large_write_without_mtime& large_write_without_mtime) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(large_write_without_mtime));
+        append_result ret = mock_append(ondisk_entry_size(large_write_without_mtime));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_large_write_without_mtime {large_write_without_mtime}});
         }
@@ -244,7 +242,7 @@ public:
     }
 
     append_result append(const ondisk_truncate& truncate) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(truncate));
+        append_result ret = mock_append(ondisk_entry_size(truncate));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_truncate {truncate}});
         }
@@ -252,7 +250,7 @@ public:
     }
 
     append_result append(const ondisk_mtime_update& mtime_update) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(mtime_update));
+        append_result ret = mock_append(ondisk_entry_size(mtime_update));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_mtime_update {mtime_update}});
         }
@@ -260,13 +258,13 @@ public:
     }
 
 private:
-    temporary_buffer<uint8_t> copy_data(const void* data, size_t length) {
+    static temporary_buffer<uint8_t> copy_data(const void* data, size_t length) {
         return temporary_buffer<uint8_t>(static_cast<const uint8_t*>(data), length);
     }
 
 public:
     append_result append(const ondisk_small_write_header& small_write, const void* data) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(small_write));
+        append_result ret = mock_append(ondisk_entry_size(small_write));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_small_write {
                     small_write,
@@ -277,7 +275,7 @@ public:
     }
 
     append_result append(const ondisk_add_dir_entry_header& add_dir_entry, const void* entry_name) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(add_dir_entry));
+        append_result ret = mock_append(ondisk_entry_size(add_dir_entry));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_add_dir_entry {
                     add_dir_entry,
@@ -289,7 +287,7 @@ public:
 
     append_result append(const ondisk_create_inode_as_dir_entry_header& create_inode_as_dir_entry,
             const void* entry_name) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(create_inode_as_dir_entry));
+        append_result ret = mock_append(ondisk_entry_size(create_inode_as_dir_entry));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_create_inode_as_dir_entry {
                     create_inode_as_dir_entry,
@@ -301,7 +299,7 @@ public:
 
     append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name,
             const void* new_name) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(rename_dir_entry));
+        append_result ret = mock_append(ondisk_entry_size(rename_dir_entry));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_rename_dir_entry {
                     rename_dir_entry,
@@ -313,7 +311,7 @@ public:
     }
 
     append_result append(const ondisk_delete_dir_entry_header& delete_dir_entry, const void* entry_name) noexcept override {
-        append_result ret = check_and_move_bytes_count(get_ondisk_entry_size(delete_dir_entry));
+        append_result ret = mock_append(ondisk_entry_size(delete_dir_entry));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_delete_dir_entry {
                     delete_dir_entry,

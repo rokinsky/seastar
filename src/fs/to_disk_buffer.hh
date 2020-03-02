@@ -51,6 +51,8 @@ public:
         assert(mod_by_power_of_2(aligned_max_size, alignment) == 0);
     }
 
+    to_disk_buffer(to_disk_buffer&&) = default;
+
     // @p cluster_beg_offset is the disk offset of the beginning of the cluster
     virtual void init(disk_offset_t cluster_beg_offset) {
         assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
