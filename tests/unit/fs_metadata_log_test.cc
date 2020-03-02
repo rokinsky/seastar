@@ -80,14 +80,21 @@ SEASTAR_THREAD_TEST_CASE(mock_metadata_to_disk_buffer_test) {
 
     log.bootstrap(0, 3, {3, 10}, 4, 0).get();
 
-    log.create_file("/test", file_permissions::default_dir_permissions).get();
+    log.create_directory("/test/", file_permissions::default_dir_permissions).get();
+    log.create_file("/test/test", file_permissions::default_dir_permissions).get();
 
     auto &created_buffers = mock_metadata_to_disk_buffer::created_buffers;
     BOOST_REQUIRE_EQUAL(created_buffers.size(), 1);
     auto &buff = created_buffers[0];
+    BOOST_REQUIRE_EQUAL(buff->actions.size(), 2);
     BOOST_CHECK(buff->is_append_type<ondisk_create_inode_as_dir_entry>(0));
-    auto &ondisk_file_header = buff->get_by_append_type<ondisk_create_inode_as_dir_entry>(0).header;
+    BOOST_CHECK(buff->is_append_type<ondisk_create_inode_as_dir_entry>(1));
+    auto &ondisk_file_header = buff->get_by_append_type<ondisk_create_inode_as_dir_entry>(1).header;
 
-    inode_t file_inode = log.open_file("/test").get0();
+    inode_t file_inode = log.open_file("/test/test").get0();
     BOOST_REQUIRE_EQUAL(file_inode, ondisk_file_header.entry_inode.inode);
+
+    log.close_file(file_inode).get();
+    log.flush_log().get();
+    BOOST_REQUIRE_EQUAL(buff->actions.size(), 3);
 }
