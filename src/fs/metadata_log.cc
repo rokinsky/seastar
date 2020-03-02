@@ -173,7 +173,7 @@ void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, std:
 
 void metadata_log::schedule_curr_cluster_flush() {
     // Make writes concurrent (TODO: maybe serialized within *one* cluster would be faster?)
-    _previous_flushes = when_all_succeed(_previous_flushes.get_future(), do_with(_curr_cluster_buff, &_device, [](auto& crr_clstr_bf, auto& device) {
+    _background_futures = when_all_succeed(_background_futures.get_future(), do_with(_curr_cluster_buff, &_device, [](auto& crr_clstr_bf, auto& device) {
         return crr_clstr_bf->flush_to_disk(*device);
     }));
 }
@@ -184,7 +184,7 @@ future<> metadata_log::flush_curr_cluster() {
     }
 
     schedule_curr_cluster_flush();
-    return _previous_flushes.get_future();
+    return _background_futures.get_future();
 }
 
 future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
@@ -203,7 +203,7 @@ future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
     _curr_cluster_buff->virtual_constructor(_cluster_size, _alignment);
     _curr_cluster_buff->init(cluster_id_to_offset(*next_cluster, _cluster_size));
 
-    return _previous_flushes.get_future();
+    return _background_futures.get_future();
 }
 
 void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_vec) {

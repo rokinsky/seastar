@@ -97,7 +97,7 @@ class metadata_log {
 
     // Takes care of writing current cluster of serialized metadata log entries to device
     shared_ptr<metadata_to_disk_buffer> _curr_cluster_buff;
-    shared_future<> _previous_flushes = now();
+    shared_future<> _background_futures = now();
 
     // In memory metadata
     cluster_allocator _cluster_allocator;
@@ -237,7 +237,7 @@ private:
 
     template<class... Args>
     future<> append_ondisk_entry(Args&&... args) {
-        // TODO: maybe check for errors on _previous_flushes to expose previous errors?
+        // TODO: maybe check for errors on _background_futures to expose previous errors?
         return repeat([this, args...] {
             auto append_res = _curr_cluster_buff->append(args...);
             switch (append_res) {
