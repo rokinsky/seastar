@@ -161,7 +161,7 @@ private:
     void prepare_unflushed_data_for_flush() noexcept override {}
 
     append_result check_and_move_bytes_count(size_t data_len) {
-        if (!fits_for_append(data_len)) {
+        if (not fits_for_append(data_len)) {
             return TOO_BIG;
         }
         move_bytes_count(data_len);
