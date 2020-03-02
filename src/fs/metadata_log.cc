@@ -348,6 +348,39 @@ future<inode_t> metadata_log::open_file(std::string path) {
     });
 }
 
+future<> metadata_log::close_file(inode_t inode) {
+    auto file_it = _inodes.find(inode);
+    if (file_it == _inodes.end()) {
+        return make_exception_future(invalid_inode_exception());
+    }
+    inode_info* file_info = &file_it->second;
+
+    return _locks.with_lock(metadata_log::locks::shared {inode}, [this, inode, file_info] {
+        if (not inode_exists(inode)) {
+            return make_exception_future(operation_became_invalid_exception());
+        }
+        --file_info->opened_files_count;
+        if (file_info->is_unlinked()) {
+            // Unlinked and not open file should be removed
+            _background_futures = when_all_succeed(_background_futures.get_future(), [this, inode, file_info] {
+                // Inode removal operation is started in background
+                return _locks.with_lock(metadata_log::locks::unique {inode}, [this, inode, file_info] {
+                    if (not inode_exists(inode) or not file_info->is_unlinked()) {
+                        return now();
+                    }
+                    ondisk_delete_inode ondisk_entry {inode};
+
+                    // TODO: should we catch exceptions?
+                    return append_ondisk_entry(ondisk_entry).then([this, inode] {
+                        memory_only_delete_inode(inode);
+                    });
+                });
+            });
+        }
+        return now();
+    });
+}
+
 // TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE,
 // then it should be possible to compact some data (e.g. by truncating a file) via top-level interface and retrying the flush()
 // without a ENOSPACE error. In particular if we delete all files after ENOSPACE it should be successful. It becomes especially

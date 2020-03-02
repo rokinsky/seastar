@@ -199,6 +199,7 @@ class metadata_log {
 
     friend class metadata_log_bootstrap;
     friend class create_file_operation;
+    friend class close_file_operation;
 
 public:
     metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment,
@@ -323,7 +324,7 @@ public:
     // TODO: what about permissions, uid, gid etc.
     future<inode_t> open_file(std::string path);
 
-    future<> close_file(inode_t inode) { return make_ready_future(); }
+    future<> close_file(inode_t inode);
 
     // Creates name (@p path) for a file (@p inode)
     future<> link_file(inode_t inode, std::string path);
