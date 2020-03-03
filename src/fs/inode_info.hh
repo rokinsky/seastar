@@ -46,6 +46,24 @@ struct inode_data_vec {
     struct hole_data { };
 
     std::variant<in_mem_data, on_disk_data, hole_data> data_location;
+
+    // TODO: rename that function to something more suitable
+    inode_data_vec share_copy() {
+        inode_data_vec shared;
+        shared.data_range = data_range;
+        std::visit(overloaded {
+            [&](inode_data_vec::in_mem_data& mem) {
+                shared.data_location = inode_data_vec::in_mem_data {mem.data.share()};
+            },
+            [&](inode_data_vec::on_disk_data& disk_data) {
+                shared.data_location = disk_data;
+            },
+            [&](inode_data_vec::hole_data&) {
+                shared.data_location = inode_data_vec::hole_data {};
+            },
+        }, data_location);
+        return shared;
+    }
 };
 
 struct inode_info {
@@ -71,7 +89,7 @@ struct inode_info {
         // data vectors) that will be deleted
         template<class Func>
         void cut_out_data_range(file_range range, Func&& cut_data_vec_processor) {
-            static_assert(std::is_invocable_v<Func, const inode_data_vec&>);
+            static_assert(std::is_invocable_v<Func, inode_data_vec>);
             // Cut all vectors intersecting with range
             auto it = data.lower_bound(range.beg);
             if (it != data.begin() and are_intersecting(range, prev(it)->second.data_range)) {
@@ -83,7 +101,7 @@ struct inode_info {
                 const auto cap = intersection(range, data_vec.data_range);
                 if (cap == data_vec.data_range) {
                     // Fully intersects => remove it
-                    cut_data_vec_processor(data_vec);
+                    cut_data_vec_processor(std::move(data_vec));
                     continue;
                 }
 
@@ -129,7 +147,7 @@ struct inode_info {
                 }
 
                 // Process deleted vector
-                cut_data_vec_processor(mid);
+                cut_data_vec_processor(std::move(mid));
             }
         }
     };
