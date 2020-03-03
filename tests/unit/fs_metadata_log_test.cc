@@ -22,6 +22,7 @@
 #include "fs/metadata_disk_entries.hh"
 #include "fs/metadata_log.hh"
 #include "fs_mock_metadata_to_disk_buffer.hh"
+#include "seastar/fs/temporary_file.hh"
 
 #include <seastar/core/print.hh>
 #include <seastar/core/shared_ptr.hh>
@@ -83,14 +84,21 @@ SEASTAR_THREAD_TEST_CASE(mock_metadata_to_disk_buffer_test) {
     BOOST_REQUIRE_EQUAL(created_buffers.size(), 1);
     auto& buff = created_buffers[0];
     BOOST_REQUIRE_EQUAL(buff->actions.size(), 2);
-    BOOST_CHECK(buff->is_append_type<ondisk_create_inode_as_dir_entry>(0));
-    BOOST_CHECK(buff->is_append_type<ondisk_create_inode_as_dir_entry>(1));
+    BOOST_REQUIRE(buff->is_append_type<ondisk_create_inode_as_dir_entry>(0));
+    BOOST_REQUIRE(buff->is_append_type<ondisk_create_inode_as_dir_entry>(1));
     auto& ondisk_file_header = buff->get_by_append_type<ondisk_create_inode_as_dir_entry>(1).header;
 
     inode_t file_inode = log.open_file("/test/test").get0();
     BOOST_REQUIRE_EQUAL(file_inode, ondisk_file_header.entry_inode.inode);
 
+    std::string str = "123456";
+    size_t wrote = log.write(file_inode, 10, str.data(), str.size()).get0();
+    BOOST_REQUIRE_EQUAL(wrote, str.size());
+    BOOST_REQUIRE_EQUAL(buff->actions.size(), 3);
+    BOOST_REQUIRE(buff->is_append_type<ondisk_small_write>(2));
+
     log.close_file(file_inode).get();
     log.flush_log().get();
-    BOOST_REQUIRE_EQUAL(buff->actions.size(), 3);
+    BOOST_REQUIRE_EQUAL(buff->actions.size(), 4);
+    BOOST_REQUIRE(buff->is_type<flush_to_disk>(3));
 }
