@@ -236,6 +236,7 @@ private:
 
     future<> flush_curr_cluster_and_change_it_to_new_one();
 
+    // TODO: add lambda that executes immediately after append succeeds
     template<class... Args>
     future<> append_ondisk_entry(Args&&... args) {
         // TODO: maybe check for errors on _background_futures to expose previous errors?
