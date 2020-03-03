@@ -222,7 +222,7 @@ void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_
 }
 
 void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) {
-    file.cut_out_data_range(range, [](const inode_data_vec& data_vec) {
+    file.cut_out_data_range(range, [](inode_data_vec data_vec) {
         (void)data_vec; // TODO: for compaction: update used inode_data_vec
     });
 }
