@@ -150,6 +150,47 @@ struct inode_info {
                 cut_data_vec_processor(std::move(mid));
             }
         }
+
+        // Executes @p execute_on_data_ranges_processor on each data vector that is a subset of @p data_range.
+        // Data vectors on the edges are appropriately trimmed before passed to the function.
+        template<class Func>
+        void execute_on_data_range(file_range range, Func&& execute_on_data_range_processor) {
+            static_assert(std::is_invocable_v<Func, inode_data_vec>);
+            auto it = data.lower_bound(range.beg);
+            if (it != data.begin() and are_intersecting(range, prev(it)->second.data_range)) {
+                --it;
+            }
+
+            while (it != data.end() and are_intersecting(range, it->second.data_range)) {
+                auto& data_vec = (it++)->second;
+                const auto cap = intersection(range, data_vec.data_range);
+                if (cap == data_vec.data_range) {
+                    // Fully intersects => execute
+                    execute_on_data_range_processor(data_vec.share_copy());
+                    continue;
+                }
+
+                inode_data_vec mid;
+                mid.data_range = std::move(cap);
+                auto mid_beg_shift = mid.data_range.beg - data_vec.data_range.beg;
+                std::visit(overloaded {
+                    [&](inode_data_vec::in_mem_data& mem) {
+                        mid.data_location = inode_data_vec::in_mem_data {
+                            mem.data.share(mid_beg_shift, mid.data_range.size())
+                        };
+                    },
+                    [&](inode_data_vec::on_disk_data& disk_data) {
+                        mid.data_location = inode_data_vec::on_disk_data {disk_data.device_offset + mid_beg_shift};
+                    },
+                    [&](inode_data_vec::hole_data&) {
+                        mid.data_location = inode_data_vec::hole_data {};
+                    },
+                }, data_vec.data_location);
+
+                // Execute on middle range
+                execute_on_data_range_processor(std::move(mid));
+            }
+        }
     };
 
     std::variant<directory, file> contents;
