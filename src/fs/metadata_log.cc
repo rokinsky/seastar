@@ -29,6 +29,7 @@
 #include "fs/metadata_log_operations/create_file.hh"
 #include "fs/metadata_to_disk_buffer.hh"
 #include "fs/path.hh"
+#include "fs/units.hh"
 #include "fs/unix_metadata.hh"
 #include "seastar/core/aligned_buffer.hh"
 #include "seastar/core/do_with.hh"
@@ -42,6 +43,7 @@
 #include <boost/range/irange.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -328,47 +330,52 @@ future<> metadata_log::create_directory(std::string path, file_permissions perms
 }
 
 future<inode_t> metadata_log::open_file(std::string path) {
-    return path_lookup(path).then([this](inode_t file_inode) {
-        auto file_it = _inodes.find(file_inode);
-        if (file_it == _inodes.end()) {
+    return path_lookup(path).then([this](inode_t inode) {
+        auto inode_it = _inodes.find(inode);
+        if (inode_it == _inodes.end()) {
             return make_exception_future<inode_t>(operation_became_invalid_exception());
-        } else if (file_it->second.is_directory()) {
+        }
+        inode_info* inode_info = &inode_it->second;
+        if (inode_info->is_directory()) {
             return make_exception_future<inode_t>(is_directory_exception());
         }
-        inode_info* file_info = &file_it->second;
-        // TODO: can be replaced by sth like _file_info.during_delete
-        return _locks.with_lock(metadata_log::locks::shared {file_inode},
-                [this, file_info = std::move(file_info), file_inode] {
-            if (not inode_exists(file_inode)) {
+
+        // TODO: can be replaced by sth like _inode_info.during_delete
+        return _locks.with_lock(metadata_log::locks::shared {inode}, [this, inode_info = std::move(inode_info), inode] {
+            if (not inode_exists(inode)) {
                 return make_exception_future<inode_t>(operation_became_invalid_exception());
             }
-            ++file_info->opened_files_count;
-            return make_ready_future<inode_t>(file_inode);
+            ++inode_info->opened_files_count;
+            return make_ready_future<inode_t>(inode);
         });
     });
 }
 
 future<> metadata_log::close_file(inode_t inode) {
-    auto file_it = _inodes.find(inode);
-    if (file_it == _inodes.end()) {
+    auto inode_it = _inodes.find(inode);
+    if (inode_it == _inodes.end()) {
         return make_exception_future(invalid_inode_exception());
     }
-    inode_info* file_info = &file_it->second;
+    inode_info* inode_info = &inode_it->second;
+    if (inode_info->is_directory()) {
+        return make_exception_future(is_directory_exception());
+    }
 
-    return _locks.with_lock(metadata_log::locks::shared {inode}, [this, inode, file_info] {
+
+    return _locks.with_lock(metadata_log::locks::shared {inode}, [this, inode, inode_info] {
         if (not inode_exists(inode)) {
             return make_exception_future(operation_became_invalid_exception());
         }
 
-        assert(file_info->is_open());
+        assert(inode_info->is_open());
 
-        --file_info->opened_files_count;
-        if (not file_info->is_linked()) {
+        --inode_info->opened_files_count;
+        if (not inode_info->is_linked()) {
             // Unlinked and not open file should be removed
-            _background_futures = when_all_succeed(_background_futures.get_future(), [this, inode, file_info] {
+            _background_futures = when_all_succeed(_background_futures.get_future(), [this, inode, inode_info] {
                 // Inode removal operation is started in background
-                return _locks.with_lock(metadata_log::locks::unique {inode}, [this, inode, file_info] {
-                    if (not inode_exists(inode) or file_info->is_linked()) {
+                return _locks.with_lock(metadata_log::locks::unique {inode}, [this, inode, inode_info] {
+                    if (not inode_exists(inode) or inode_info->is_linked()) {
                         return now(); // Scheduled delete became invalid
                     }
                     ondisk_delete_inode ondisk_entry {inode};
