@@ -390,6 +390,45 @@ future<> metadata_log::close_file(inode_t inode) {
     });
 }
 
+future<size_t> metadata_log::write(inode_t inode, file_offset_t pos, const void* buffer, size_t len,
+        [[maybe_unused]] const io_priority_class& pc) {
+    auto inode_it = _inodes.find(inode);
+    if (inode_it == _inodes.end()) {
+        return make_exception_future<size_t>(invalid_inode_exception());
+    }
+    if (inode_it->second.is_directory()) {
+        return make_exception_future<size_t>(is_directory_exception());
+    }
+
+    return _locks.with_lock(metadata_log::locks::shared {inode}, [this, inode, pos, buffer, len] {
+        if (not inode_exists(inode)) {
+            return make_exception_future<inode_t>(operation_became_invalid_exception());
+        }
+
+        if (len <= std::numeric_limits<decltype(ondisk_small_write_header::length)>::max()) {
+            using namespace std::chrono;
+            uint64_t mtime_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+            ondisk_small_write_header ondisk_entry {
+                inode,
+                pos,
+                static_cast<decltype(ondisk_small_write_header::length)>(len),
+                mtime_ns
+            };
+
+            // TODO: ondisk append and memory updates should be atomic to prevent races and inconsistency in disk data
+            // and memory data
+            return append_ondisk_entry(ondisk_entry, buffer).then([this, inode, pos, buffer, len, mtime_ns] {
+                temporary_buffer<uint8_t> tmp_buffer(len);
+                std::memcpy(tmp_buffer.get_write(), buffer, len);
+                memory_only_small_write(inode, pos, std::move(tmp_buffer));
+                memory_only_update_mtime(inode, mtime_ns);
+                return len;
+            });
+        }
+        return make_exception_future<size_t>(invalid_argument_exception());
+    });
+}
+
 // TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE,
 // then it should be possible to compact some data (e.g. by truncating a file) via top-level interface and retrying the flush()
 // without a ENOSPACE error. In particular if we delete all files after ENOSPACE it should be successful. It becomes especially

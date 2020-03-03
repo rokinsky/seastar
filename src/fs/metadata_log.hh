@@ -54,6 +54,10 @@ struct invalid_inode_exception : public fs_exception {
     const char* what() const noexcept override { return "Invalid inode"; }
 };
 
+struct invalid_argument_exception : public fs_exception {
+    const char* what() const noexcept override { return "Invalid argument"; }
+};
+
 struct operation_became_invalid_exception : public fs_exception {
     const char* what() const noexcept override { return "Operation became invalid"; }
 };
@@ -342,9 +346,8 @@ public:
         return make_ready_future<size_t>(0);
     }
 
-    future<size_t> write(inode_t inode, file_offset_t pos, const void* buffer, size_t len, const io_priority_class& pc = default_priority_class()) {
-        return make_ready_future<size_t>(0);
-    }
+    future<size_t> write(inode_t inode, file_offset_t pos, const void* buffer, size_t len,
+            const io_priority_class& pc = default_priority_class());
 
     future<> truncate_file(inode_t inode, file_offset_t new_size) { return make_ready_future(); }
 
