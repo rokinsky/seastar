@@ -429,6 +429,71 @@ future<size_t> metadata_log::write(inode_t inode, file_offset_t pos, const void*
     });
 }
 
+future<size_t> metadata_log::read(inode_t inode, file_offset_t pos, void* buffer, size_t len,
+        const io_priority_class& pc) {
+    auto inode_it = _inodes.find(inode);
+    if (inode_it == _inodes.end()) {
+        return make_exception_future<size_t>(invalid_inode_exception());
+    }
+    if (inode_it->second.is_directory()) {
+        return make_exception_future<size_t>(is_directory_exception());
+    }
+    inode_info::file* file_info = &inode_it->second.get_file();
+
+    return _locks.with_lock(metadata_log::locks::shared {inode}, [this, inode, pos, buffer, len, file_info, pc] {
+        // TODO: do we want to keep that lock during reading? Everything should work even after file removal
+        if (not inode_exists(inode)) {
+            return make_exception_future<size_t>(operation_became_invalid_exception());
+        }
+
+        std::vector<inode_data_vec> data_vecs;
+        // Extract data vectors from file_info
+        file_info->execute_on_data_range({pos, pos + len}, [&data_vecs](inode_data_vec data_vec) {
+            // TODO: for compaction: mark that clusters shouldn't be moved to _cluster_allocator before that read ends
+            data_vecs.emplace_back(std::move(data_vec));
+        });
+
+        return do_with(std::move(data_vecs), (size_t)0, (size_t)0,
+                [this, pos, buffer, pc](std::vector<inode_data_vec>& data_vecs, size_t& vec_idx, size_t& valid_read_size) {
+            uint8_t* buffer_u = static_cast<uint8_t*>(buffer);
+            return repeat([this, &valid_read_size, &data_vecs, &vec_idx, pos, buffer_u, pc] {
+                if (vec_idx == data_vecs.size()) {
+                    return make_ready_future<bool_class<stop_iteration_tag>>(stop_iteration::yes);
+                }
+
+                inode_data_vec& data_vec = data_vecs[vec_idx++];
+                size_t expected_read_size = data_vec.data_range.size();
+                future<size_t> disk_read = make_ready_future<size_t>(expected_read_size);
+
+                std::visit(overloaded {
+                    [&](inode_data_vec::in_mem_data& mem) {
+                        std::memcpy(buffer_u + data_vec.data_range.beg - pos, mem.data.get(), expected_read_size);
+                    },
+                    [&](inode_data_vec::on_disk_data& disk_data) {
+                        // TODO: we need to align those reads, we shouldn't read the same block more than one time,
+                        // without assuming aligned reads here we will need to save previous disk read and copy data
+                        // from it
+                        disk_read = _device.read(disk_data.device_offset, buffer_u + data_vec.data_range.beg - pos,
+                                expected_read_size, pc);
+                    },
+                    [&](inode_data_vec::hole_data&) {
+                        std::memset(buffer_u + data_vec.data_range.beg - pos, 0, expected_read_size);
+                    },
+                }, data_vec.data_location);
+
+                return disk_read.then([&valid_read_size, expected_read_size](size_t read_size) {
+                    valid_read_size += read_size;
+                    if (read_size != expected_read_size) {
+                        return stop_iteration::yes;
+                    }
+                    return stop_iteration::no;
+                });
+            }).then([&valid_read_size] {
+                return make_ready_future<size_t>(valid_read_size);
+            });
+        });
+    });
+}
 // TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE,
 // then it should be possible to compact some data (e.g. by truncating a file) via top-level interface and retrying the flush()
 // without a ENOSPACE error. In particular if we delete all files after ENOSPACE it should be successful. It becomes especially
