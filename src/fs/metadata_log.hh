@@ -78,12 +78,20 @@ struct is_directory_exception : public fs_exception {
     const char* what() const noexcept override { return "Is a directory"; }
 };
 
+struct directory_not_empty_exception : public fs_exception {
+    const char* what() const noexcept override { return "Directory is not empty"; }
+};
+
 struct path_lookup_exception : public fs_exception {
     const char* what() const noexcept override = 0;
 };
 
 struct path_is_not_absolute_exception : public path_lookup_exception {
     const char* what() const noexcept override { return "Path is not absolute"; }
+};
+
+struct invalid_path_exception : public path_lookup_exception {
+    const char* what() const noexcept override { return "Path is invalid"; }
 };
 
 struct no_such_file_or_directory_exception : public path_lookup_exception {
@@ -204,6 +212,7 @@ class metadata_log {
     friend class metadata_log_bootstrap;
     friend class create_file_operation;
     friend class close_file_operation;
+    friend class unlink_or_remove_file_operation;
 
 public:
     metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment,
@@ -234,32 +243,57 @@ private:
     void memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, std::string entry_name);
     void memory_only_delete_dir_entry(inode_info::directory& dir, std::string entry_name);
 
-    void schedule_curr_cluster_flush();
+    template<class Func>
+    void schedule_background_task(Func&& task) {
+        _background_futures = when_all_succeed(_background_futures.get_future(), std::forward<Func>(task));
+    }
+
+    void schedule_flush_of_curr_cluster();
+
+    enum class flush_result {
+        DONE,
+        NO_SPACE
+    };
+
+    [[nodiscard]] flush_result schedule_flush_of_curr_cluster_and_change_it_to_new_one();
 
     future<> flush_curr_cluster();
 
-    future<> flush_curr_cluster_and_change_it_to_new_one();
+    enum class append_result {
+        APPENDED,
+        TOO_BIG,
+        NO_SPACE
+    };
 
-    // TODO: add lambda that executes immediately after append succeeds
     template<class... Args>
-    future<> append_ondisk_entry(Args&&... args) {
+    [[nodiscard]] append_result append_ondisk_entry(Args&&... args) {
+        using AR = append_result;
         // TODO: maybe check for errors on _background_futures to expose previous errors?
-        return repeat([this, args...] {
-            auto append_res = _curr_cluster_buff->append(args...);
-            switch (append_res) {
-            case metadata_to_disk_buffer::APPENDED:
-                return make_ready_future<stop_iteration>(stop_iteration::yes);
+        switch (_curr_cluster_buff->append(args...)) {
+        case metadata_to_disk_buffer::APPENDED:
+            return AR::APPENDED;
+        case metadata_to_disk_buffer::TOO_BIG:
+            break;
+        }
 
-            case metadata_to_disk_buffer::TOO_BIG: {
-                return flush_curr_cluster_and_change_it_to_new_one().then([] {
-                    return stop_iteration::no;
-                });
-            }
-            }
+        switch (schedule_flush_of_curr_cluster_and_change_it_to_new_one()) {
+        case flush_result::NO_SPACE:
+            return AR::NO_SPACE;
+        case flush_result::DONE:
+            break;
+        }
 
-            __builtin_unreachable();
-        });
+        switch (_curr_cluster_buff->append(args...)) {
+        case metadata_to_disk_buffer::APPENDED:
+            return AR::APPENDED;
+        case metadata_to_disk_buffer::TOO_BIG:
+            return AR::TOO_BIG;
+        }
+
+        __builtin_unreachable();
     }
+
+    void schedule_attempt_to_delete_inode(inode_t inode);
 
     enum class path_lookup_error {
         NOT_ABSOLUTE, // a path is not absolute
@@ -269,6 +303,7 @@ private:
 
     std::variant<inode_t, path_lookup_error> do_path_lookup(const std::string& path) const noexcept;
 
+    // It is safe for @p path to be a temporary (there is no need to worry about its lifetime)
     future<inode_t> path_lookup(const std::string& path) const;
 
 public:

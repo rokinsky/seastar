@@ -27,6 +27,7 @@
 #include "fs/metadata_log.hh"
 #include "fs/metadata_log_bootstrap.hh"
 #include "fs/metadata_log_operations/create_file.hh"
+#include "fs/metadata_log_operations/unlink_or_remove_file.hh"
 #include "fs/metadata_to_disk_buffer.hh"
 #include "fs/path.hh"
 #include "fs/units.hh"
@@ -69,6 +70,27 @@ future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_c
         fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id) {
     return metadata_log_bootstrap::bootstrap(*this, root_dir, first_metadata_cluster_id, available_clusters,
             fs_shards_pool_size, fs_shard_id);
+}
+
+void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_vec) {
+    // TODO: for compaction: update used inode_data_vec
+    auto file_size = file.size();
+    if (file_size < new_data_vec.data_range.beg) {
+        file.data.emplace(file_size, inode_data_vec {
+            {file_size, new_data_vec.data_range.beg},
+            inode_data_vec::hole_data {}
+        });
+    } else {
+        cut_out_data_range(file, new_data_vec.data_range);
+    }
+
+    file.data.emplace(new_data_vec.data_range.beg, std::move(new_data_vec));
+}
+
+void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) {
+    file.cut_out_data_range(range, [](inode_data_vec data_vec) {
+        (void)data_vec; // TODO: for compaction: update used inode_data_vec
+    });
 }
 
 void metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata) {
@@ -173,59 +195,64 @@ void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, std:
     dir.entries.erase(it);
 }
 
-void metadata_log::schedule_curr_cluster_flush() {
+void metadata_log::schedule_flush_of_curr_cluster() {
     // Make writes concurrent (TODO: maybe serialized within *one* cluster would be faster?)
-    _background_futures = when_all_succeed(_background_futures.get_future(), do_with(_curr_cluster_buff, &_device, [](auto& crr_clstr_bf, auto& device) {
+    schedule_background_task(do_with(_curr_cluster_buff, &_device, [](auto& crr_clstr_bf, auto& device) {
         return crr_clstr_bf->flush_to_disk(*device);
     }));
 }
 
 future<> metadata_log::flush_curr_cluster() {
     if (_curr_cluster_buff->bytes_left_after_flush_if_done_now() == 0) {
-        return flush_curr_cluster_and_change_it_to_new_one();
+        switch (schedule_flush_of_curr_cluster_and_change_it_to_new_one()) {
+        case flush_result::NO_SPACE:
+            return make_exception_future(no_more_space_exception());
+        case flush_result::DONE:
+            break;
+        }
+    } else {
+        schedule_flush_of_curr_cluster();
     }
 
-    schedule_curr_cluster_flush();
     return _background_futures.get_future();
 }
 
-future<> metadata_log::flush_curr_cluster_and_change_it_to_new_one() {
+metadata_log::flush_result metadata_log::schedule_flush_of_curr_cluster_and_change_it_to_new_one() {
     auto next_cluster = _cluster_allocator.alloc();
     if (not next_cluster) {
         // Here metadata log dies, we cannot even flush current cluster because from there we won't be able to recover
         // TODO: ^ add protection from it and take it into account during compaction
-        return make_exception_future(no_more_space_exception());
+        return flush_result::NO_SPACE;
     }
 
     auto append_res = _curr_cluster_buff->append(ondisk_next_metadata_cluster {*next_cluster});
     assert(append_res == metadata_to_disk_buffer::APPENDED);
-    schedule_curr_cluster_flush();
+    schedule_flush_of_curr_cluster();
 
     // Make next cluster the current cluster to allow writing next metadata entries before flushing finishes
     _curr_cluster_buff->virtual_constructor(_cluster_size, _alignment);
     _curr_cluster_buff->init(cluster_id_to_offset(*next_cluster, _cluster_size));
-
-    return _background_futures.get_future();
+    return flush_result::DONE;
 }
 
-void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_vec) {
-    // TODO: for compaction: update used inode_data_vec
-    auto file_size = file.size();
-    if (file_size < new_data_vec.data_range.beg) {
-        file.data.emplace(file_size, inode_data_vec {
-            {file_size, new_data_vec.data_range.beg},
-            inode_data_vec::hole_data {}
-        });
-    } else {
-        cut_out_data_range(file, new_data_vec.data_range);
-    }
 
-    file.data.emplace(new_data_vec.data_range.beg, std::move(new_data_vec));
-}
+void metadata_log::schedule_attempt_to_delete_inode(inode_t inode) {
+    return schedule_background_task([this, inode] {
+        auto it = _inodes.find(inode);
+        if (it == _inodes.end() or it->second.is_linked() or it->second.is_open()) {
+            return now(); // Scheduled delete became invalid
+        }
 
-void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) {
-    file.cut_out_data_range(range, [](inode_data_vec data_vec) {
-        (void)data_vec; // TODO: for compaction: update used inode_data_vec
+        switch (append_ondisk_entry(ondisk_delete_inode {inode})) {
+        case append_result::TOO_BIG:
+            assert(false and "ondisk entry cannot be too big");
+        case append_result::NO_SPACE:
+            return make_exception_future(no_more_space_exception());
+        case append_result::APPENDED:
+            memory_only_delete_inode(inode);
+            return now();
+        }
+        __builtin_unreachable();
     });
 }
 
@@ -370,21 +397,9 @@ future<> metadata_log::close_file(inode_t inode) {
         assert(inode_info->is_open());
 
         --inode_info->opened_files_count;
-        if (not inode_info->is_linked()) {
+        if (not inode_info->is_linked() and not inode_info->is_open()) {
             // Unlinked and not open file should be removed
-            _background_futures = when_all_succeed(_background_futures.get_future(), [this, inode, inode_info] {
-                // Inode removal operation is started in background
-                return _locks.with_lock(metadata_log::locks::unique {inode}, [this, inode, inode_info] {
-                    if (not inode_exists(inode) or inode_info->is_linked()) {
-                        return now(); // Scheduled delete became invalid
-                    }
-                    ondisk_delete_inode ondisk_entry {inode};
-
-                    return append_ondisk_entry(ondisk_entry).then([this, inode] {
-                        memory_only_delete_inode(inode);
-                    });
-                });
-            });
+            schedule_attempt_to_delete_inode(inode);
         }
         return now();
     });
@@ -402,7 +417,7 @@ future<size_t> metadata_log::write(inode_t inode, file_offset_t pos, const void*
 
     return _locks.with_lock(metadata_log::locks::shared {inode}, [this, inode, pos, buffer, len] {
         if (not inode_exists(inode)) {
-            return make_exception_future<inode_t>(operation_became_invalid_exception());
+            return make_exception_future<size_t>(operation_became_invalid_exception());
         }
 
         if (len <= std::numeric_limits<decltype(ondisk_small_write_header::length)>::max()) {
@@ -415,15 +430,18 @@ future<size_t> metadata_log::write(inode_t inode, file_offset_t pos, const void*
                 mtime_ns
             };
 
-            // TODO: ondisk append and memory updates should be atomic to prevent races and inconsistency in disk data
-            // and memory data
-            return append_ondisk_entry(ondisk_entry, buffer).then([this, inode, pos, buffer, len, mtime_ns] {
-                temporary_buffer<uint8_t> tmp_buffer(len);
-                std::memcpy(tmp_buffer.get_write(), buffer, len);
+            switch (append_ondisk_entry(ondisk_entry, buffer)) {
+            case append_result::TOO_BIG:
+                assert(false and "ondisk entry cannot be too big");
+            case append_result::NO_SPACE:
+                return make_exception_future<size_t>(no_more_space_exception());
+            case append_result::APPENDED:
+                temporary_buffer<uint8_t> tmp_buffer(static_cast<const uint8_t*>(buffer), len);
                 memory_only_small_write(inode, pos, std::move(tmp_buffer));
                 memory_only_update_mtime(inode, mtime_ns);
-                return len;
-            });
+                return make_ready_future<size_t>(len);
+            }
+            __builtin_unreachable();
         }
         return make_exception_future<size_t>(invalid_argument_exception());
     });
@@ -494,6 +512,15 @@ future<size_t> metadata_log::read(inode_t inode, file_offset_t pos, void* buffer
         });
     });
 }
+
+future<> metadata_log::unlink_file(std::string path) {
+    return unlink_or_remove_file_operation::perform(*this, std::move(path), false);
+}
+
+future<> metadata_log::remove(std::string path) {
+    return unlink_or_remove_file_operation::perform(*this, std::move(path), true);
+}
+
 // TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE,
 // then it should be possible to compact some data (e.g. by truncating a file) via top-level interface and retrying the flush()
 // without a ENOSPACE error. In particular if we delete all files after ENOSPACE it should be successful. It becomes especially
