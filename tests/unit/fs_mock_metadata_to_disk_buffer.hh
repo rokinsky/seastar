@@ -49,6 +49,11 @@ struct ondisk_delete_dir_entry {
     temporary_buffer<uint8_t> entry_name;
 };
 
+struct ondisk_delete_inode_and_dir_entry {
+    ondisk_delete_inode_and_dir_entry_header header;
+    temporary_buffer<uint8_t> entry_name;
+};
+
 struct ondisk_rename_dir_entry {
     ondisk_rename_dir_entry_header header;
     temporary_buffer<uint8_t> old_name;
@@ -86,6 +91,7 @@ public:
                     ondisk_add_dir_entry,
                     ondisk_create_inode_as_dir_entry,
                     ondisk_delete_dir_entry,
+                    ondisk_delete_inode_and_dir_entry,
                     ondisk_rename_dir_entry>;
 
             entry_data entry;
@@ -321,6 +327,16 @@ public:
         return ret;
     }
 
+    append_result append(const ondisk_delete_inode_and_dir_entry_header& delete_inode_and_dir_entry, const void* entry_name) noexcept override {
+        append_result ret = mock_append(ondisk_entry_size(delete_inode_and_dir_entry));
+        if (ret == APPENDED) {
+            actions.emplace_back(action::append {ondisk_delete_inode_and_dir_entry {
+                    delete_inode_and_dir_entry,
+                    copy_data(entry_name, delete_inode_and_dir_entry.entry_name_length)
+                }});
+        }
+        return ret;
+    }
 };
 
 } // namespace seastar::fs

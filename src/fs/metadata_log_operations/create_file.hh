@@ -33,7 +33,6 @@ class create_file_operation {
     file_permissions _perms;
     inode_t _dir_inode;
     inode_info::directory* _dir_info;
-    ondisk_create_inode_as_dir_entry_header _ondisk_entry;
 
     create_file_operation(metadata_log& metadata_log) : _metadata_log(metadata_log) {}
 
@@ -48,7 +47,7 @@ class create_file_operation {
         _entry_name = extract_last_component(path);
         if (_entry_name.empty()) {
             if (is_directory) {
-                return make_exception_future<inode_t>(std::runtime_error("Invalid path"));
+                return make_exception_future<inode_t>(invalid_path_exception());
             } else {
                 return make_exception_future<inode_t>(std::runtime_error("Path has to end with character different than '/'"));
             }
@@ -58,12 +57,18 @@ class create_file_operation {
         _perms = perms;
         return _metadata_log.path_lookup(path).then([this](inode_t dir_inode) {
             _dir_inode = dir_inode;
+            // Fail-fast checks before locking (as locking may be expensive)
             auto dir_it = _metadata_log._inodes.find(_dir_inode);
             if (dir_it == _metadata_log._inodes.end()) {
                 return make_exception_future<inode_t>(operation_became_invalid_exception());
             }
             assert(dir_it->second.is_directory() and "Directory cannot become file or there is a BUG in path_lookup");
             _dir_info = &dir_it->second.get_directory();
+
+            if (_dir_info->entries.count(_entry_name) != 0) {
+                return make_exception_future<inode_t>(file_already_exists_exception());
+            }
+
             return _metadata_log._locks.with_locks(metadata_log::locks::shared {dir_inode},
                     metadata_log::locks::unique {dir_inode, _entry_name}, [this] {
                 return create_file_in_directory();
@@ -80,7 +85,8 @@ class create_file_operation {
             return make_exception_future<inode_t>(file_already_exists_exception());
         }
 
-        decltype(_ondisk_entry.entry_name_length) entry_name_length;
+        ondisk_create_inode_as_dir_entry_header ondisk_entry;
+        decltype(ondisk_entry.entry_name_length) entry_name_length;
         if (_entry_name.size() > std::numeric_limits<decltype(entry_name_length)>::max()) {
             // TODO: add an assert that the culster_size is not too small as it would cause to allocate all clusters
             //       and then return error ENOSPACE
@@ -98,7 +104,7 @@ class create_file_operation {
             now_ns
         };
 
-        _ondisk_entry = {
+        ondisk_entry = {
             {
                 _metadata_log._inode_allocator.alloc(),
                 _is_directory,
@@ -108,12 +114,18 @@ class create_file_operation {
             entry_name_length,
         };
 
-        return _metadata_log.append_ondisk_entry(_ondisk_entry, _entry_name.data()).then([this, unx_mtdt] {
-            _metadata_log.memory_only_create_inode(_ondisk_entry.entry_inode.inode, _is_directory, unx_mtdt);
-            _metadata_log.memory_only_add_dir_entry(*_dir_info, _ondisk_entry.entry_inode.inode, std::move(_entry_name));
-        }).then([this] {
-            return make_ready_future<inode_t>((inode_t)_ondisk_entry.entry_inode.inode);
-        });
+
+        switch (_metadata_log.append_ondisk_entry(ondisk_entry, _entry_name.data())) {
+        case metadata_log::append_result::TOO_BIG:
+            assert(false and "ondisk entry cannot be too big");
+        case metadata_log::append_result::NO_SPACE:
+            return make_exception_future<size_t>(no_more_space_exception());
+        case metadata_log::append_result::APPENDED:
+            _metadata_log.memory_only_create_inode(ondisk_entry.entry_inode.inode, _is_directory, unx_mtdt);
+            _metadata_log.memory_only_add_dir_entry(*_dir_info, ondisk_entry.entry_inode.inode, std::move(_entry_name));
+            return make_ready_future<inode_t>((inode_t)ondisk_entry.entry_inode.inode);
+        }
+        __builtin_unreachable();
     }
 
 public:

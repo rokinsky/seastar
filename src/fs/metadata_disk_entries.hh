@@ -79,6 +79,7 @@ enum ondisk_type : uint8_t {
     ADD_DIR_ENTRY,
     CREATE_INODE_AS_DIR_ENTRY,
     DELETE_DIR_ENTRY,
+    DELETE_INODE_AND_DIR_ENTRY,
     RENAME_DIR_ENTRY,
 };
 
@@ -178,6 +179,13 @@ struct ondisk_delete_dir_entry_header {
     // After header comes entry name
 } __attribute__((packed));
 
+struct ondisk_delete_inode_and_dir_entry_header {
+    inode_t inode_to_delete;
+    inode_t dir_inode;
+    uint16_t entry_name_length;
+    // After header comes entry name
+} __attribute__((packed));
+
 struct ondisk_rename_dir_entry_header {
     inode_t dir_inode;
     inode_t new_dir_inode;
@@ -209,6 +217,9 @@ constexpr size_t ondisk_entry_size(const ondisk_create_inode_as_dir_entry_header
     return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
 }
 constexpr size_t ondisk_entry_size(const ondisk_delete_dir_entry_header& entry) noexcept {
+    return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
+}
+constexpr size_t ondisk_entry_size(const ondisk_delete_inode_and_dir_entry_header& entry) noexcept {
     return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
 }
 constexpr size_t ondisk_entry_size(const ondisk_rename_dir_entry_header& entry) noexcept {
