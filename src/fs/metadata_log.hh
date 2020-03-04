@@ -342,9 +342,9 @@ public:
     // Removes empty directory or unlinks file
     future<> remove(std::string path);
 
-    future<size_t> read(inode_t inode, file_offset_t pos, void* buffer, size_t len, const io_priority_class& pc = default_priority_class ()) {
-        return make_ready_future<size_t>(0);
-    }
+    // Unaligned reads and writes are supported but discouraged because of bad performace impact
+    future<size_t> read(inode_t inode, file_offset_t pos, void* buffer, size_t len,
+            const io_priority_class& pc = default_priority_class ());
 
     future<size_t> write(inode_t inode, file_offset_t pos, const void* buffer, size_t len,
             const io_priority_class& pc = default_priority_class());
