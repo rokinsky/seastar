@@ -210,9 +210,11 @@ class metadata_log {
     //       the real size of metadata log taken on disk to allow for detecting when compaction
 
     friend class metadata_log_bootstrap;
-    friend class create_file_operation;
     friend class close_file_operation;
+    friend class create_file_operation;
+    friend class read_operation;
     friend class unlink_or_remove_file_operation;
+    friend class write_operation;
 
 public:
     metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment,
@@ -379,7 +381,7 @@ public:
 
     // Unaligned reads and writes are supported but discouraged because of bad performace impact
     future<size_t> read(inode_t inode, file_offset_t pos, void* buffer, size_t len,
-            const io_priority_class& pc = default_priority_class ());
+            const io_priority_class& pc = default_priority_class());
 
     future<size_t> write(inode_t inode, file_offset_t pos, const void* buffer, size_t len,
             const io_priority_class& pc = default_priority_class());

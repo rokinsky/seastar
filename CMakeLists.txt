@@ -674,7 +674,9 @@ if (Seastar_EXPERIMENTAL_FS)
     src/fs/metadata_log.hh
     src/fs/metadata_log_bootstrap.hh
     src/fs/metadata_log_operations/create_file.hh
+    src/fs/metadata_log_operations/read.hh
     src/fs/metadata_log_operations/unlink_or_remove_file.hh
+    src/fs/metadata_log_operations/write.hh
     src/fs/metadata_to_disk_buffer.hh
     src/fs/path.hh
     src/fs/range.hh
