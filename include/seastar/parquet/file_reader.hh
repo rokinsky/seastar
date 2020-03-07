@@ -8,6 +8,7 @@
 
 #include <seastar/core/file.hh>
 #include <seastar/core/fstream.hh>
+#include <seastar/core/seastar.hh>
 
 #include <optional>
 #include <variant>
@@ -16,30 +17,24 @@ namespace parquet {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-class file_reader {
-    std::string _path;
-    seastar::file _file;
-    std::unique_ptr<format::FileMetaData> _metadata;
-    std::unique_ptr<schema::root_node> _schema;
-private:
-    file_reader() {};
-    static seastar::future<std::unique_ptr<format::FileMetaData>>
-    read_file_metadata(seastar::file file);
+class buffer {
+    size_t _size;
+    std::unique_ptr<uint8_t[]> _data;
+    static constexpr inline uint64_t next_power_of_2(uint64_t n) {
+        if (n < 2) return n;
+        return 1ull << (64 - __builtin_clzll(n - 1));
+    }
 public:
-    static seastar::future<file_reader> open(std::string path);
-    seastar::future<> close() { return _file.close(); };
-    const std::string& path() const { return _path; }
-    seastar::file file() const { return _file; }
-    const format::FileMetaData& metadata() const { return *_metadata; }
-    const schema::root_node& schema() const { return *_schema; }
+    explicit buffer(size_t size = 0)
+        : _size(next_power_of_2(size))
+        , _data(new uint8_t[_size]) {}
+    uint8_t* data() { return _data.get(); }
+    size_t size() { return _size; }
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 class peekable_stream {
     seastar::input_stream<char> _source;
-    std::unique_ptr<uint8_t[]> _buffer;
-    size_t _buffer_size = 0;
+    buffer _buffer;
     size_t _buffer_start = 0;
     size_t _buffer_end = 0;
 private:
@@ -77,8 +72,7 @@ public:
 class page_decompressor {
     page_reader _source;
     const format::CompressionCodec::type _codec;
-    std::unique_ptr<uint8_t[]> _buffer;
-    size_t _buffer_size = 0;
+    buffer _buffer;
 public:
     explicit page_decompressor(page_reader source, format::CompressionCodec::type codec)
         : _source{std::move(source)}
@@ -294,9 +288,9 @@ private:
     bool _eof = false;
 private:
     seastar::future<> load_next_page();
-    void load_dictionary_page(const page p);
-    void load_data_page(const page p);
-    void load_data_page_v2(const page p);
+    void load_dictionary_page(page p);
+    void load_data_page(page p);
+    void load_data_page_v2(page p);
 public:
     explicit column_chunk_reader(const schema::primitive_node& schema_node, page_decompressor source)
         : _schema_node(schema_node)
@@ -344,4 +338,62 @@ inline column_chunk_reader<T>::read_batch(size_t n, LevelT def[], LevelT rep[], 
     return seastar::make_ready_future<size_t>(def_levels_read);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+class file_reader {
+    std::string _path;
+    seastar::file _file;
+    std::unique_ptr<format::FileMetaData> _metadata;
+    std::unique_ptr<schema::schema> _schema;
+private:
+    file_reader() {};
+    static seastar::future<std::unique_ptr<format::FileMetaData>>
+    read_file_metadata(seastar::file file);
+public:
+    static seastar::future<file_reader> open(std::string path);
+    seastar::future<> close() { return _file.close(); };
+    const std::string& path() const { return _path; }
+    seastar::file file() const { return _file; }
+    const format::FileMetaData& metadata() const { return *_metadata; }
+    const schema::schema& schema() const { return *_schema; }
+
+    template <format::Type::type T>
+    seastar::future<column_chunk_reader<T>>
+    open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+extern template class column_chunk_reader<format::Type::INT32>;
+extern template class column_chunk_reader<format::Type::INT64>;
+extern template class column_chunk_reader<format::Type::INT96>;
+extern template class column_chunk_reader<format::Type::FLOAT>;
+extern template class column_chunk_reader<format::Type::DOUBLE>;
+extern template class column_chunk_reader<format::Type::BOOLEAN>;
+extern template class column_chunk_reader<format::Type::BYTE_ARRAY>;
+extern template class column_chunk_reader<format::Type::FIXED_LEN_BYTE_ARRAY>;
+extern template class value_decoder<format::Type::INT32>;
+extern template class value_decoder<format::Type::INT64>;
+extern template class value_decoder<format::Type::INT96>;
+extern template class value_decoder<format::Type::FLOAT>;
+extern template class value_decoder<format::Type::DOUBLE>;
+extern template class value_decoder<format::Type::BOOLEAN>;
+extern template class value_decoder<format::Type::BYTE_ARRAY>;
+extern template class value_decoder<format::Type::FIXED_LEN_BYTE_ARRAY>;
+extern template seastar::future<column_chunk_reader<format::Type::INT32>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+extern template seastar::future<column_chunk_reader<format::Type::INT64>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+extern template seastar::future<column_chunk_reader<format::Type::INT96>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+extern template seastar::future<column_chunk_reader<format::Type::FLOAT>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+extern template seastar::future<column_chunk_reader<format::Type::DOUBLE>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+extern template seastar::future<column_chunk_reader<format::Type::BOOLEAN>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+extern template seastar::future<column_chunk_reader<format::Type::BYTE_ARRAY>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+extern template seastar::future<column_chunk_reader<format::Type::FIXED_LEN_BYTE_ARRAY>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
 } // namespace parquet

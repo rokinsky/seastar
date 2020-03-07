@@ -94,10 +94,70 @@ seastar::future<file_reader> file_reader::open(std::string path) {
             fr._path = std::move(path);
             fr._file = file;
             fr._metadata = std::move(metadata);
-            fr._schema = std::make_unique<schema::root_node>(schema::build_logical_schema(*fr._metadata));
+            fr._schema = std::make_unique<schema::schema>(schema::build_logical_schema(*fr._metadata));
             return fr;
         });
     });
+}
+
+namespace {
+seastar::future<std::unique_ptr<format::ColumnMetaData>> read_chunk_metadata(seastar::input_stream<char> s) {
+    using return_type = seastar::future<std::unique_ptr<format::ColumnMetaData>>;
+    return seastar::do_with(peekable_stream(std::move(s)), [] (peekable_stream& stream) -> return_type {
+        constexpr size_t max_allowed_column_metadata_size = 16 * 1024 * 1024;
+        constexpr size_t expected_size = 256;
+        return y_combinator{[&stream] (auto&& retry, size_t peek_size) -> return_type {
+            return stream.peek(peek_size).then([peek_size, retry] (std::basic_string_view<uint8_t> peek) {
+                try {
+                    uint32_t len = peek.size();
+                    format::ColumnMetaData column_metadata;
+                    deserialize_thrift_msg(peek.data(), &len, &column_metadata);
+                    return seastar::make_ready_future<std::unique_ptr<format::ColumnMetaData>>(
+                            std::make_unique<format::ColumnMetaData>(std::move(column_metadata)));
+                } catch (std::exception& e) {
+                    if (peek_size > max_allowed_column_metadata_size || peek_size > peek.size()) {
+                        std::stringstream ss;
+                        ss << e.what();
+                        ss << "Could not deserialize ColumnMetaData.\n";
+                        throw parquet_exception(ss.str());
+                    }
+                    return retry(peek_size * 2);
+                }
+            });
+        }}(expected_size);
+    });
+}
+}
+
+template <format::Type::type T>
+seastar::future<column_chunk_reader<T>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const {
+    assert(leaf.info.type == T);
+    const format::ColumnChunk& column_chunk = metadata().row_groups[row].columns[leaf.column_index];
+    return [this, &column_chunk] {
+        if (!column_chunk.__isset.file_path) {
+            return seastar::make_ready_future<seastar::file>(file());
+        } else {
+            return seastar::open_file_dma(path() + column_chunk.file_path, seastar::open_flags::ro);
+        }
+    }().then([&column_chunk, &leaf] (seastar::file f) {
+        return [&column_chunk, f] {
+            if (column_chunk.__isset.meta_data) {
+                return seastar::make_ready_future<std::unique_ptr<format::ColumnMetaData>>(
+                        std::make_unique<format::ColumnMetaData>(column_chunk.meta_data));
+            } else {
+                return read_chunk_metadata(seastar::make_file_input_stream(f, column_chunk.file_offset));
+            }
+        }().then([f, &leaf] (std::unique_ptr<format::ColumnMetaData> cmd) {
+            size_t file_offset = cmd->__isset.dictionary_page_offset
+                                 ? cmd->dictionary_page_offset
+                                 : cmd->data_page_offset;
+            page_reader page_reader{seastar::make_file_input_stream(f, file_offset, cmd->total_compressed_size)};
+            page_decompressor pd{std::move(page_reader), cmd->codec};
+            return column_chunk_reader<T>(leaf, std::move(pd));
+        });
+    });
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -112,37 +172,27 @@ peekable_stream::read_exactly(size_t n) {
         if (newbuf.size() == 0) {
             return seastar::make_ready_future<>();
         } else {
-            std::memcpy(_buffer.get() + _buffer_end, newbuf.get(), newbuf.size());
+            std::memcpy(_buffer.data() + _buffer_end, newbuf.get(), newbuf.size());
             _buffer_end += newbuf.size();
             return read_exactly(n - newbuf.size());
         }
     });
 }
 
-namespace {
-
-static constexpr inline int64_t next_power_of_2(int64_t n) {
-    return 1ull << (64 - __builtin_clzll(n - 1));
-}
-
-} // namespace
-
 void peekable_stream::ensure_space(size_t n) {
-    if (_buffer_size - _buffer_end >= n) {
+    if (_buffer.size() - _buffer_end >= n) {
         return;
-    } else if (_buffer_size > n + (_buffer_end - _buffer_start)
-            && _buffer_start > _buffer_size / 2) {
-        std::memmove(_buffer.get(), _buffer.get() + _buffer_start, _buffer_end - _buffer_start);
+    } else if (_buffer.size() > n + (_buffer_end - _buffer_start)
+            && _buffer_start > _buffer.size() / 2) {
+        std::memmove(_buffer.data(), _buffer.data() + _buffer_start, _buffer_end - _buffer_start);
         _buffer_end -= _buffer_start;
         _buffer_start = 0;
     } else {
-        size_t new_size = next_power_of_2(_buffer_end + n);
-        std::unique_ptr<uint8_t[]> b{new uint8_t[new_size]};
+        buffer b{_buffer_end + n};
         if (_buffer_end - _buffer_start > 0) {
-            std::memcpy(b.get(), _buffer.get() + _buffer_start, _buffer_end - _buffer_start);
+            std::memcpy(b.data(), _buffer.data() + _buffer_start, _buffer_end - _buffer_start);
         }
         _buffer = std::move(b);
-        _buffer_size = new_size;
         _buffer_end -= _buffer_start;
         _buffer_start = 0;
     }
@@ -153,12 +203,12 @@ seastar::future<std::basic_string_view<uint8_t>> peekable_stream::peek(size_t n)
         return seastar::make_ready_future<std::basic_string_view<uint8_t>>();
     } else if (_buffer_end - _buffer_start >= n) {
         return seastar::make_ready_future<std::basic_string_view<uint8_t>>(
-                std::basic_string_view<uint8_t>{_buffer.get() +_buffer_start, n});
+                std::basic_string_view<uint8_t>{_buffer.data() +_buffer_start, n});
     } else {
         size_t bytes_needed = n - (_buffer_end - _buffer_start);
         ensure_space(bytes_needed);
         return read_exactly(bytes_needed).then([this] {
-            return std::basic_string_view(_buffer.get() + _buffer_start, _buffer_end - _buffer_start);
+            return std::basic_string_view(_buffer.data() + _buffer_start, _buffer_end - _buffer_start);
         });
     }
 }
@@ -223,25 +273,23 @@ seastar::future<std::optional<page>> page_decompressor::next_page() {
             if (output_len == 0) {
                 return std::optional<page>{page{p->header, std::basic_string_view<uint8_t>{}}};
             }
-            if (output_len > _buffer_size) {
-                size_t new_size = next_power_of_2(output_len);
-                _buffer = std::unique_ptr<uint8_t[]>(new uint8_t[new_size]);
-                _buffer_size = new_size;
+            if (output_len > _buffer.size()) {
+                _buffer = buffer{output_len};
             }
             switch (_codec) {
             case format::CompressionCodec::SNAPPY:
                 compression::snappy_decompress(p->contents.data(), p->contents.size(),
-                        _buffer.get(), output_len);
+                        _buffer.data(), output_len);
                 break;
             case format::CompressionCodec::GZIP:
                 compression::zlib_decompress(p->contents.data(), p->contents.size(),
-                        _buffer.get(), output_len);
+                        _buffer.data(), output_len);
                 break;
             // TODO LZO, BROTLI, LZ4, ZSTD
             default:
                 throw parquet_exception::nyi("Unsupported compression type");
             }
-            std::basic_string_view<uint8_t> v(_buffer.get(), output_len);
+            std::basic_string_view<uint8_t> v(_buffer.data(), output_len);
             return std::optional<page>{page{p->header, v}};
         }
     });
@@ -602,5 +650,21 @@ template class value_decoder<format::Type::DOUBLE>;
 template class value_decoder<format::Type::BOOLEAN>;
 template class value_decoder<format::Type::BYTE_ARRAY>;
 template class value_decoder<format::Type::FIXED_LEN_BYTE_ARRAY>;
+template seastar::future<column_chunk_reader<format::Type::INT32>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+template seastar::future<column_chunk_reader<format::Type::INT64>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+template seastar::future<column_chunk_reader<format::Type::INT96>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+template seastar::future<column_chunk_reader<format::Type::FLOAT>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+template seastar::future<column_chunk_reader<format::Type::DOUBLE>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+template seastar::future<column_chunk_reader<format::Type::BOOLEAN>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+template seastar::future<column_chunk_reader<format::Type::BYTE_ARRAY>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
+template seastar::future<column_chunk_reader<format::Type::FIXED_LEN_BYTE_ARRAY>>
+file_reader::open_column_chunk_reader(int row, const schema::primitive_node& leaf) const;
 
 } // namespace parquet

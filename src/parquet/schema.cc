@@ -7,188 +7,347 @@ namespace parquet::schema {
 
 namespace {
 
-constexpr format::FieldRepetitionType::type REPEATED = format::FieldRepetitionType::REPEATED;
-constexpr format::FieldRepetitionType::type OPTIONAL = format::FieldRepetitionType::OPTIONAL;
-
 struct raw_node {
     std::vector<raw_node> children;
     const format::SchemaElement& info;
+    std::vector<std::string> path;
     int column_index;
+    int def_level;
+    int rep_level;
+    logical_type::logical_type logical_type;
 };
 
-raw_node flat_schema_to_tree_recursive(
-        const std::vector<format::SchemaElement>& flat_schema,
-        int& schema_index,
-        int& column_index
-) {
-    if (schema_index >= static_cast<int>(flat_schema.size())) {
-        throw parquet_exception::corrupted_file("Invalid schema");
-    }
-    const format::SchemaElement& current = flat_schema[schema_index];
-    ++schema_index;
-    std::vector<raw_node> children;
-    if (current.__isset.num_children) {
-        for (int i = 0; i < current.num_children; ++i) {
-            auto child = flat_schema_to_tree_recursive(flat_schema, schema_index, column_index);
-            children.push_back(std::move(child));
+raw_node compute_shape(const std::vector<format::SchemaElement>& flat_schema) {
+    size_t index = 0;
+    return y_combinator{[&] (auto&& convert) -> raw_node {
+        if (index >= flat_schema.size()) {
+            throw parquet_exception::corrupted_file("invalid number of children in schema");
         }
-        return raw_node{std::move(children), current, -1};
-    } else {
-        column_index += 1;
-        return raw_node{std::move(children), current, column_index - 1};
-    }
-}
-
-raw_node flat_schema_to_tree(const std::vector<format::SchemaElement>& flat_schema) {
-    int schema_index = 0;
-    int column_index = 0;
-    return flat_schema_to_tree_recursive(flat_schema, schema_index, column_index);
-}
-
-node build_logical_node(const raw_node& r, std::vector<std::string>, int def_level, int rep_level);
-
-node build_logical_inner_node(
-        const raw_node& r,
-        std::vector<std::string> path,
-        int def_level,
-        int rep_level
-) {
-    node_base node_base{r.info, path, def_level, rep_level};
-
-    if (r.children.size() == 0) {
-        return primitive_node{std::move(node_base), r.info.type, r.column_index};
-    } else {
-        if ((r.info.__isset.logicalType && r.info.logicalType.__isset.LIST)
-                || (r.info.__isset.converted_type && r.info.converted_type == format::ConvertedType::LIST)) {
-            if (r.children.size() != 1 || r.info.repetition_type == REPEATED) {
-                throw parquet_exception::corrupted_file(
-                        std::string("Invalid list group_node: ") + r.info.name);
+        const format::SchemaElement &current = flat_schema[index];
+        ++index;
+        if (current.__isset.num_children) {
+            if (current.num_children < 0) {
+                throw parquet_exception::corrupted_file("negative num_children");
             }
-
-            const raw_node& repeated_node = r.children[0];
-            if (repeated_node.info.repetition_type != REPEATED) {
-                throw parquet_exception::corrupted_file(
-                        std::string("Invalid list node: ") + r.info.name);
+            std::vector<raw_node> children;
+            children.reserve(current.num_children);
+            for (int i = 0; i < current.num_children; ++i) {
+                children.push_back(convert());
             }
-
-            if (repeated_node.children.size() == 0
-                    || repeated_node.children.size() > 1
-                    || repeated_node.info.name.compare("array") == 0
-                    || repeated_node.info.name.compare(r.info.name + "_tuple") == 0) {
-                // Legacy 2-level list
-                return list_node{
-                    std::move(node_base),
-                    std::make_unique<node>(build_logical_node(repeated_node, std::move(path),
-                            def_level, rep_level))};
-            } else {
-                // Standard 3-level list
-                const raw_node& element_node = repeated_node.children[0];
-                path.push_back(repeated_node.info.name);
-                return list_node{
-                    std::move(node_base),
-                    std::make_unique<node>(build_logical_node(element_node, std::move(path),
-                            def_level + 1, rep_level + 1))};
-            }
-        } else if ((r.info.__isset.logicalType && r.info.logicalType.__isset.MAP)
-                || (r.info.__isset.converted_type && r.info.converted_type == format::ConvertedType::MAP)) {
-            if (r.children.size() != 1) {
-                throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
-            }
-
-            const raw_node& repeated_node = r.children[0];
-            if (repeated_node.children.size() != 2
-                    || repeated_node.info.repetition_type != REPEATED) {
-                throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
-            }
-
-            const raw_node& key_node = repeated_node.children[0];
-            const raw_node& value_node = repeated_node.children[1];
-
-            if (key_node.children.size() != 0) {
-                throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
-            }
-
-            path.push_back(repeated_node.info.name);
-            return map_node{
-                std::move(node_base),
-                std::make_unique<node>(build_logical_node(key_node,
-                        path, def_level + 1, rep_level + 1)),
-                std::make_unique<node>(build_logical_node(value_node,
-                        path, def_level + 1, rep_level + 1))};
+            return raw_node{std::move(children), current};
         } else {
-            std::vector<node> fields;
-            fields.reserve(r.children.size());
-            for (size_t i = 0; i < r.children.size(); ++i) {
-                fields.push_back(build_logical_node(r.children[i], path, def_level, rep_level));
-            }
-            return struct_node{
-                std::move(node_base),
-                std::move(fields)};
+            return raw_node{std::vector<raw_node>(), current};
         }
+    }}();
+}
+
+void compute_column_index(raw_node& raw_schema) {
+    int column_index = 0;
+    y_combinator{[&] (auto&& compute, raw_node& r) -> void {
+        if (r.children.empty()) {
+            r.column_index = column_index;
+            ++column_index;
+        } else {
+            r.column_index = -1;
+            for (raw_node& child : r.children) {
+                compute(child);
+            }
+        }
+    }}(raw_schema);
+}
+
+void compute_levels(raw_node& raw_schema) {
+    y_combinator{[&] (auto&& compute, raw_node& r, int def, int rep) -> void {
+        if (r.info.repetition_type == format::FieldRepetitionType::REPEATED) {
+            ++def;
+            ++rep;
+        } else if (r.info.repetition_type == format::FieldRepetitionType::OPTIONAL) {
+            ++def;
+        }
+        r.def_level = def;
+        r.rep_level = rep;
+        for (raw_node& child : r.children) {
+            compute(child, def, rep);
+        }
+    }}(raw_schema, 0, 0);
+}
+
+void compute_path(raw_node& raw_schema) {
+    auto compute = y_combinator{[&] (auto&& compute, raw_node& r, std::vector<std::string> path) -> void {
+        path.push_back(r.info.name);
+        for (raw_node& child : r.children) {
+            compute(child, path);
+        }
+        r.path = std::move(path);
+    }};
+    for (raw_node& child : raw_schema.children) {
+        compute(child, std::vector<std::string>());
     }
 }
 
-node build_logical_node(
-        const raw_node& r,
-        std::vector<std::string> path,
-        int def_level,
-        int rep_level
-) {
-    def_level = def_level + (r.info.repetition_type == REPEATED || r.info.repetition_type == OPTIONAL);
-    rep_level = rep_level + (r.info.repetition_type == REPEATED);
-    path.push_back(r.info.name);
+logical_type::logical_type determine_logical_type(const format::SchemaElement& x) {
+    static auto verify = [] (bool condition, std::string error) {
+        if (!condition) { throw parquet_exception::corrupted_file(error); }
+    };
+    if (x.__isset.logicalType) {
+        if (x.logicalType.__isset.TIME) {
+            if (x.logicalType.TIME.unit.__isset.MILLIS) {
+                verify(x.type == format::Type::INT32, "TIME MILLIS must annotate the INT32 physical type");
+                return logical_type::TIME{x.logicalType.TIME.isAdjustedToUTC, logical_type::TIME::MILLIS};
+            } else if (x.logicalType.TIME.unit.__isset.MICROS) {
+                verify(x.type == format::Type::INT64, "TIME MICROS must annotate the INT64 physical type");
+                return logical_type::TIME{x.logicalType.TIME.isAdjustedToUTC, logical_type::TIME::MICROS};
+            } else if (x.logicalType.TIME.unit.__isset.NANOS) {
+                verify(x.type == format::Type::INT64, "TIME NANOS must annotate the INT64 physical type");
+                return logical_type::TIME{x.logicalType.TIME.isAdjustedToUTC, logical_type::TIME::NANOS};
+            }
+        } else if (x.logicalType.__isset.TIMESTAMP) {
+            verify(x.type == format::Type::INT64, "TIMESTAMP must annotate the INT64 physical type");
+            if (x.logicalType.TIMESTAMP.unit.__isset.MILLIS) {
+                return logical_type::TIMESTAMP{x.logicalType.TIMESTAMP.isAdjustedToUTC, logical_type::TIMESTAMP::MILLIS};
+            } else if (x.logicalType.TIMESTAMP.unit.__isset.MICROS) {
+                return logical_type::TIMESTAMP{x.logicalType.TIMESTAMP.isAdjustedToUTC, logical_type::TIMESTAMP::MICROS};
+            } else if (x.logicalType.TIMESTAMP.unit.__isset.NANOS) {
+                return logical_type::TIMESTAMP{x.logicalType.TIMESTAMP.isAdjustedToUTC, logical_type::TIMESTAMP::NANOS};
+            }
+        } else if (x.logicalType.__isset.UUID) {
+            verify(x.type == format::Type::FIXED_LEN_BYTE_ARRAY && x.type_length == 16,
+                   "UUID must annotate the 16-byte fixed-length binary type");
+            return logical_type::UUID{};
+        } else if (x.logicalType.__isset.UNKNOWN) {
+            return logical_type::UNKNOWN{};
+        }
+    }
+    if (x.__isset.converted_type) {
+        if (x.converted_type == format::ConvertedType::UTF8) {
+            verify(x.type == format::Type::BYTE_ARRAY || x.type == format::Type::FIXED_LEN_BYTE_ARRAY,
+                   "UTF8 must annotate the binary physical type");
+            return logical_type::STRING{};
+        } else if (x.converted_type == format::ConvertedType::ENUM) {
+            verify(x.type == format::Type::BYTE_ARRAY || x.type == format::Type::FIXED_LEN_BYTE_ARRAY,
+                   "ENUM must annotate the binary physical type");
+            return logical_type::ENUM{};
+        } else if (x.converted_type == format::ConvertedType::INT_8) {
+            verify(x.type == format::Type::INT32, "INT_8 must annotate the INT32 physical type");
+            return logical_type::INT8{};
+        } else if (x.converted_type == format::ConvertedType::INT_16) {
+            verify(x.type == format::Type::INT32, "INT_16 must annotate the INT32 physical type");
+            return logical_type::INT16{};
+        } else if (x.converted_type == format::ConvertedType::INT_32) {
+            verify(x.type == format::Type::INT32, "INT_32 must annotate the INT32 physical type");
+            return logical_type::INT32{};
+        } else if (x.converted_type == format::ConvertedType::INT_64) {
+            verify(x.type == format::Type::INT64, "INT_64 must annotate the INT64 physical type");
+            return logical_type::INT64{};
+        } else if (x.converted_type == format::ConvertedType::UINT_8) {
+            verify(x.type == format::Type::INT32, "UINT_8 must annotate the INT32 physical type");
+            return logical_type::UINT8{};
+        } else if (x.converted_type == format::ConvertedType::UINT_16) {
+            verify(x.type == format::Type::INT32, "UINT_16 must annotate the INT32 physical type");
+            return logical_type::UINT16{};
+        } else if (x.converted_type == format::ConvertedType::UINT_32) {
+            verify(x.type == format::Type::INT32, "UINT_32 must annotate the INT32 physical type");
+            return logical_type::UINT32{};
+        } else if (x.converted_type == format::ConvertedType::UINT_64) {
+            verify(x.type == format::Type::INT64, "UINT_64 must annotate the INT64 physical type");
+            return logical_type::UINT64{};
+        } else if (x.converted_type == format::ConvertedType::DECIMAL) {
+            verify(x.__isset.precision && x.__isset.scale, "precision and scale must be set for DECIMAL");
+            int precision = x.precision;
+            int scale = x.scale;
+            if (x.type == format::Type::INT32) {
+                verify(1 <= precision && precision <= 9,"precision " + std::to_string(precision) + " out of bounds for INT32 decimal");
+            } else if (x.type == format::Type::INT64) {
+                verify(1 <= precision && precision <= 18, "precision " + std::to_string(precision) + " out of bounds for INT64 decimal");
+            } else if (x.type == format::Type::BYTE_ARRAY) {
+                verify(precision > 0, "precision " + std::to_string(precision) + " out of bounds for BYTE_ARRAY decimal");
+            } else if (x.type == format::Type::FIXED_LEN_BYTE_ARRAY) {
+                verify(precision > 0, "precision " + std::to_string(precision) + " out of bounds for FIXED_LEN_BYTE_ARRAY decimal");
+            }
+            return logical_type::DECIMAL{scale, precision};
+        } else if (x.converted_type == format::ConvertedType::DATE) {
+            verify(x.type == format::Type::INT32, "DATE must annotate the INT32 physical type");
+        } else if (x.converted_type == format::ConvertedType::TIME_MILLIS) {
+            verify(x.type == format::Type::INT32, "TIME_MILLIS must annotate the INT32 physical type");
+            return logical_type::TIME{true, logical_type::TIME::MILLIS};
+        } else if (x.converted_type == format::ConvertedType::TIME_MICROS) {
+            verify(x.type == format::Type::INT64, "TIME_MICROS must annotate the INT64 physical type");
+            return logical_type::TIME{true, logical_type::TIME::MICROS};
+        } else if (x.converted_type == format::ConvertedType::TIMESTAMP_MILLIS) {
+            verify(x.type == format::Type::INT64, "TIMESTAMP_MILLIS must annotate the INT64 physical type");
+            return logical_type::TIMESTAMP{true, logical_type::TIMESTAMP::MILLIS};
+        } else if (x.converted_type == format::ConvertedType::TIMESTAMP_MICROS) {
+            verify(x.type == format::Type::INT64, "TIMESTAMP_MICROS must annotate the INT64 physical type");
+            return logical_type::TIMESTAMP{true, logical_type::TIMESTAMP::MICROS};
+        } else if (x.converted_type == format::ConvertedType::INTERVAL) {
+            verify(x.type == format::Type::FIXED_LEN_BYTE_ARRAY && x.type_length == 12,
+                   "INTERVAL must annotate the INT32 physical type");
+            return logical_type::INTERVAL{};
+        } else if (x.converted_type == format::ConvertedType::JSON) {
+            verify(x.type == format::Type::BYTE_ARRAY || x.type == format::Type::FIXED_LEN_BYTE_ARRAY,
+                   "JSON must annotate the binary physical type");
+            return logical_type::JSON{};
+        } else if (x.converted_type == format::ConvertedType::BSON) {
+            verify(x.type == format::Type::BYTE_ARRAY || x.type == format::Type::FIXED_LEN_BYTE_ARRAY,
+                   "BSON must annotate the binary physical type");
+            return logical_type::BSON{};
+        } else if (x.converted_type == format::ConvertedType::LIST) {
+            return logical_type::LIST{};
+        } else if (x.converted_type == format::ConvertedType::MAP || x.converted_type == format::ConvertedType::MAP_KEY_VALUE) {
+            return logical_type::MAP{};
+        }
+    }
+    return logical_type::NONE{};
+}
 
-    node inner_node = build_logical_inner_node(r, path, def_level, rep_level);
+void compute_logical_type(raw_node& raw_schema) {
+    y_combinator{[&] (auto&& compute, raw_node& r) -> void {
+        r.logical_type = determine_logical_type(r.info);
+        for (auto& child : r.children) {
+            compute(child);
+        }
+    }}(raw_schema);
+}
 
-    if (r.info.repetition_type == OPTIONAL) {
-        return optional_node{
-            {r.info, std::move(path), def_level - 1, rep_level},
-            std::make_unique<node>(std::move(inner_node))};
-    } else if (r.info.repetition_type == REPEATED) {
+raw_node flat_schema_to_raw_schema(const std::vector<format::SchemaElement>& flat_schema) {
+    raw_node raw_schema = compute_shape(flat_schema);
+    compute_column_index(raw_schema);
+    compute_levels(raw_schema);
+    compute_path(raw_schema);
+    compute_logical_type(raw_schema);
+    return raw_schema;
+}
+
+node build_logical_node(const raw_node& raw_schema);
+
+primitive_node build_primitive_node(const raw_node& r) {
+    return primitive_node{{r.info, r.path, r.def_level, r.rep_level}, r.logical_type, r.column_index};
+}
+
+list_node build_list_node(const raw_node& r) {
+    if (r.children.size() != 1 || r.info.repetition_type == format::FieldRepetitionType::REPEATED) {
+        throw parquet_exception::corrupted_file(std::string("Invalid list node: ") + r.info.name);
+    }
+
+    const raw_node& repeated_node = r.children[0];
+    if (repeated_node.info.repetition_type != format::FieldRepetitionType::REPEATED) {
+        throw parquet_exception::corrupted_file(std::string("Invalid list element: ") + r.info.name);
+    }
+
+    if ((repeated_node.children.size() != 1)
+        || (repeated_node.info.name == "array")
+        || (repeated_node.info.name == (r.info.name + "_tuple"))) {
+        // Legacy 2-level list
         return list_node{
-            {r.info, std::move(path), def_level - 1, rep_level - 1},
-            std::make_unique<node>(std::move(inner_node))};
+                {r.info, r.path, r.def_level, r.rep_level},
+                std::make_unique<node>(build_logical_node(repeated_node))};
     } else {
-        return inner_node;
+        // Standard 3-level list
+        const raw_node& element_node = repeated_node.children[0];
+        return list_node{
+                {r.info, r.path, r.def_level, r.rep_level},
+                std::make_unique<node>(build_logical_node(element_node))};
+    }
+}
+
+map_node build_map_node(const raw_node& r) {
+    if (r.children.size() != 1) {
+        throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
+    }
+
+    const raw_node& repeated_node = r.children[0];
+    if (repeated_node.children.size() != 2
+        || repeated_node.info.repetition_type != format::FieldRepetitionType::REPEATED) {
+        throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
+    }
+
+    const raw_node& key_node = repeated_node.children[0];
+    const raw_node& value_node = repeated_node.children[1];
+    if (!key_node.children.empty()) {
+        throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
+    }
+
+    return map_node{
+            {r.info, r.path, r.def_level, r.rep_level},
+            std::make_unique<node>(build_logical_node(key_node)),
+            std::make_unique<node>(build_logical_node(value_node))};
+}
+
+struct_node build_struct_node(const raw_node& r) {
+    std::vector<node> fields;
+    fields.reserve(r.children.size());
+    for (const raw_node& child : r.children) {
+        fields.push_back(build_logical_node(child));
+    }
+    return struct_node{{r.info, r.path, r.def_level, r.rep_level}, std::move(fields)};
+}
+
+node build_logical_node(const raw_node& r) {
+    auto build_unwrapped_node = [&r] () -> node {
+        if (r.children.empty()) {
+            return build_primitive_node(r);
+        } else if (std::holds_alternative<logical_type::LIST>(r.logical_type)) {
+            return build_list_node(r);
+        } else if (std::holds_alternative<logical_type::MAP>(r.logical_type)) {
+            return build_map_node(r);
+        } else {
+            return build_struct_node(r);
+        }
+    };
+
+    if (r.info.repetition_type == format::FieldRepetitionType::OPTIONAL) {
+        return optional_node{
+                {r.info, r.path,  r.def_level - 1, r.rep_level},
+                std::make_unique<node>(build_unwrapped_node())};
+    } else if (r.info.repetition_type == format::FieldRepetitionType::REPEATED) {
+        return list_node{
+                {r.info, r.path, r.def_level - 1, r.rep_level - 1},
+                std::make_unique<node>(build_unwrapped_node())};
+    } else {
+        return build_unwrapped_node();
+    }
+}
+
+schema compute_shape(const raw_node& raw_schema) {
+    std::vector<node> fields;
+    fields.reserve(raw_schema.children.size());
+    for (const raw_node& child : raw_schema.children) {
+        fields.push_back(build_logical_node(child));
+    }
+    return schema{raw_schema.info, std::move(fields)};
+}
+
+void compute_leaves(schema& root) {
+    auto collect = y_combinator{[&](auto&& collect, const node& x_variant) -> void {
+        std::visit(overloaded {
+            [&] (const optional_node& x) { collect(*x.child); },
+            [&] (const list_node& x) { collect(*x.element); },
+            [&] (const map_node& x) {
+                collect(*x.key);
+                collect(*x.value);
+            },
+            [&] (const struct_node& x) {
+                for (const node& child : x.fields) {
+                    collect(child);
+                }
+            },
+            [&] (const primitive_node& y) {
+                root.leaves.push_back(&y);
+            }
+        }, x_variant);
+    }};
+    for (const node& field : root.fields) {
+        collect(field);
     }
 }
 
 } // namespace
 
-void collect_leaves(const node& x, std::vector<const primitive_node*>& leaves) {
-    std::visit(overloaded {
-        [&] (const optional_node& x) { collect_leaves(*x.child_node, leaves); },
-        [&] (const list_node& x) { collect_leaves(*x.element_node, leaves); },
-        [&] (const map_node& x) {
-            collect_leaves(*x.key_node, leaves);
-            collect_leaves(*x.value_node, leaves);
-        },
-        [&] (const struct_node& x) {
-            for (const node& child : x.field_nodes) {
-                collect_leaves(child, leaves);
-            }
-        },
-        [&] (const primitive_node& y) {
-            leaves.push_back(&y);
-        }
-    }, x);
-}
-
-root_node build_logical_schema(const format::FileMetaData& metadata) {
-    const raw_node& raw_root = flat_schema_to_tree(metadata.schema);
-    std::vector<node> fields;
-    fields.reserve(raw_root.children.size());
-
-    for (size_t i = 0; i < raw_root.children.size(); ++i) {
-        fields.push_back(build_logical_node(raw_root.children[i], std::vector<std::string>(), 0, 0));
-    }
-
-    std::vector<const primitive_node*> leaves;
-    for (const node& x : fields) {
-        collect_leaves(x, leaves);
-    }
-
-    return root_node{raw_root.info, std::move(fields), std::move(leaves)};
+schema build_logical_schema(const format::FileMetaData& metadata) {
+    raw_node raw_root = flat_schema_to_raw_schema(metadata.schema);
+    schema root = compute_shape(raw_root);
+    compute_leaves(root);
+    return root;
 }
 
 } // namespace parquet::schema

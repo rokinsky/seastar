@@ -31,6 +31,7 @@ std::ostream& operator<<(std::ostream& out, const std::array<int32_t, 3>& a) {
     return out << a[0] << ':' << a[1] << ':' << a[2];
 }
 
+#if 0
 template<format::Type::type T>
 void print_column_chunk(column_chunk_reader<T> r) {
         std::ostream& out = std::cout;
@@ -40,11 +41,12 @@ void print_column_chunk(column_chunk_reader<T> r) {
                 if (def < 0) {
                     return seastar::make_ready_future<seastar::stop_iteration>(seastar::stop_iteration::yes);
                 } else {
-                    return xd.read_field(out).then([] { return seastar::stop_iteration::no; });
+                    return xd.template read_field<cql::cql_consumer>(out).then([] { return seastar::stop_iteration::no; });
                 }
             });
         }).get();
 }
+#endif
 
 SEASTAR_TEST_CASE(parquet_file_reader) {
     return seastar::async([] {
@@ -71,25 +73,26 @@ SEASTAR_TEST_CASE(parquet_file_reader) {
                 std::cout << (int)page.contents[i] << ' ';
             }
             std::cout << '\n';
-            schema::root_node root = schema::build_logical_schema(file_reader.metadata());
+            schema::schema root = schema::build_logical_schema(file_reader.metadata());
             std::cout << cql::cql_schema_from_logical_schema(root) << '\n';
         }
         {
             std::string test_name = get_data_file("nested_maps.snappy.parquet");
             parquet::file_reader file_reader = file_reader::open(test_name).get0();
-            schema::root_node root = schema::build_logical_schema(file_reader.metadata());
+            schema::schema root = schema::build_logical_schema(file_reader.metadata());
             std::cout << cql::cql_schema_from_logical_schema(root) << '\n';
         }
         {
             std::string test_name = get_data_file("nested_lists.snappy.parquet");
             parquet::file_reader file_reader = file_reader::open(test_name).get0();
-            schema::root_node root = schema::build_logical_schema(file_reader.metadata());
+            schema::schema root = schema::build_logical_schema(file_reader.metadata());
             std::cout << cql::cql_schema_from_logical_schema(root) << '\n';
         }
+#if 0
         {
             std::string test_name = get_data_file("nested_maps.snappy.parquet");
             parquet::file_reader file_reader = file_reader::open(test_name).get0();
-            schema::root_node root = schema::build_logical_schema(file_reader.metadata());
+            schema::schema root = schema::build_logical_schema(file_reader.metadata());
             std::cout << file_reader.metadata();
             std::cout << cql::cql_schema_from_logical_schema(root) << '\n';
             for (size_t j = 0; j < file_reader.metadata().row_groups[0].columns.size(); ++j) {
@@ -152,13 +155,15 @@ SEASTAR_TEST_CASE(parquet_file_reader) {
                 }
             }
         }
+#endif
         {
-            std::string test_name = get_data_file("nested_maps.snappy.parquet");
+            std::string test_name = get_data_file("repeated_no_annotation.parquet");
             parquet::file_reader file_reader = file_reader::open(test_name).get0();
             std::cout << file_reader.metadata();
             std::cout << cql::cql_schema_from_logical_schema(file_reader.schema()) << '\n';
-            cql::record_reader r = cql::record_reader::make(file_reader, 0);
-            r.read_all(std::cout).get();
+            cql::record_reader r = cql::record_reader::make(file_reader, 0).get0();
+            cql::cql_consumer cc{std::cout};
+            r.read_all<cql::cql_consumer>(cc).get();
         }
     });
 }
