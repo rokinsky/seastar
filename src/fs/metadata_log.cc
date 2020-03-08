@@ -62,6 +62,7 @@ metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t 
 , _cluster_size(cluster_size)
 , _alignment(alignment)
 , _curr_cluster_buff(std::move(cluster_buff))
+, _curr_data_buff(make_shared<to_disk_buffer>(cluster_size, alignment))
 , _cluster_allocator({}, {})
 , _inode_allocator(1, 0) {
     assert(is_power_of_2(alignment));
