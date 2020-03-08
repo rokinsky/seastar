@@ -88,7 +88,7 @@ public:
         };
         // Pad buffer with zeros till alignment
         range padding = {_unflushed_data.end, real_write.end};
-        memset(_buff.get_write() + padding.beg, 0, padding.size());
+        std::memset(_buff.get_write() + padding.beg, 0, padding.size());
 
         // Make sure the buffer is usable before returning from this function
         _unflushed_data = {real_write.end, real_write.end};
