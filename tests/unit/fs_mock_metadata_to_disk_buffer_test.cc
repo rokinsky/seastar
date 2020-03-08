@@ -128,7 +128,7 @@ SEASTAR_THREAD_TEST_CASE(virtual_constructor_test) {
     BOOST_REQUIRE_EQUAL(created_buffers.size(), 1);
     BOOST_REQUIRE(created_buffers[0] == buf2);
     BOOST_REQUIRE_EQUAL(created_buffers[0]->actions.size(), 0);
-    buf2->append(ondisk_delete_inode {1});
+    BOOST_REQUIRE_EQUAL(buf2->append(ondisk_delete_inode {1}), APPENDED);
     BOOST_REQUIRE_EQUAL(created_buffers[0]->actions.size(), 1);
 
     auto buf3 = buf2->virtual_constructor(default_buff_size, default_alignment);
