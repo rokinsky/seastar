@@ -124,6 +124,12 @@ public:
     virtual size_t bytes_left_after_flush_if_done_now() const noexcept {
         return _max_size - round_up_to_multiple_of_power_of_2(_unflushed_data.end, _alignment);
     }
+
+    // Returns disk offset of the place where the first byte of next appended bytes would be after flush
+    // TODO: maybe better name for that function? Or any other method to extract that data?
+    virtual disk_offset_t current_disk_offset() const noexcept {
+        return _cluster_beg_offset + _unflushed_data.end;
+    }
 };
 
 } // namespace seastar::fs
