@@ -125,9 +125,9 @@ class unlink_or_remove_file_operation {
 
             switch (_metadata_log.append_ondisk_entry(ondisk_entry, _entry_name.data())) {
             case metadata_log::append_result::TOO_BIG:
-                assert(false and "ondisk entry cannot be too big");
+                return make_exception_future(cluster_size_too_small_to_perform_operation_exception());
             case metadata_log::append_result::NO_SPACE:
-                return make_exception_future<>(no_more_space_exception());
+                return make_exception_future(no_more_space_exception());
             case metadata_log::append_result::APPENDED:
                 _metadata_log.memory_only_delete_dir_entry(*_dir_info, _entry_name);
                 _metadata_log.memory_only_delete_inode(_entry_inode);
