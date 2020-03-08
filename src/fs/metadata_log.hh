@@ -50,6 +50,10 @@ struct fs_exception : public std::exception {
     const char* what() const noexcept override = 0;
 };
 
+struct cluster_size_too_small_to_perform_operation_exception : public std::exception {
+    const char* what() const noexcept override { return "Cluster size is too small to perform operation"; }
+};
+
 struct invalid_inode_exception : public fs_exception {
     const char* what() const noexcept override { return "Invalid inode"; }
 };
