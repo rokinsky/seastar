@@ -109,6 +109,7 @@ class metadata_log {
 
     // Takes care of writing current cluster of serialized metadata log entries to device
     shared_ptr<metadata_to_disk_buffer> _curr_cluster_buff;
+    shared_ptr<to_disk_buffer> _curr_data_buff;
     shared_future<> _background_futures = now();
 
     // In memory metadata

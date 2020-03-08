@@ -148,6 +148,12 @@ class metadata_log_bootstrap {
                     free_clusters.emplace_back(cid);
                 }
             }
+            if (free_clusters.empty()) {
+                return make_exception_future(no_more_space_exception());
+            }
+            cluster_id_t datalog_cluster_id = free_clusters.front();
+            _metadata_log._curr_data_buff->init(cluster_id_to_offset(datalog_cluster_id, _metadata_log._cluster_size));
+            free_clusters.pop_front();
             _metadata_log._cluster_allocator = cluster_allocator(std::move(_taken_clusters), std::move(free_clusters));
 
             // Reset _inode_allocator
@@ -159,6 +165,7 @@ class metadata_log_bootstrap {
 
             // TODO: what about orphaned inodes: maybe they are remnants of unlinked files and we need to delete them,
             //       or maybe not?
+            return now();
         });
     }
 
