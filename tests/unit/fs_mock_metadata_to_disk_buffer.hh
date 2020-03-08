@@ -455,7 +455,7 @@ std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry_header&
 
 std::ostream& operator<<(std::ostream& os, const temporary_buffer<uint8_t>& data) {
     constexpr size_t MAX_ELEMENTS_NUMBER = 10;
-    for (int i = 0; i < std::min(MAX_ELEMENTS_NUMBER, data.size()); ++i) {
+    for (size_t i = 0; i < std::min(MAX_ELEMENTS_NUMBER, data.size()); ++i) {
         if (isprint(data[i]) != 0) {
             os << data[i];
         } else {
