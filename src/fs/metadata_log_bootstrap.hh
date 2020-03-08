@@ -396,7 +396,7 @@ class metadata_log_bootstrap {
                 _taken_clusters.count(entry.data_cluster) != 0) {
             return invalid_entry_exception();
         }
-        _taken_clusters.emplace(entry.data_cluster);
+        _taken_clusters.emplace((cluster_id_t)entry.data_cluster);
 
         _metadata_log.memory_only_disk_write(entry.inode, entry.offset,
                 cluster_id_to_offset(entry.data_cluster, _metadata_log._cluster_size), _metadata_log._cluster_size);
@@ -420,7 +420,7 @@ class metadata_log_bootstrap {
                 _taken_clusters.count(entry.data_cluster) != 0) {
             return invalid_entry_exception();
         }
-        _taken_clusters.emplace(entry.data_cluster);
+        _taken_clusters.emplace((cluster_id_t)entry.data_cluster);
 
         _metadata_log.memory_only_disk_write(entry.inode, entry.offset,
                 cluster_id_to_offset(entry.data_cluster, _metadata_log._cluster_size), _metadata_log._cluster_size);

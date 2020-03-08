@@ -70,12 +70,12 @@ class read_operation {
     }
 
     struct disk_temp_buffer {
-        disk_range disk_range;
-        temporary_buffer<uint8_t> data;
+        disk_range _disk_range;
+        temporary_buffer<uint8_t> _data;
     };
     // Keep last disk read to accelerate next disk reads in cases where next read is intersecting previous disk read
     // (after alignment)
-    disk_temp_buffer prev_disk_read;
+    disk_temp_buffer _prev_disk_read;
 
     future<size_t> iterate_reads(uint8_t* buffer, file_offset_t file_offset, std::vector<inode_data_vec> data_vecs) {
         return do_with(std::move(data_vecs), (size_t)0, (size_t)0,
@@ -119,16 +119,16 @@ class read_operation {
                 // and source_buffer.disk_range into buffer. dest_disk_range.beg corresponds to first byte of buffer
                 auto copy_intersecting_data =
                         [](uint8_t* buffer, disk_range dest_disk_range, const disk_temp_buffer& source_buffer) -> size_t {
-                    disk_range intersect = intersection(dest_disk_range, source_buffer.disk_range);
+                    disk_range intersect = intersection(dest_disk_range, source_buffer._disk_range);
                     if (not intersect.is_empty()) {
-                        // We can copy data from disk_temp_buffer
+                        // We can copy _data from disk_temp_buffer
                         size_t common_data_len = intersect.size();
-                        if (dest_disk_range.beg > source_buffer.disk_range.beg) {
-                            size_t source_data_offset = dest_disk_range.beg - source_buffer.disk_range.beg;
-                            std::memcpy(buffer, source_buffer.data.get() + source_data_offset, common_data_len);
+                        if (dest_disk_range.beg > source_buffer._disk_range.beg) {
+                            size_t source_data_offset = dest_disk_range.beg - source_buffer._disk_range.beg;
+                            std::memcpy(buffer, source_buffer._data.get() + source_data_offset, common_data_len);
                         } else {
-                            size_t dest_data_offset = source_buffer.disk_range.beg - dest_disk_range.beg;
-                            std::memcpy(buffer + dest_data_offset, source_buffer.data.get(), common_data_len);
+                            size_t dest_data_offset = source_buffer._disk_range.beg - dest_disk_range.beg;
+                            std::memcpy(buffer + dest_data_offset, source_buffer._data.get(), common_data_len);
                         }
                         return common_data_len;
                     } else {
@@ -142,8 +142,8 @@ class read_operation {
                 };
 
                 size_t copied = 0;
-                if (not prev_disk_read.data.empty()) {
-                    copied = copy_intersecting_data(buffer, remaining_read_range, prev_disk_read);
+                if (not _prev_disk_read._data.empty()) {
+                    copied = copy_intersecting_data(buffer, remaining_read_range, _prev_disk_read);
                     if (copied == expected_read_len) {
                         return make_ready_future<size_t>(expected_read_len);
                     }
@@ -152,20 +152,20 @@ class read_operation {
                 }
 
                 disk_temp_buffer new_disk_read;
-                new_disk_read.disk_range = {
+                new_disk_read._disk_range = {
                     round_down_to_multiple_of_power_of_2(remaining_read_range.beg, _metadata_log._alignment),
                     round_up_to_multiple_of_power_of_2(remaining_read_range.end, _metadata_log._alignment)
                 };
-                new_disk_read.data = temporary_buffer<uint8_t>::aligned(_metadata_log._alignment, new_disk_read.disk_range.size());
+                new_disk_read._data = temporary_buffer<uint8_t>::aligned(_metadata_log._alignment, new_disk_read._disk_range.size());
 
-                return _metadata_log._device.read(new_disk_read.disk_range.beg, new_disk_read.data.get_write(),
-                        new_disk_read.disk_range.size(), _pc).then(
+                return _metadata_log._device.read(new_disk_read._disk_range.beg, new_disk_read._data.get_write(),
+                        new_disk_read._disk_range.size(), _pc).then(
                         [this, copy_intersecting_data = std::move(copy_intersecting_data),
                         new_disk_read = std::move(new_disk_read),
                         remaining_read_range, buffer, copied](size_t read_len) mutable {
-                    new_disk_read.disk_range.end = new_disk_read.disk_range.beg + read_len;
+                    new_disk_read._disk_range.end = new_disk_read._disk_range.beg + read_len;
                     copied += copy_intersecting_data(buffer, remaining_read_range, new_disk_read);
-                    prev_disk_read = std::move(new_disk_read);
+                    _prev_disk_read = std::move(new_disk_read);
                     return copied;
                 });
             },
