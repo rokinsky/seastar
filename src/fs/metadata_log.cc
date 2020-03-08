@@ -135,10 +135,23 @@ void metadata_log::memory_only_delete_inode(inode_t inode) {
     _inodes.erase(it);
 }
 
-void metadata_log::memory_only_small_write(inode_t inode, disk_offset_t offset, temporary_buffer<uint8_t> data) {
+void metadata_log::memory_only_small_write(inode_t inode, file_offset_t file_offset, temporary_buffer<uint8_t> data) {
     inode_data_vec data_vec = {
-        {offset, offset + data.size()},
+        {file_offset, file_offset + data.size()},
         inode_data_vec::in_mem_data {std::move(data)}
+    };
+
+    auto it = _inodes.find(inode);
+    assert(it != _inodes.end());
+    assert(it->second.is_file());
+    write_update(it->second.get_file(), std::move(data_vec));
+}
+
+void metadata_log::memory_only_disk_write(inode_t inode, file_offset_t file_offset, disk_offset_t disk_offset,
+        size_t write_len) {
+    inode_data_vec data_vec = {
+        {file_offset, file_offset + write_len},
+        inode_data_vec::on_disk_data {disk_offset}
     };
 
     auto it = _inodes.find(inode);

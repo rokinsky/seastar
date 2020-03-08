@@ -240,6 +240,7 @@ private:
     void memory_only_update_metadata(inode_t inode, unix_metadata metadata);
     void memory_only_delete_inode(inode_t inode);
     void memory_only_small_write(inode_t inode, disk_offset_t offset, temporary_buffer<uint8_t> data);
+    void memory_only_disk_write(inode_t inode, file_offset_t file_offset, disk_offset_t disk_offset, size_t write_len);
     void memory_only_update_mtime(inode_t inode, decltype(unix_metadata::mtime_ns) mtime_ns);
     void memory_only_truncate(inode_t inode, disk_offset_t size);
     void memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, std::string entry_name);
