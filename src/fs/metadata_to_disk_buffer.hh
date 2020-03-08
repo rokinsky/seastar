@@ -204,7 +204,7 @@ public:
         return APPENDED;
     }
 
-    virtual append_result append(const ondisk_create_inode_as_dir_entry_header& create_inode_as_dir_entry,
+    [[nodiscard]] virtual append_result append(const ondisk_create_inode_as_dir_entry_header& create_inode_as_dir_entry,
             const void* entry_name) noexcept {
         ondisk_type type = CREATE_INODE_AS_DIR_ENTRY;
         if (not fits_for_append(ondisk_entry_size(create_inode_as_dir_entry))) {
