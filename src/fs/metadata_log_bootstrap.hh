@@ -352,23 +352,71 @@ class metadata_log_bootstrap {
     }
 
     future<> bootstrap_medium_write() {
-        // TODO: update _taken_clusters
-        // TODO: will be very similar to SMALL_WRITE
-        assert(false && "Not implemented");
+        ondisk_medium_write entry;
+        if (not _curr_checkpoint.read_entry(entry) or not inode_exists(entry.inode)) {
+            return invalid_entry_exception();
+        }
+
+        if (not _metadata_log._inodes[entry.inode].is_file()) {
+            return invalid_entry_exception();
+        }
+
+        cluster_id_t data_cluster_id = offset_to_cluster_id(entry.disk_offset, _metadata_log._cluster_size);
+        if (_available_clusters.beg > data_cluster_id or
+                _available_clusters.end <= data_cluster_id) {
+            return invalid_entry_exception();
+        }
+        // TODO: we could check overlapping with other writes
+        _taken_clusters.emplace(data_cluster_id);
+
+        _metadata_log.memory_only_disk_write(entry.inode, entry.offset, entry.disk_offset, entry.length);
+        _metadata_log.memory_only_update_mtime(entry.inode, entry.mtime_ns);
         return now();
     }
 
     future<> bootstrap_large_write() {
-        // TODO: update _taken_clusters
-        // TODO: will be very similar to SMALL_WRITE
-        assert(false && "Not implemented");
+        ondisk_large_write entry;
+        if (not _curr_checkpoint.read_entry(entry) or not inode_exists(entry.inode)) {
+            return invalid_entry_exception();
+        }
+
+        if (not _metadata_log._inodes[entry.inode].is_file()) {
+            return invalid_entry_exception();
+        }
+
+        if (_available_clusters.beg > entry.data_cluster or
+                _available_clusters.end <= entry.data_cluster or
+                _taken_clusters.count(entry.data_cluster) != 0) {
+            return invalid_entry_exception();
+        }
+        _taken_clusters.emplace(entry.data_cluster);
+
+        _metadata_log.memory_only_disk_write(entry.inode, entry.offset,
+                cluster_id_to_offset(entry.data_cluster, _metadata_log._cluster_size), _metadata_log._cluster_size);
+        _metadata_log.memory_only_update_mtime(entry.inode, entry.mtime_ns);
         return now();
     }
 
+    // TODO: copy pasting :(
     future<> bootstrap_large_write_without_mtime() {
-        // TODO: update _taken_clusters
-        // TODO: will be very similar to SMALL_WRITE
-        assert(false && "Not implemented");
+        ondisk_large_write_without_mtime entry;
+        if (not _curr_checkpoint.read_entry(entry) or not inode_exists(entry.inode)) {
+            return invalid_entry_exception();
+        }
+
+        if (not _metadata_log._inodes[entry.inode].is_file()) {
+            return invalid_entry_exception();
+        }
+
+        if (_available_clusters.beg > entry.data_cluster or
+                _available_clusters.end <= entry.data_cluster or
+                _taken_clusters.count(entry.data_cluster) != 0) {
+            return invalid_entry_exception();
+        }
+        _taken_clusters.emplace(entry.data_cluster);
+
+        _metadata_log.memory_only_disk_write(entry.inode, entry.offset,
+                cluster_id_to_offset(entry.data_cluster, _metadata_log._cluster_size), _metadata_log._cluster_size);
         return now();
     }
 
