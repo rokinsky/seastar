@@ -79,7 +79,7 @@ protected:
 
         ondisk_type type = INVALID;
         ondisk_checkpoint checkpoint;
-        memset(&checkpoint, 0, sizeof(checkpoint));
+        std::memset(&checkpoint, 0, sizeof(checkpoint));
 
         to_disk_buffer::append_bytes(&type, sizeof(type));
         to_disk_buffer::append_bytes(&checkpoint, sizeof(checkpoint));
