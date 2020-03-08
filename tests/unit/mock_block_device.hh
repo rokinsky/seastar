@@ -42,6 +42,8 @@ public:
     }
 
     future<size_t> read(uint64_t pos, void* buffer, size_t len, const io_priority_class&) noexcept override {
+        if (buf.size() < pos + len)
+            buf.resize(pos + len);
         std::memcpy(buffer, buf.c_str() + pos, len);
         return make_ready_future<size_t>(len);
     }
@@ -51,7 +53,7 @@ public:
     }
 
     future<disk_offset_t> size() noexcept override {
-        return make_ready_future<disk_offset_t>(0);
+        return make_ready_future<disk_offset_t>(buf.size());
     }
 
     future<> close() noexcept override {
