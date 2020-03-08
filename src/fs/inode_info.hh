@@ -209,7 +209,6 @@ struct inode_info {
     constexpr directory& get_directory() & noexcept { return std::get<directory>(contents); }
     constexpr const directory& get_directory()  const & noexcept { return std::get<directory>(contents); }
     constexpr directory&& get_directory() && noexcept { return std::move(std::get<directory>(contents)); }
-    constexpr const directory&& get_directory() const && noexcept { return std::move(std::get<directory>(contents)); }
 
     constexpr bool is_file() const noexcept { return std::holds_alternative<file>(contents); }
 
@@ -217,7 +216,6 @@ struct inode_info {
     constexpr file& get_file() & noexcept { return std::get<file>(contents); }
     constexpr const file& get_file()  const & noexcept { return std::get<file>(contents); }
     constexpr file&& get_file() && noexcept { return std::move(std::get<file>(contents)); }
-    constexpr const file&& get_file() const && noexcept { return std::move(std::get<file>(contents)); }
 };
 
 } // namespace seastar::fs
