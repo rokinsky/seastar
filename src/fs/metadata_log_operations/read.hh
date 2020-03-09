@@ -115,6 +115,7 @@ class read_operation {
                 return make_ready_future<size_t>(expected_read_len);
             },
             [&](inode_data_vec::on_disk_data& disk_data) {
+                // TODO: we can optimize the case when disk_data.device_offset is aligned
                 // Copies data from source_buffer corresponding to the intersection of dest_disk_range
                 // and source_buffer.disk_range into buffer. dest_disk_range.beg corresponds to first byte of buffer
                 auto copy_intersecting_data =
@@ -125,6 +126,8 @@ class read_operation {
                         size_t common_data_len = intersect.size();
                         if (dest_disk_range.beg > source_buffer._disk_range.beg) {
                             size_t source_data_offset = dest_disk_range.beg - source_buffer._disk_range.beg;
+                            // TODO: maybe we should split that memcpy to multiple parts because large reads can lead
+                            // to spikes in latency
                             std::memcpy(buffer, source_buffer._data.get() + source_data_offset, common_data_len);
                         } else {
                             size_t dest_data_offset = source_buffer._disk_range.beg - dest_disk_range.beg;
