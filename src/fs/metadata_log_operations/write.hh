@@ -73,10 +73,22 @@ class write_operation {
                     return make_ready_future<bool_class<stop_iteration_tag>>(stop_iteration::yes);
                 }
 
-                size_t expected_write_len = std::min((size_t)_metadata_log._cluster_size, write_len - valid_write_len);
-                if (expected_write_len > SMALL_WRITE_THRESHOLD) {
-                    // If last write is at least medium then align write length
-                    expected_write_len = round_down_to_multiple_of_power_of_2(expected_write_len, _metadata_log._alignment);
+                size_t expected_write_len;
+                if (size_t buffer_alignment = mod_by_power_of_2(reinterpret_cast<size_t>(buffer) + valid_write_len, _metadata_log._alignment);
+                        buffer_alignment != 0) {
+                    // When buffer is not aligned then align it using one small write
+                    expected_write_len = std::min(_metadata_log._alignment - buffer_alignment, write_len - valid_write_len);
+                } else {
+                    size_t remaining_write_len = write_len - valid_write_len;
+                    if (remaining_write_len >= _metadata_log._cluster_size) {
+                        expected_write_len = _metadata_log._cluster_size;
+                    } else if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
+                        expected_write_len = remaining_write_len;
+                    } else {
+                        // If the last write is medium then align write length by splitting last write into medium aligned
+                        // write and small write
+                        expected_write_len = round_down_to_multiple_of_power_of_2(remaining_write_len, _metadata_log._alignment);
+                    }
                 }
 
                 auto new_buffer = buffer + valid_write_len;
@@ -129,20 +141,22 @@ class write_operation {
         __builtin_unreachable();
     }
 
-    future<size_t> medium_write(const uint8_t* buffer, size_t expected_write_len, file_offset_t file_offset) {
+    future<size_t> medium_write(const uint8_t* aligned_buffer, size_t aligned_expected_write_len, file_offset_t file_offset) {
+        assert(reinterpret_cast<size_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        assert(aligned_expected_write_len % _metadata_log._alignment == 0);
         // TODO: medium write can be divided into bigger number of smaller medium writes. Maybe we should add checks
         // for that and allow only limited number of medium writes? Or we could add to to_disk_buffer option for
         // space 'reservation' to make sure that after division our write will fit into the buffer?
         // That would also limit medium write to at most two smaller writes.
-        return do_with((size_t)0, [this, buffer, expected_write_len, file_offset](size_t& valid_write_len) {
-            return repeat([this, &valid_write_len, buffer, expected_write_len, file_offset] {
-                if (valid_write_len == expected_write_len) {
+        return do_with((size_t)0, [this, aligned_buffer, aligned_expected_write_len, file_offset](size_t& valid_write_len) {
+            return repeat([this, &valid_write_len, aligned_buffer, aligned_expected_write_len, file_offset] {
+                if (valid_write_len == aligned_expected_write_len) {
                     return make_ready_future<bool_class<stop_iteration_tag>>(stop_iteration::yes);
                 }
 
-                size_t remaining_write_len = expected_write_len - valid_write_len;
+                size_t remaining_write_len = aligned_expected_write_len - valid_write_len;
                 size_t curr_expected_write_len;
-                auto new_buffer = buffer + valid_write_len;
+                auto new_buffer = aligned_buffer + valid_write_len;
                 auto new_file_offset = file_offset + valid_write_len;
                 auto write_future = make_ready_future<size_t>(0);
                 if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
@@ -191,21 +205,25 @@ class write_operation {
         });
     }
 
-    future<size_t> do_medium_write(const uint8_t* buffer, size_t expected_write_len, file_offset_t file_offset,
+    future<size_t> do_medium_write(const uint8_t* aligned_buffer, size_t aligned_expected_write_len, file_offset_t file_offset,
             shared_ptr<to_disk_buffer> disk_buffer) {
-        assert(disk_buffer->bytes_left() >= expected_write_len);
+        assert(reinterpret_cast<size_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        assert(aligned_expected_write_len % _metadata_log._alignment == 0);
+        assert(disk_buffer->bytes_left() >= aligned_expected_write_len);
+
         disk_offset_t device_offset = disk_buffer->current_disk_offset();
-        disk_buffer->append_bytes(buffer, expected_write_len);
+        // TODO: we can avoid copying data because aligned_buffer is aligned and we can just dma directly into device
+        disk_buffer->append_bytes(aligned_buffer, aligned_expected_write_len);
         // TODO: handle partial write
         return disk_buffer->flush_to_disk(_metadata_log._device).then(
-                [this, file_offset, expected_write_len, disk_buffer = std::move(disk_buffer), device_offset] {
+                [this, file_offset, aligned_expected_write_len, disk_buffer = std::move(disk_buffer), device_offset] {
             using namespace std::chrono;
             uint64_t mtime_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
             ondisk_medium_write ondisk_entry {
                 _inode,
                 file_offset,
                 device_offset,
-                static_cast<decltype(ondisk_medium_write::length)>(expected_write_len),
+                static_cast<decltype(ondisk_medium_write::length)>(aligned_expected_write_len),
                 mtime_ns
             };
 
@@ -215,17 +233,18 @@ class write_operation {
             case metadata_log::append_result::NO_SPACE:
                 return make_exception_future<size_t>(no_more_space_exception());
             case metadata_log::append_result::APPENDED:
-                _metadata_log.memory_only_disk_write(_inode, file_offset, device_offset, expected_write_len);
+                _metadata_log.memory_only_disk_write(_inode, file_offset, device_offset, aligned_expected_write_len);
                 _metadata_log.memory_only_update_mtime(_inode, mtime_ns);
-                return make_ready_future<size_t>(expected_write_len);
+                return make_ready_future<size_t>(aligned_expected_write_len);
             }
             __builtin_unreachable();
-            return make_ready_future<size_t>(expected_write_len);
+            return make_ready_future<size_t>(aligned_expected_write_len);
         });
     }
 
-    future<size_t> do_large_write(const uint8_t* buffer, file_offset_t file_offset, bool update_mtime) {
-        // expected_write_len = _metadata_log._cluster_size
+    future<size_t> do_large_write(const uint8_t* aligned_buffer, file_offset_t file_offset, bool update_mtime) {
+        assert(reinterpret_cast<size_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        // aligned_expected_write_len = _metadata_log._cluster_size
         std::optional<cluster_id_t> cluster_opt = _metadata_log._cluster_allocator.alloc();
         if (not cluster_opt) {
             return make_exception_future<size_t>(no_more_space_exception());
@@ -233,11 +252,8 @@ class write_operation {
         auto cluster_id = cluster_opt.value();
         disk_offset_t cluster_disk_offset = cluster_id_to_offset(cluster_id, _metadata_log._cluster_size);
 
-        // TODO: we could reuse that buffer instead of allocating it every time
         // We assume that buffer can be unaligned so we copy buffer to aligned buffer
-        auto aligned_buffer = temporary_buffer<uint8_t>::aligned(_metadata_log._alignment, _metadata_log._cluster_size);
-        std::memcpy(aligned_buffer.get_write(), buffer, _metadata_log._cluster_size);
-        return _metadata_log._device.write(cluster_disk_offset, aligned_buffer.get(), aligned_buffer.size(), _pc).then(
+        return _metadata_log._device.write(cluster_disk_offset, aligned_buffer, _metadata_log._cluster_size, _pc).then(
                 [this, file_offset, cluster_id, cluster_disk_offset, update_mtime](size_t write_len) {
             if (write_len != _metadata_log._cluster_size) {
                 _metadata_log._cluster_allocator.free(cluster_id);
