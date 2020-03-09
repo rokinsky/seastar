@@ -252,7 +252,6 @@ class write_operation {
         auto cluster_id = cluster_opt.value();
         disk_offset_t cluster_disk_offset = cluster_id_to_offset(cluster_id, _metadata_log._cluster_size);
 
-        // We assume that buffer can be unaligned so we copy buffer to aligned buffer
         return _metadata_log._device.write(cluster_disk_offset, aligned_buffer, _metadata_log._cluster_size, _pc).then(
                 [this, file_offset, cluster_id, cluster_disk_offset, update_mtime](size_t write_len) {
             if (write_len != _metadata_log._cluster_size) {
