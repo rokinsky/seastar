@@ -135,10 +135,10 @@ class metadata_log_bootstrap {
                 return bootstrap_cluster(curr_cluster);
             }).then([this, &last_cluster] {
                 // Initialize _curr_cluster_buff
-                _metadata_log._curr_cluster_buff = _metadata_log._curr_cluster_buff->virtual_constructor(
-                        _metadata_log._cluster_size, _metadata_log._alignment);
-                _metadata_log._curr_cluster_buff->init_from_bootstrapped_cluster(cluster_id_to_offset(last_cluster,
-                        _metadata_log._cluster_size), _curr_cluster.curr_pos());
+                _metadata_log._curr_cluster_buff = _metadata_log._curr_cluster_buff->virtual_constructor();
+                _metadata_log._curr_cluster_buff->init_from_bootstrapped_cluster(_metadata_log._cluster_size,
+                        _metadata_log._alignment, cluster_id_to_offset(last_cluster, _metadata_log._cluster_size),
+                        _curr_cluster.curr_pos());
             });
         }).then([this, fs_shards_pool_size, fs_shard_id] {
             // Initialize _cluser_allocator
@@ -152,7 +152,8 @@ class metadata_log_bootstrap {
                 return make_exception_future(no_more_space_exception());
             }
             cluster_id_t datalog_cluster_id = free_clusters.front();
-            _metadata_log._curr_data_buff->init(cluster_id_to_offset(datalog_cluster_id, _metadata_log._cluster_size));
+            _metadata_log._curr_data_buff->init(_metadata_log._cluster_size, _metadata_log._alignment,
+                    cluster_id_to_offset(datalog_cluster_id, _metadata_log._cluster_size));
             free_clusters.pop_front();
             _metadata_log._cluster_allocator = cluster_allocator(std::move(_taken_clusters), std::move(free_clusters));
 

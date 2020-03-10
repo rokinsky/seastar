@@ -29,43 +29,48 @@
 
 namespace seastar::fs {
 
+// Represents buffer that will be written to a block_device. Method init() should be called just after constructor
+// in order to finish construction.
 class metadata_to_disk_buffer : protected to_disk_buffer {
     boost::crc_32_type _crc;
 
 public:
-    // Represents buffer that will be written to a block_device. Method init() should be called just after constructor
-    // in order to finish construction. Total number of bytes appended cannot exceed @p aligned_max_size.
-    metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment)
-    : to_disk_buffer(aligned_max_size, alignment) {
-        assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
-        assert(alignment >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint) + sizeof(ondisk_type) +
-                sizeof(ondisk_next_metadata_cluster) and
-                "We always need to be able to pack at least a checkpoint and next_metadata_cluster entry to the last "
-                "data flush in the cluster");
-    }
+    metadata_to_disk_buffer() = default;
 
     using to_disk_buffer::init; // Explicitly stated that stays the same
 
-    virtual shared_ptr<metadata_to_disk_buffer> virtual_constructor(size_t aligned_max_size, unit_size_t alignment) const {
-        return make_shared<metadata_to_disk_buffer>(aligned_max_size, alignment);
+    virtual shared_ptr<metadata_to_disk_buffer> virtual_constructor() const {
+        return make_shared<metadata_to_disk_buffer>();
     }
 
     /**
      * @brief Inits object, leaving it in state as if just after flushing with unflushed data end at
      *   @p cluster_beg_offset
      *
+     * @param aligned_max_size size of the buffer, must be aligned
+     * @param alignment write alignment
      * @param cluster_beg_offset disk offset of the beginning of the cluster
      * @param metadata_end_pos position at which valid metadata ends: valid metadata range: [0, @p metadata_end_pos)
      */
-    virtual void init_from_bootstrapped_cluster(disk_offset_t cluster_beg_offset, size_t metadata_end_pos) noexcept {
-        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
+    virtual void init_from_bootstrapped_cluster(size_t aligned_max_size, unit_size_t alignment,
+            disk_offset_t cluster_beg_offset, size_t metadata_end_pos) {
+        assert(is_power_of_2(alignment));
+        assert(mod_by_power_of_2(aligned_max_size, alignment) == 0);
+        assert(mod_by_power_of_2(cluster_beg_offset, alignment) == 0);
+        assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
+        assert(alignment >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint) + sizeof(ondisk_type) +
+                sizeof(ondisk_next_metadata_cluster) and
+                "We always need to be able to pack at least a checkpoint and next_metadata_cluster entry to the last "
+                "data flush in the cluster");
         assert(metadata_end_pos < _max_size);
 
+        _max_size = aligned_max_size;
+        _alignment = alignment;
         _cluster_beg_offset = cluster_beg_offset;
-        _buff = decltype(_buff)::aligned(_alignment, _max_size);
-
         auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
         _unflushed_data = {aligned_pos, aligned_pos};
+        _buff = decltype(_buff)::aligned(_alignment, _max_size);
+
         start_new_unflushed_data();
     }
 

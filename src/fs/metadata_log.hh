@@ -227,6 +227,7 @@ public:
 
     metadata_log(const metadata_log&) = delete;
     metadata_log& operator=(const metadata_log&) = delete;
+    metadata_log(metadata_log&&) = default;
 
     future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters,
             fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id);

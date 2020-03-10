@@ -31,32 +31,35 @@
 
 namespace seastar::fs {
 
+// Represents buffer that will be written to a block_device. Method init() should be called just after constructor
+// in order to finish construction.
 class to_disk_buffer {
 protected:
     temporary_buffer<uint8_t> _buff;
-    const size_t _max_size;
-    const unit_size_t _alignment;
-    disk_offset_t _cluster_beg_offset; // disk offset that corresponds to _buff.begin()
-    range<size_t> _unflushed_data; // range of unflushed bytes in _buff
+    size_t _max_size = 0;
+    unit_size_t _alignment = 0;
+    disk_offset_t _cluster_beg_offset = 0; // disk offset that corresponds to _buff.begin()
+    range<size_t> _unflushed_data = {0, 0}; // range of unflushed bytes in _buff
 
 public:
-    // Represents buffer that will be written to a block_device. Method init() should be called just after constructor
-    // in order to finish construction. Total number of bytes appended cannot exceed @p aligned_max_size.
-    to_disk_buffer(size_t aligned_max_size, unit_size_t alignment)
-    : _buff()
-    , _max_size(aligned_max_size)
-    , _alignment(alignment)
-    , _unflushed_data {0, 0} {
+    to_disk_buffer() = default;
+
+    to_disk_buffer(const to_disk_buffer&) = delete;
+    to_disk_buffer& operator=(const to_disk_buffer&) = delete;
+    to_disk_buffer(to_disk_buffer&&) = default;
+    to_disk_buffer& operator=(to_disk_buffer&&) = default;
+
+    // Total number of bytes appended cannot exceed @p aligned_max_size.
+    // @p cluster_beg_offset is the disk offset of the beginning of the cluster.
+    virtual void init(size_t aligned_max_size, unit_size_t alignment, disk_offset_t cluster_beg_offset) {
         assert(is_power_of_2(alignment));
         assert(mod_by_power_of_2(aligned_max_size, alignment) == 0);
-    }
+        assert(mod_by_power_of_2(cluster_beg_offset, alignment) == 0);
 
-    to_disk_buffer(to_disk_buffer&&) = default;
-
-    // @p cluster_beg_offset is the disk offset of the beginning of the cluster
-    virtual void init(disk_offset_t cluster_beg_offset) {
-        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
+        _max_size = aligned_max_size;
+        _alignment = alignment;
         _cluster_beg_offset = cluster_beg_offset;
+        _unflushed_data = {0, 0};
         _buff = decltype(_buff)::aligned(_alignment, _max_size);
         start_new_unflushed_data();
     }

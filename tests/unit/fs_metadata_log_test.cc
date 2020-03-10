@@ -22,6 +22,7 @@
 #include "fs/metadata_disk_entries.hh"
 #include "fs/metadata_log.hh"
 #include "fs_mock_metadata_to_disk_buffer.hh"
+#include "mock_block_device.hh"
 #include "seastar/fs/temporary_file.hh"
 
 #include <seastar/core/print.hh>
@@ -38,55 +39,42 @@ using namespace seastar::fs;
 using append = mock_metadata_to_disk_buffer::action::append;
 using flush_to_disk = mock_metadata_to_disk_buffer::action::flush_to_disk;
 
-namespace seastar::fs {
+namespace {
 
-class empty_block_device_impl : public block_device_impl {
-public:
-    ~empty_block_device_impl() override = default;
+// Returns copy of given value. Needed to solve misalignment iiss
+template<typename T>
+T copy_value(T x) {
+    return x;
+}
 
-    future<size_t> write([[maybe_unused]] uint64_t pos, [[maybe_unused]] const void* buffer,
-            size_t len, [[maybe_unused]] const io_priority_class&) override {
-        return make_ready_future<size_t>(len);
-    }
+std::string to_string(const temporary_buffer<uint8_t>& a) {
+    return std::string(a.get(), a.get() + a.size());
+}
 
-    future<size_t> read([[maybe_unused]] uint64_t pos, void* buffer, size_t len,
-            [[maybe_unused]] const io_priority_class&) noexcept override {
-        std::memset(buffer, 0, len);
-        return make_ready_future<size_t>(len);
-    }
+constexpr unit_size_t default_cluster_size = 1 * MB;
+constexpr unit_size_t default_alignment = 4096;
+constexpr cluster_range default_cluster_range = {1, 10};
+constexpr cluster_id_t default_metadata_log_cluster = 1;
 
-    future<> flush() noexcept override {
-        return make_ready_future<>();
-    }
+template<typename BlockDevice = mock_block_device_impl, typename MetadataToDiskBuffer = mock_metadata_to_disk_buffer>
+auto init_structs() {
+    auto dev_impl = make_shared<BlockDevice>();
+    metadata_log log(block_device(dev_impl), default_cluster_size, default_alignment, make_shared<MetadataToDiskBuffer>());
+    log.bootstrap(0, default_metadata_log_cluster, default_cluster_range, 1, 0).get();
 
-    future<disk_offset_t> size() noexcept override {
-        return make_ready_future<disk_offset_t>(0);
-    }
+    return std::pair{std::move(dev_impl), std::move(log)};
+}
 
-    future<> close() noexcept override {
-        return make_ready_future<>();
-    }
-};
+} // namespace
 
-} // seastar::fs
-
-SEASTAR_THREAD_TEST_CASE(mock_metadata_to_disk_buffer_test) {
-    constexpr unit_size_t cluster_size = 1 * MB;
-    constexpr unit_size_t alignment = 4096;
-    shared_ptr<metadata_to_disk_buffer> tmp_buff = make_shared<mock_metadata_to_disk_buffer>(cluster_size, alignment);
-    auto dev_impl = make_shared<empty_block_device_impl>();
-    block_device dev(dev_impl);
-
-    metadata_log log(dev, cluster_size, alignment, std::move(tmp_buff));
-
-    log.bootstrap(0, 3, {3, 10}, 4, 0).get();
+SEASTAR_THREAD_TEST_CASE(some_tests) {
+    auto [dev, log] = init_structs();
 
     log.create_directory("/test/", file_permissions::default_dir_permissions).get();
     log.create_file("/test/test", file_permissions::default_dir_permissions).get();
 
     auto& created_buffers = mock_metadata_to_disk_buffer::virtually_constructed_buffers;
-    BOOST_REQUIRE_EQUAL(created_buffers.size(), 1);
-    auto& buff = created_buffers[0];
+    auto& buff = created_buffers.back();
     BOOST_REQUIRE_EQUAL(buff->actions.size(), 2);
     BOOST_REQUIRE(buff->is_append_type<ondisk_create_inode_as_dir_entry>(0));
     BOOST_REQUIRE(buff->is_append_type<ondisk_create_inode_as_dir_entry>(1));
@@ -95,11 +83,14 @@ SEASTAR_THREAD_TEST_CASE(mock_metadata_to_disk_buffer_test) {
     inode_t file_inode = log.open_file("/test/test").get0();
     BOOST_REQUIRE_EQUAL(file_inode, ondisk_file_header.entry_inode.inode);
 
-    std::string str = "123456";
-    size_t wrote = log.write(file_inode, 10, str.data(), str.size()).get0();
-    BOOST_REQUIRE_EQUAL(wrote, str.size());
+    std::string str_write = "123456";
+    constexpr uint64_t offset = 10;
+    size_t wrote = log.write(file_inode, offset, str_write.data(), str_write.size()).get0();
+    BOOST_REQUIRE_EQUAL(wrote, str_write.size());
     BOOST_REQUIRE_EQUAL(buff->actions.size(), 3);
     BOOST_REQUIRE(buff->is_append_type<ondisk_small_write>(2));
+    BOOST_REQUIRE_EQUAL(to_string(buff->get_by_append_type<ondisk_small_write>(2).data), str_write);
+    BOOST_REQUIRE_EQUAL(copy_value(buff->get_by_append_type<ondisk_small_write>(2).header.offset), offset);
 
     log.close_file(file_inode).get();
     log.flush_log().get();
