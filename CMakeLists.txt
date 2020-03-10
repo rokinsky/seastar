@@ -665,6 +665,7 @@ if (Seastar_EXPERIMENTAL_FS)
     src/fs/cluster.hh
     src/fs/cluster_allocator.cc
     src/fs/cluster_allocator.hh
+    src/fs/cluster_writer.hh
     src/fs/crc.hh
     src/fs/enum.hh
     src/fs/file.cc
