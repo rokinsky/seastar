@@ -42,16 +42,16 @@ BOOST_TEST_DONT_PRINT_LOG_VALUE(to_disk_buffer)
 SEASTAR_THREAD_TEST_CASE(test_initially_empty) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment);
-    disk_buf.init(0);
+    auto disk_buf = to_disk_buffer();
+    disk_buf.init(max_siz, alignment, 0);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }
 
 SEASTAR_THREAD_TEST_CASE(test_simple_write) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment);
-    disk_buf.init(0);
+    auto disk_buf = to_disk_buffer();
+    disk_buf.init(max_siz, alignment, 0);
     auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
     auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
     disk_offset_t len_aligned;
@@ -70,8 +70,8 @@ SEASTAR_THREAD_TEST_CASE(test_simple_write) {
 SEASTAR_THREAD_TEST_CASE(test_multiple_write) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment);
-    disk_buf.init(0);
+    auto disk_buf = to_disk_buffer();
+    disk_buf.init(max_siz, alignment, 0);
     auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
     auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);
     disk_offset_t len_aligned, len_aligned2;
@@ -98,8 +98,8 @@ SEASTAR_THREAD_TEST_CASE(test_multiple_write) {
 SEASTAR_THREAD_TEST_CASE(test_empty_write) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment);
-    disk_buf.init(0);
+    auto disk_buf = to_disk_buffer();
+    disk_buf.init(max_siz, alignment, 0);
     disk_buf.flush_to_disk(dev).get();
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
 }
@@ -107,8 +107,8 @@ SEASTAR_THREAD_TEST_CASE(test_empty_write) {
 SEASTAR_THREAD_TEST_CASE(test_empty_append_bytes) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment);
-    disk_buf.init(0);
+    auto disk_buf = to_disk_buffer();
+    disk_buf.init(max_siz, alignment, 0);
     disk_buf.append_bytes("123456", 0);
     BOOST_REQUIRE_EQUAL(disk_buf.bytes_left(), max_siz);
     disk_buf.flush_to_disk(dev).get();
@@ -118,8 +118,8 @@ SEASTAR_THREAD_TEST_CASE(test_empty_append_bytes) {
 SEASTAR_THREAD_TEST_CASE(test_combined) {
     auto dev_impl = make_shared<mock_block_device_impl>();
     block_device dev(dev_impl);
-    auto disk_buf = to_disk_buffer(max_siz, alignment);
-    disk_buf.init(0);
+    auto disk_buf = to_disk_buffer();
+    disk_buf.init(max_siz, alignment, 0);
     auto buf = temporary_buffer<char>::aligned(alignment, max_siz);
     auto inp = temporary_buffer<char>::aligned(alignment, max_siz);
     auto expected_buf = temporary_buffer<char>::aligned(alignment, max_siz);

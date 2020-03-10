@@ -175,11 +175,11 @@ class write_operation {
                             return make_exception_future<bool_class<stop_iteration_tag>>(no_more_space_exception());
                         }
 
-                        _metadata_log._curr_data_buff =
-                                make_shared<to_disk_buffer>(_metadata_log._cluster_size, _metadata_log._alignment);
                         auto cluster_id = cluster_opt.value();
                         disk_offset_t cluster_disk_offset = cluster_id_to_offset(cluster_id, _metadata_log._cluster_size);
-                        _metadata_log._curr_data_buff->init(cluster_disk_offset);
+                        _metadata_log._curr_data_buff = make_shared<to_disk_buffer>();
+                        _metadata_log._curr_data_buff->init(_metadata_log._cluster_size, _metadata_log._alignment,
+                                cluster_disk_offset);
                         buff_bytes_left = _metadata_log._curr_data_buff->bytes_left();
 
                         curr_expected_write_len = remaining_write_len;

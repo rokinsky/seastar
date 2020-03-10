@@ -62,7 +62,7 @@ metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t 
 , _cluster_size(cluster_size)
 , _alignment(alignment)
 , _curr_cluster_buff(std::move(cluster_buff))
-, _curr_data_buff(make_shared<to_disk_buffer>(cluster_size, alignment))
+, _curr_data_buff(make_shared<to_disk_buffer>())
 , _cluster_allocator({}, {})
 , _inode_allocator(1, 0) {
     assert(is_power_of_2(alignment));
@@ -246,8 +246,9 @@ metadata_log::flush_result metadata_log::schedule_flush_of_curr_cluster_and_chan
     schedule_flush_of_curr_cluster();
 
     // Make next cluster the current cluster to allow writing next metadata entries before flushing finishes
-    _curr_cluster_buff->virtual_constructor(_cluster_size, _alignment);
-    _curr_cluster_buff->init(cluster_id_to_offset(*next_cluster, _cluster_size));
+    _curr_cluster_buff->virtual_constructor();
+    _curr_cluster_buff->init(_cluster_size, _alignment,
+            cluster_id_to_offset(*next_cluster, _cluster_size));
     return flush_result::DONE;
 }
 

@@ -63,15 +63,13 @@ struct ondisk_rename_dir_entry {
 
 class mock_metadata_to_disk_buffer : public metadata_to_disk_buffer {
 public:
-    mock_metadata_to_disk_buffer(size_t aligned_max_size, unit_size_t alignment)
-        : metadata_to_disk_buffer(aligned_max_size, alignment) {}
+    mock_metadata_to_disk_buffer() = default;
 
     // A container with all the buffers created by virtual_constructor
     inline static thread_local std::vector<shared_ptr<mock_metadata_to_disk_buffer>> virtually_constructed_buffers;
 
-    virtual shared_ptr<metadata_to_disk_buffer> virtual_constructor(size_t aligned_max_size,
-            unit_size_t alignment) const override {
-        auto new_buffer = make_shared<mock_metadata_to_disk_buffer>(aligned_max_size, alignment);
+    virtual shared_ptr<metadata_to_disk_buffer> virtual_constructor() const override {
+        auto new_buffer = make_shared<mock_metadata_to_disk_buffer>();
         virtually_constructed_buffers.emplace_back(new_buffer);
         return new_buffer;
     }
@@ -128,18 +126,36 @@ public:
         return std::get<T>(get_by_type<action::append>(idx).entry);
     }
 
-    void init([[maybe_unused]] disk_offset_t cluster_beg_offset) override {
-        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
+    void init(size_t aligned_max_size, unit_size_t alignment, disk_offset_t cluster_beg_offset) override {
+        assert(is_power_of_2(alignment));
+        assert(mod_by_power_of_2(aligned_max_size, alignment) == 0);
+        assert(mod_by_power_of_2(cluster_beg_offset, alignment) == 0);
+        _max_size = aligned_max_size;
+        _alignment = alignment;
+        _cluster_beg_offset = cluster_beg_offset;
+        _unflushed_data = {0, 0};
         start_new_unflushed_data();
     }
 
-    void init_from_bootstrapped_cluster([[maybe_unused]] disk_offset_t cluster_beg_offset,
-            size_t metadata_end_pos) noexcept override {
-        assert(mod_by_power_of_2(cluster_beg_offset, _alignment) == 0);
-        assert(metadata_end_pos < _max_size);
+    void init_from_bootstrapped_cluster(size_t aligned_max_size, unit_size_t alignment,
+            disk_offset_t cluster_beg_offset, size_t metadata_end_pos) noexcept override {
+        assert(is_power_of_2(alignment));
+        assert(mod_by_power_of_2(aligned_max_size, alignment) == 0);
+        assert(mod_by_power_of_2(cluster_beg_offset, alignment) == 0);
 
+        assert(aligned_max_size >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint));
+        assert(alignment >= sizeof(ondisk_type) + sizeof(ondisk_checkpoint) + sizeof(ondisk_type) +
+                sizeof(ondisk_next_metadata_cluster) and
+                "We always need to be able to pack at least a checkpoint and next_metadata_cluster entry to the last "
+                "data flush in the cluster");
+        assert(metadata_end_pos < aligned_max_size);
+
+        _max_size = aligned_max_size;
+        _alignment = alignment;
+        _cluster_beg_offset = cluster_beg_offset;
         auto aligned_pos = round_up_to_multiple_of_power_of_2(metadata_end_pos, _alignment);
         _unflushed_data = {aligned_pos, aligned_pos};
+
         start_new_unflushed_data();
     }
 

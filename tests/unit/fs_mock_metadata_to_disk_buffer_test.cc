@@ -47,8 +47,8 @@ constexpr size_t default_alignment = 4 * KB;
 constexpr size_t checkpoint_size = sizeof(ondisk_type) + sizeof(ondisk_checkpoint);
 
 mock_metadata_to_disk_buffer create_default_mock_buffer() {
-    mock_metadata_to_disk_buffer buf(default_buff_size, default_alignment);
-    buf.init(0);
+    mock_metadata_to_disk_buffer buf;
+    buf.init(default_buff_size, default_alignment, 0);
     return buf;
 }
 
@@ -122,8 +122,8 @@ SEASTAR_THREAD_TEST_CASE(virtual_constructor_test) {
     BOOST_REQUIRE_EQUAL(buf.bytes_left(), default_buff_size - checkpoint_size);
     BOOST_REQUIRE_EQUAL(buf.append(ondisk_delete_inode {1}), APPENDED);
 
-    auto buf2 = buf.virtual_constructor(default_buff_size, default_alignment);
-    buf2->init(default_alignment);
+    auto buf2 = buf.virtual_constructor();
+    buf2->init(default_buff_size, default_alignment, default_alignment);
 
     BOOST_REQUIRE_EQUAL(created_buffers.size(), 1);
     BOOST_REQUIRE(created_buffers[0] == buf2);
@@ -131,8 +131,8 @@ SEASTAR_THREAD_TEST_CASE(virtual_constructor_test) {
     BOOST_REQUIRE_EQUAL(buf2->append(ondisk_delete_inode {1}), APPENDED);
     BOOST_REQUIRE_EQUAL(created_buffers[0]->actions.size(), 1);
 
-    auto buf3 = buf2->virtual_constructor(default_buff_size, default_alignment);
-    buf3->init(default_alignment * 2);
+    auto buf3 = buf2->virtual_constructor();
+    buf3->init(default_buff_size, default_alignment, default_alignment * 2);
 
     BOOST_REQUIRE_EQUAL(created_buffers.size(), 2);
     BOOST_REQUIRE(created_buffers[1] == buf3);
