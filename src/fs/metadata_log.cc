@@ -58,12 +58,12 @@
 namespace seastar::fs {
 
 metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment,
-    shared_ptr<metadata_to_disk_buffer> cluster_buff)
+    shared_ptr<metadata_to_disk_buffer> cluster_buff, shared_ptr<cluster_writer> data_writer)
 : _device(std::move(device))
 , _cluster_size(cluster_size)
 , _alignment(alignment)
 , _curr_cluster_buff(std::move(cluster_buff))
-, _curr_data_buff(make_shared<to_disk_buffer>())
+, _curr_data_writer(std::move(data_writer))
 , _cluster_allocator({}, {})
 , _inode_allocator(1, 0) {
     assert(is_power_of_2(alignment));

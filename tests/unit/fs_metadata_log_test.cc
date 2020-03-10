@@ -21,6 +21,7 @@
 
 #include "fs/metadata_disk_entries.hh"
 #include "fs/metadata_log.hh"
+#include "fs_mock_cluster_writer.hh"
 #include "fs_mock_metadata_to_disk_buffer.hh"
 #include "mock_block_device.hh"
 #include "seastar/fs/temporary_file.hh"
@@ -56,10 +57,13 @@ constexpr unit_size_t default_alignment = 4096;
 constexpr cluster_range default_cluster_range = {1, 10};
 constexpr cluster_id_t default_metadata_log_cluster = 1;
 
-template<typename BlockDevice = mock_block_device_impl, typename MetadataToDiskBuffer = mock_metadata_to_disk_buffer>
+template<typename BlockDevice = mock_block_device_impl,
+        typename MetadataToDiskBuffer = mock_metadata_to_disk_buffer,
+        typename ClusterWriter = mock_cluster_writer>
 auto init_structs() {
     auto dev_impl = make_shared<BlockDevice>();
-    metadata_log log(block_device(dev_impl), default_cluster_size, default_alignment, make_shared<MetadataToDiskBuffer>());
+    metadata_log log(block_device(dev_impl), default_cluster_size, default_alignment,
+            make_shared<MetadataToDiskBuffer>(), make_shared<ClusterWriter>());
     log.bootstrap(0, default_metadata_log_cluster, default_cluster_range, 1, 0).get();
 
     return std::pair{std::move(dev_impl), std::move(log)};

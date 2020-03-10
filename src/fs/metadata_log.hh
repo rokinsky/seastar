@@ -23,6 +23,7 @@
 
 #include "fs/cluster.hh"
 #include "fs/cluster_allocator.hh"
+#include "fs/cluster_writer.hh"
 #include "fs/inode.hh"
 #include "fs/inode_info.hh"
 #include "fs/metadata_disk_entries.hh"
@@ -113,7 +114,7 @@ class metadata_log {
 
     // Takes care of writing current cluster of serialized metadata log entries to device
     shared_ptr<metadata_to_disk_buffer> _curr_cluster_buff;
-    shared_ptr<to_disk_buffer> _curr_data_buff;
+    shared_ptr<cluster_writer> _curr_data_writer;
     shared_future<> _background_futures = now();
 
     // In memory metadata
@@ -224,7 +225,7 @@ class metadata_log {
 
 public:
     metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment,
-            shared_ptr<metadata_to_disk_buffer> cluster_buff);
+            shared_ptr<metadata_to_disk_buffer> cluster_buff, shared_ptr<cluster_writer> data_writer);
 
     metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment);
 
