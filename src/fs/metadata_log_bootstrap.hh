@@ -152,9 +152,12 @@ class metadata_log_bootstrap {
                 return make_exception_future(no_more_space_exception());
             }
             cluster_id_t datalog_cluster_id = free_clusters.front();
-            _metadata_log._curr_data_buff->init(_metadata_log._cluster_size, _metadata_log._alignment,
-                    cluster_id_to_offset(datalog_cluster_id, _metadata_log._cluster_size));
             free_clusters.pop_front();
+
+            _metadata_log._curr_data_writer = _metadata_log._curr_data_writer->virtual_constructor();
+            _metadata_log._curr_data_writer->init(_metadata_log._cluster_size, _metadata_log._alignment,
+                    cluster_id_to_offset(datalog_cluster_id, _metadata_log._cluster_size));
+
             _metadata_log._cluster_allocator = cluster_allocator(std::move(_taken_clusters), std::move(free_clusters));
 
             // Reset _inode_allocator

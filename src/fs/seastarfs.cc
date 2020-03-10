@@ -19,6 +19,7 @@
  * Copyright (C) 2020 ScyllaDB
  */
 
+#include "fs/cluster_writer.hh"
 #include "fs/enum.hh"
 #include "fs/metadata_log.hh"
 #include "fs/units.hh"
@@ -46,7 +47,7 @@ future<> filesystem::init(std::string dev_path) {
                     cluster_id_to_offset(shard_info.metadata_cluster, record.cluster_size));
 
             _metadata_log = make_lw_shared<metadata_log>(std::move(device), record.cluster_size, record.alignment,
-                    std::move(cluster_buff));
+                    std::move(cluster_buff), make_shared<cluster_writer>());
             return _metadata_log->bootstrap(record.root_directory, shard_info.metadata_cluster,
                     std::move(shard_info.available_clusters), record.shards_nb(), shard_id);
         });

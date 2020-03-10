@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include "fs/bitwise.hh"
 #include "fs/inode.hh"
 #include "fs/inode_info.hh"
 #include "fs/metadata_disk_entries.hh"
@@ -165,7 +166,7 @@ class write_operation {
                     write_future = do_small_write(new_buffer, curr_expected_write_len, new_file_offset);
                 } else {
                     // We must use medium write
-                    size_t buff_bytes_left = _metadata_log._curr_data_buff->bytes_left();
+                    size_t buff_bytes_left = _metadata_log._curr_data_writer->bytes_left();
                     if (buff_bytes_left <= SMALL_WRITE_THRESHOLD) {
                         // TODO: add wasted buff_bytes_left bytes for compaction
                         // No space left in the current to_disk_buffer for medium write - allocate a new buffer
@@ -177,10 +178,10 @@ class write_operation {
 
                         auto cluster_id = cluster_opt.value();
                         disk_offset_t cluster_disk_offset = cluster_id_to_offset(cluster_id, _metadata_log._cluster_size);
-                        _metadata_log._curr_data_buff = make_shared<to_disk_buffer>();
-                        _metadata_log._curr_data_buff->init(_metadata_log._cluster_size, _metadata_log._alignment,
+                        _metadata_log._curr_data_writer = make_shared<cluster_writer>();
+                        _metadata_log._curr_data_writer->init(_metadata_log._cluster_size, _metadata_log._alignment,
                                 cluster_disk_offset);
-                        buff_bytes_left = _metadata_log._curr_data_buff->bytes_left();
+                        buff_bytes_left = _metadata_log._curr_data_writer->bytes_left();
 
                         curr_expected_write_len = remaining_write_len;
                     } else {
@@ -189,7 +190,7 @@ class write_operation {
                     }
 
                     write_future = do_medium_write(new_buffer, curr_expected_write_len, new_file_offset,
-                            _metadata_log._curr_data_buff);
+                            _metadata_log._curr_data_writer);
                 }
 
                 return write_future.then([&valid_write_len, curr_expected_write_len](size_t write_len) {
@@ -206,24 +207,25 @@ class write_operation {
     }
 
     future<size_t> do_medium_write(const uint8_t* aligned_buffer, size_t aligned_expected_write_len, file_offset_t file_offset,
-            shared_ptr<to_disk_buffer> disk_buffer) {
+            shared_ptr<cluster_writer> disk_buffer) {
         assert(reinterpret_cast<size_t>(aligned_buffer) % _metadata_log._alignment == 0);
         assert(aligned_expected_write_len % _metadata_log._alignment == 0);
         assert(disk_buffer->bytes_left() >= aligned_expected_write_len);
 
         disk_offset_t device_offset = disk_buffer->current_disk_offset();
-        // TODO: we can avoid copying data because aligned_buffer is aligned and we can just dma directly into device
-        disk_buffer->append_bytes(aligned_buffer, aligned_expected_write_len);
-        // TODO: handle partial write
-        return disk_buffer->flush_to_disk(_metadata_log._device).then(
-                [this, file_offset, aligned_expected_write_len, disk_buffer = std::move(disk_buffer), device_offset] {
+        return disk_buffer->write(aligned_buffer, aligned_expected_write_len, _metadata_log._device).then(
+                [this, file_offset, disk_buffer = std::move(disk_buffer), device_offset](size_t write_len) {
+            // TODO: is this round down necessary?
+            // On partial write return aligned write length
+            write_len = round_down_to_multiple_of_power_of_2(write_len, _metadata_log._alignment);
+
             using namespace std::chrono;
             uint64_t mtime_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
             ondisk_medium_write ondisk_entry {
                 _inode,
                 file_offset,
                 device_offset,
-                static_cast<decltype(ondisk_medium_write::length)>(aligned_expected_write_len),
+                static_cast<decltype(ondisk_medium_write::length)>(write_len),
                 mtime_ns
             };
 
@@ -233,12 +235,11 @@ class write_operation {
             case metadata_log::append_result::NO_SPACE:
                 return make_exception_future<size_t>(no_more_space_exception());
             case metadata_log::append_result::APPENDED:
-                _metadata_log.memory_only_disk_write(_inode, file_offset, device_offset, aligned_expected_write_len);
+                _metadata_log.memory_only_disk_write(_inode, file_offset, device_offset, write_len);
                 _metadata_log.memory_only_update_mtime(_inode, mtime_ns);
-                return make_ready_future<size_t>(aligned_expected_write_len);
+                return make_ready_future<size_t>(write_len);
             }
             __builtin_unreachable();
-            return make_ready_future<size_t>(aligned_expected_write_len);
         });
     }
 
