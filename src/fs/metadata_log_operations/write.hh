@@ -36,9 +36,11 @@
 namespace seastar::fs {
 
 class write_operation {
+public:
     // TODO: decide about threshold for small write
     static constexpr size_t SMALL_WRITE_THRESHOLD = std::numeric_limits<decltype(ondisk_small_write_header::length)>::max();
 
+private:
     metadata_log& _metadata_log;
     inode_t _inode;
     const io_priority_class& _pc;
