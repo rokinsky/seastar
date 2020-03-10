@@ -76,21 +76,24 @@ private:
                     return make_ready_future<bool_class<stop_iteration_tag>>(stop_iteration::yes);
                 }
 
+                size_t remaining_write_len = write_len - valid_write_len;
+
                 size_t expected_write_len;
-                if (size_t buffer_alignment = mod_by_power_of_2(reinterpret_cast<size_t>(buffer) + valid_write_len, _metadata_log._alignment);
-                        buffer_alignment != 0) {
-                    // When buffer is not aligned then align it using one small write
-                    expected_write_len = std::min(_metadata_log._alignment - buffer_alignment, write_len - valid_write_len);
+                if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
+                    expected_write_len = remaining_write_len;
                 } else {
-                    size_t remaining_write_len = write_len - valid_write_len;
-                    if (remaining_write_len >= _metadata_log._cluster_size) {
-                        expected_write_len = _metadata_log._cluster_size;
-                    } else if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
-                        expected_write_len = remaining_write_len;
+                    if (size_t buffer_alignment = mod_by_power_of_2(reinterpret_cast<size_t>(buffer) + valid_write_len,
+                            _metadata_log._alignment); buffer_alignment != 0) {
+                        // When buffer is not aligned then align it using one small write
+                        expected_write_len = std::min(_metadata_log._alignment - buffer_alignment, write_len - valid_write_len);
                     } else {
-                        // If the last write is medium then align write length by splitting last write into medium aligned
-                        // write and small write
-                        expected_write_len = round_down_to_multiple_of_power_of_2(remaining_write_len, _metadata_log._alignment);
+                        if (remaining_write_len >= _metadata_log._cluster_size) {
+                            expected_write_len = _metadata_log._cluster_size;
+                        } else {
+                            // If the last write is medium then align write length by splitting last write into medium aligned
+                            // write and small write
+                            expected_write_len = round_down_to_multiple_of_power_of_2(remaining_write_len, _metadata_log._alignment);
+                        }
                     }
                 }
 
