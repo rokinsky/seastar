@@ -22,8 +22,11 @@
 #pragma once
 
 #include "fs/metadata_to_disk_buffer.hh"
+#include "fs_print_tmp_buff.hh"
+
 #include <seastar/core/temporary_buffer.hh>
 #include <seastar/fs/overloaded.hh>
+
 #include <cstdint>
 #include <variant>
 #include <vector>
@@ -68,7 +71,7 @@ public:
     // A container with all the buffers created by virtual_constructor
     inline static thread_local std::vector<shared_ptr<mock_metadata_to_disk_buffer>> virtually_constructed_buffers;
 
-    virtual shared_ptr<metadata_to_disk_buffer> virtual_constructor() const override {
+    shared_ptr<metadata_to_disk_buffer> virtual_constructor() const override {
         auto new_buffer = make_shared<mock_metadata_to_disk_buffer>();
         virtually_constructed_buffers.emplace_back(new_buffer);
         return new_buffer;
@@ -357,7 +360,7 @@ public:
 };
 
 
-std::ostream& operator<<(std::ostream& os, const ondisk_unix_metadata& metadata) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_unix_metadata& metadata) {
     os << "[" << metadata.perms << ",";
     os << metadata.uid << ",";
     os << metadata.gid << ",";
@@ -366,30 +369,30 @@ std::ostream& operator<<(std::ostream& os, const ondisk_unix_metadata& metadata)
     return os << "]";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_next_metadata_cluster& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_next_metadata_cluster& entry) {
     os << "{" << "cluster_id=" << entry.cluster_id;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_create_inode& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_create_inode& entry) {
     os << "{" << "inode=" << entry.inode;
     os << ", is_directory=" << (int)entry.is_directory;
     // os << ", metadata=" << entry.metadata;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_update_metadata& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_update_metadata& entry) {
     os << "{" << "inode=" << entry.inode;
     // os << ", metadata=" << entry.metadata;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode& entry) {
     os << "{" << "inode=" << entry.inode;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_small_write_header& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_small_write_header& entry) {
     os << "{" << "inode=" << entry.inode;
     os << ", offset=" << entry.offset;
     os << ", length=" << entry.length;
@@ -397,7 +400,7 @@ std::ostream& operator<<(std::ostream& os, const ondisk_small_write_header& entr
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_medium_write& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_medium_write& entry) {
     os << "{" << "inode=" << entry.inode;
     os << ", offset=" << entry.offset;
     os << ", disk_offset=" << entry.disk_offset;
@@ -406,7 +409,7 @@ std::ostream& operator<<(std::ostream& os, const ondisk_medium_write& entry) {
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_large_write& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_large_write& entry) {
     os << "{" << "inode=" << entry.inode;
     os << ", offset=" << entry.offset;
     os << ", data_cluster=" << entry.data_cluster;
@@ -414,54 +417,54 @@ std::ostream& operator<<(std::ostream& os, const ondisk_large_write& entry) {
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_large_write_without_mtime& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_large_write_without_mtime& entry) {
     os << "{" << "inode=" << entry.inode;
     os << ", offset=" << entry.offset;
     os << ", data_cluster=" << entry.data_cluster;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_truncate& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_truncate& entry) {
     os << "{" << "inode=" << entry.inode;
     os << ", size=" << entry.size;
     // os << ", mtime_ns=" << entry.mtime_ns;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_mtime_update& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_mtime_update& entry) {
     os << "{" << "inode=" << entry.inode;
     // os << ", mtime_ns=" << entry.mtime_ns;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_add_dir_entry_header& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_add_dir_entry_header& entry) {
     os << "{" << "dir_inode=" << entry.dir_inode;
     os << ", entry_inode=" << entry.entry_inode;
     os << ", entry_name_length=" << entry.entry_name_length;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_create_inode_as_dir_entry_header& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_create_inode_as_dir_entry_header& entry) {
     os << "{" << "entry_inode=" << entry.entry_inode;
     os << ", dir_inode=" << entry.dir_inode;
     os << ", entry_name_length=" << entry.entry_name_length;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_delete_dir_entry_header& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_dir_entry_header& entry) {
     os << "{" << "dir_inode=" << entry.dir_inode;
     os << ", entry_name_length=" << entry.entry_name_length;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode_and_dir_entry_header& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode_and_dir_entry_header& entry) {
     os << "{" << "inode_to_delete=" << entry.inode_to_delete;
     os << ", dir_inode=" << entry.dir_inode;
     os << ", entry_name_length=" << entry.entry_name_length;
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry_header& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry_header& entry) {
     os << "{" << "dir_inode=" << entry.dir_inode;
     os << ", new_dir_inode=" << entry.new_dir_inode;
     os << ", entry_old_name_length=" << entry.entry_old_name_length;
@@ -469,59 +472,44 @@ std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry_header&
     return os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const temporary_buffer<uint8_t>& data) {
-    constexpr size_t MAX_ELEMENTS_PRINTED = 10;
-    for (size_t i = 0; i < std::min(MAX_ELEMENTS_PRINTED, data.size()); ++i) {
-        if (isprint(data[i]) != 0) {
-            os << data[i];
-        } else {
-            os << "<" << (int)data[i] << ">";
-        }
-    }
-    if (data.size() > MAX_ELEMENTS_PRINTED) {
-        os << "...";
-    }
-    return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const ondisk_small_write& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_small_write& entry) {
     os << "(header=" << entry.header;
     os << ", data=" << entry.data;
     return os << ")";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_add_dir_entry& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_add_dir_entry& entry) {
     os << "(header=" << entry.header;
     os << ", entry_name=" << entry.entry_name;
     return os << ")";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_create_inode_as_dir_entry& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_create_inode_as_dir_entry& entry) {
     os << "(header=" << entry.header;
     os << ", entry_name=" << entry.entry_name;
     return os << ")";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_delete_dir_entry& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_dir_entry& entry) {
     os << "(header=" << entry.header;
     os << ", entry_name=" << entry.entry_name;
     return os << ")";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode_and_dir_entry& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode_and_dir_entry& entry) {
     os << "(header=" << entry.header;
     os << ", entry_name=" << entry.entry_name;
     return os << ")";
 }
 
-std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry& entry) {
+inline std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry& entry) {
     os << "(header=" << entry.header;
     os << ", me=" << entry.old_name;
     os << ", new_name=" << entry.new_name;
     return os << ")";
 }
 
-std::ostream& operator<<(std::ostream& os, const mock_metadata_to_disk_buffer::action& action) {
+inline std::ostream& operator<<(std::ostream& os, const mock_metadata_to_disk_buffer::action& action) {
     std::visit(overloaded {
         [&os](const mock_metadata_to_disk_buffer::action::append& append) {
             os << "[append:";
@@ -581,7 +569,7 @@ std::ostream& operator<<(std::ostream& os, const mock_metadata_to_disk_buffer::a
     return os;
 }
 
-std::ostream& operator<<(std::ostream& os, const std::vector<mock_metadata_to_disk_buffer::action>& actions) {
+inline std::ostream& operator<<(std::ostream& os, const std::vector<mock_metadata_to_disk_buffer::action>& actions) {
     for (size_t i = 0; i < actions.size(); ++i) {
         if (i != 0) {
             os << '\n';
