@@ -657,6 +657,7 @@ if (Seastar_EXPERIMENTAL_FS)
     include/seastar/fs/block_device.hh
     include/seastar/fs/file.hh
     include/seastar/fs/overloaded.hh
+    include/seastar/fs/seastarfs.hh
     include/seastar/fs/temporary_file.hh
     src/fs/bitwise.hh
     src/fs/bootstrap_record.cc
@@ -681,6 +682,7 @@ if (Seastar_EXPERIMENTAL_FS)
     src/fs/metadata_to_disk_buffer.hh
     src/fs/path.hh
     src/fs/range.hh
+    src/fs/seastarfs.cc
     src/fs/to_disk_buffer.hh
     src/fs/units.hh
     src/fs/unix_metadata.hh

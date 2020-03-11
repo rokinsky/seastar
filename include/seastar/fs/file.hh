@@ -21,6 +21,8 @@
 
 #pragma once
 
+#include <fs/inode.hh>
+#include <fs/metadata_log.hh>
 #include <seastar/core/file.hh>
 #include <seastar/core/future.hh>
 #include <seastar/fs/block_device.hh>
@@ -28,10 +30,13 @@
 namespace seastar::fs {
 
 class seastarfs_file_impl : public file_impl {
-    block_device _block_device;
+    block_device _block_device;  /* TODO remove after refactored unit test */
+    lw_shared_ptr<metadata_log> _metadata_log;
+    std::optional<inode_t> _inode;
     open_flags _open_flags;
 public:
-    seastarfs_file_impl(block_device dev, open_flags flags);
+    seastarfs_file_impl(block_device dev, open_flags flags); /* TODO remove after refactored unit test */
+    seastarfs_file_impl(lw_shared_ptr<metadata_log> metadata_log, inode_t inode, open_flags flags);
     ~seastarfs_file_impl() override = default;
 
     future<size_t> write_dma(uint64_t pos, const void* buffer, size_t len, const io_priority_class& pc) override;
@@ -48,6 +53,8 @@ public:
     std::unique_ptr<file_handle_impl> dup() override;
     subscription<directory_entry> list_directory(std::function<future<> (directory_entry de)> next) override;
     future<temporary_buffer<uint8_t>> dma_read_bulk(uint64_t offset, size_t range_size, const io_priority_class& pc) override;
+private:
+    future<> check_io_flag(open_flags flag);
 };
 
 future<file> open_file_dma(std::string name, open_flags flags);
