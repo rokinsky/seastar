@@ -70,6 +70,10 @@ metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t 
     assert(cluster_size > 0 and cluster_size % alignment == 0);
 }
 
+metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment)
+: metadata_log(std::move(device), cluster_size, alignment,
+        make_shared<metadata_to_disk_buffer>(), make_shared<cluster_writer>()) {}
+
 future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters,
         fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id) {
     return metadata_log_bootstrap::bootstrap(*this, root_dir, first_metadata_cluster_id, available_clusters,
