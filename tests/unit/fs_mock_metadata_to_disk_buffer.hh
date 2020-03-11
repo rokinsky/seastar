@@ -504,7 +504,7 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode_and_
 
 inline std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry& entry) {
     os << "(header=" << entry.header;
-    os << ", me=" << entry.old_name;
+    os << ", old_name=" << entry.old_name;
     os << ", new_name=" << entry.new_name;
     return os << ")";
 }
