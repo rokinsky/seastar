@@ -92,8 +92,12 @@ SEASTAR_THREAD_TEST_CASE(some_tests) {
     BOOST_REQUIRE_EQUAL(to_string(buff->get_by_append_type<ondisk_small_write>(2).data), str_write);
     BOOST_REQUIRE_EQUAL(copy_value(buff->get_by_append_type<ondisk_small_write>(2).header.offset), offset);
 
+    log.truncate(file_inode, 4).get0();
+    BOOST_REQUIRE_EQUAL(buff->actions.size(), 5);
+    BOOST_REQUIRE(buff->is_append_type<ondisk_truncate>(3));
+
     log.close_file(file_inode).get();
     log.flush_log().get();
-    BOOST_REQUIRE_EQUAL(buff->actions.size(), 4);
-    BOOST_REQUIRE(buff->is_type<flush_to_disk>(3));
+    BOOST_REQUIRE_EQUAL(buff->actions.size(), 5);
+    BOOST_REQUIRE(buff->is_type<flush_to_disk>(4));
 }
