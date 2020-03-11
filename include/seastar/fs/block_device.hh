@@ -109,4 +109,13 @@ inline future<block_device> open_block_device(std::string name) {
     });
 }
 
+template<class Func>
+inline future<> do_with_device(std::string name, Func&& func) {
+    return open_block_device(std::move(name)).then([=](block_device device) {
+        return do_with(std::move(device), [=](block_device& device) {
+            return func(device);
+        });
+    });
+}
+
 }
