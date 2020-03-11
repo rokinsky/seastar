@@ -70,7 +70,7 @@ metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t 
     assert(cluster_size > 0 and cluster_size % alignment == 0);
 }
 
-metadata_log::metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment)
+metadata_log::metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment)
 : metadata_log(std::move(device), cluster_size, alignment,
         make_shared<metadata_to_disk_buffer>(), make_shared<cluster_writer>()) {}
 
