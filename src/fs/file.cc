@@ -41,13 +41,11 @@ seastarfs_file_impl::seastarfs_file_impl(lw_shared_ptr<metadata_log> metadata_lo
 
 future<size_t>
 seastarfs_file_impl::write_dma(uint64_t pos, const void* buffer, size_t len, const io_priority_class& pc) {
-    return check_io_flag(open_flags::wo).then([&] {
-        if (_metadata_log and _inode) {
-            return _metadata_log->write(_inode.value(), pos, buffer, len, pc);
-        } else { /* TODO remove after refactored unit test */
-            return _block_device.write(pos, buffer, len, pc);
-        }
-    });
+    if (_metadata_log and _inode) {
+        return _metadata_log->write(_inode.value(), pos, buffer, len, pc);
+    } else { /* TODO remove after refactored unit test */
+        return _block_device.write(pos, buffer, len, pc);
+    }
 }
 
 future<size_t>
@@ -57,13 +55,11 @@ seastarfs_file_impl::write_dma(uint64_t pos, std::vector<iovec> iov, const io_pr
 
 future<size_t>
 seastarfs_file_impl::read_dma(uint64_t pos, void* buffer, size_t len, const io_priority_class& pc) {
-    return check_io_flag(open_flags::ro).then([&] {
-        if (_metadata_log and _inode) {
-            return _metadata_log->read(_inode.value(), pos, buffer, len, pc);
-        } else { /* TODO remove after refactored unit test */
-            return _block_device.read(pos, buffer, len, pc);
-        }
-    });
+    if (_metadata_log and _inode) {
+        return _metadata_log->read(_inode.value(), pos, buffer, len, pc);
+    } else { /* TODO remove after refactored unit test */
+        return _block_device.read(pos, buffer, len, pc);
+    }
 }
 
 future<size_t>
@@ -73,13 +69,11 @@ seastarfs_file_impl::read_dma(uint64_t pos, std::vector<iovec> iov, const io_pri
 
 future<>
 seastarfs_file_impl::flush() {
-    return check_io_flag(open_flags::wo).then([this] {
-        if (_metadata_log and _inode) {
-            return _metadata_log->flush_log();
-        } else { /* TODO remove after refactored unit test */
-            return _block_device.flush();
-        }
-    });
+    if (_metadata_log and _inode) {
+        return _metadata_log->flush_log();
+    } else { /* TODO remove after refactored unit test */
+        return _block_device.flush();
+    }
 }
 
 future<struct stat>
@@ -89,13 +83,11 @@ seastarfs_file_impl::stat() {
 
 future<>
 seastarfs_file_impl::truncate(uint64_t length) {
-    return check_io_flag(open_flags::wo).then([this, length] {
-        if (_metadata_log and _inode) {
-            return _metadata_log->truncate(_inode.value(), length);
-        } else {
-            return make_exception_future(std::bad_function_call());
-        }
-    });
+    if (_metadata_log and _inode) {
+        return _metadata_log->truncate(_inode.value(), length);
+    } else {
+        return make_exception_future(std::bad_function_call());
+    }
 }
 
 future<>
