@@ -233,6 +233,7 @@ public:
     future<> bootstrap(inode_t root_dir, cluster_id_t first_metadata_cluster_id, cluster_range available_clusters,
             fs_shard_id_t fs_shards_pool_size, fs_shard_id_t fs_shard_id);
 
+    future<> shutdown();
 private:
     bool inode_exists(inode_t inode) const noexcept {
         return _inodes.count(inode) != 0;
