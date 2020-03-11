@@ -76,6 +76,12 @@ future<> metadata_log::bootstrap(inode_t root_dir, cluster_id_t first_metadata_c
             fs_shards_pool_size, fs_shard_id);
 }
 
+future<> metadata_log::shutdown() {
+    return flush_log().then([this] {
+        return _device.close();
+    });
+}
+
 void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_vec) {
     // TODO: for compaction: update used inode_data_vec
     auto file_size = file.size();
