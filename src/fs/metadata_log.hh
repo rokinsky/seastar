@@ -227,6 +227,8 @@ public:
     metadata_log(block_device device, unit_size_t cluster_size, unit_size_t alignment,
             shared_ptr<metadata_to_disk_buffer> cluster_buff, shared_ptr<cluster_writer> data_writer);
 
+    metadata_log(block_device device, uint32_t cluster_size, uint32_t alignment);
+
     metadata_log(const metadata_log&) = delete;
     metadata_log& operator=(const metadata_log&) = delete;
     metadata_log(metadata_log&&) = default;
