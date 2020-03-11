@@ -28,6 +28,7 @@
 #include "fs/metadata_log_bootstrap.hh"
 #include "fs/metadata_log_operations/create_file.hh"
 #include "fs/metadata_log_operations/read.hh"
+#include "fs/metadata_log_operations/truncate.hh"
 #include "fs/metadata_log_operations/unlink_or_remove_file.hh"
 #include "fs/metadata_log_operations/write.hh"
 #include "fs/metadata_to_disk_buffer.hh"
@@ -167,7 +168,7 @@ void metadata_log::memory_only_update_mtime(inode_t inode, decltype(unix_metadat
     it->second.metadata.mtime_ns = mtime_ns;
 }
 
-void metadata_log::memory_only_truncate(inode_t inode, disk_offset_t size) {
+void metadata_log::memory_only_truncate(inode_t inode, file_offset_t size) {
     auto it = _inodes.find(inode);
     assert(it != _inodes.end());
     assert(it->second.is_file());
@@ -430,6 +431,10 @@ future<size_t> metadata_log::write(inode_t inode, file_offset_t pos, const void*
 future<size_t> metadata_log::read(inode_t inode, file_offset_t pos, void* buffer, size_t len,
         const io_priority_class& pc) {
     return read_operation::perform(*this, inode, pos, buffer, len, pc);
+}
+
+future<> metadata_log::truncate(inode_t inode, file_offset_t size) {
+    return truncate_operation::perform(*this, inode, size);
 }
 
 future<> metadata_log::unlink_file(std::string path) {

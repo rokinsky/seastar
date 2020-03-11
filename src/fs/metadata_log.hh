@@ -218,6 +218,7 @@ class metadata_log {
     friend class close_file_operation;
     friend class create_file_operation;
     friend class read_operation;
+    friend class truncate_operation;
     friend class unlink_or_remove_file_operation;
     friend class write_operation;
 
@@ -393,7 +394,8 @@ public:
     future<size_t> write(inode_t inode, file_offset_t pos, const void* buffer, size_t len,
             const io_priority_class& pc = default_priority_class());
 
-    future<> truncate_file(inode_t inode, file_offset_t new_size) { return make_ready_future(); }
+    // Truncates a file or or extends it with a "hole" data_vec to a specified size
+    future<> truncate(inode_t inode, file_offset_t size);
 
     // All disk-related errors will be exposed here
     future<> flush_log() {
