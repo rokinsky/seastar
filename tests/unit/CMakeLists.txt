@@ -372,7 +372,9 @@ if (Seastar_EXPERIMENTAL_FS)
   seastar_add_test (fs_metadata_log
     SOURCES
       fs_metadata_log_test.cc
-      fs_mock_metadata_to_disk_buffer.hh)
+      fs_mock_metadata_to_disk_buffer.hh
+      fs_mock_cluster_writer.hh
+      fs_print_tmp_buff.hh)
   seastar_add_test (fs_mock_metadata_to_disk_buffer
     SOURCES
       fs_mock_metadata_to_disk_buffer_test.cc
@@ -380,6 +382,12 @@ if (Seastar_EXPERIMENTAL_FS)
   seastar_add_test (fs_path
     KIND BOOST
     SOURCES fs_path_test.cc)
+  seastar_add_test (fs_read_write
+    SOURCES
+      fs_read_write_test.cc
+      fs_mock_metadata_to_disk_buffer.hh
+      fs_mock_cluster_writer.hh
+      fs_print_tmp_buff.hh)
   seastar_add_test (fs_seastarfs
     SOURCES fs_seastarfs_test.cc)
   seastar_add_test (fs_to_disk_buffer
