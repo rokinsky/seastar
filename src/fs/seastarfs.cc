@@ -46,8 +46,12 @@ future<> filesystem::init(std::string dev_path) {
             cluster_buff->init(record.cluster_size, record.alignment,
                     cluster_id_to_offset(shard_info.metadata_cluster, record.cluster_size));
 
+            auto data_writer = make_shared<cluster_writer>();
+            data_writer->init(record.cluster_size, record.alignment,
+                    cluster_id_to_offset(shard_info.metadata_cluster, record.cluster_size));
+
             _metadata_log = make_lw_shared<metadata_log>(std::move(device), record.cluster_size, record.alignment,
-                    std::move(cluster_buff), make_shared<cluster_writer>());
+                    std::move(cluster_buff), std::move(data_writer));
             return _metadata_log->bootstrap(record.root_directory, shard_info.metadata_cluster,
                     std::move(shard_info.available_clusters), record.shards_nb(), shard_id);
         });
