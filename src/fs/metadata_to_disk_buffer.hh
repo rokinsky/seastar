@@ -62,7 +62,7 @@ public:
                 sizeof(ondisk_next_metadata_cluster) and
                 "We always need to be able to pack at least a checkpoint and next_metadata_cluster entry to the last "
                 "data flush in the cluster");
-        assert(metadata_end_pos < _max_size);
+        assert(metadata_end_pos < aligned_max_size);
 
         _max_size = aligned_max_size;
         _alignment = alignment;
