@@ -23,6 +23,7 @@
 
 #include "fs/metadata_log.hh"
 #include "fs/path.hh"
+#include "seastar/core/future.hh"
 
 namespace seastar::fs {
 
@@ -46,11 +47,7 @@ class create_file_operation {
 
         _entry_name = extract_last_component(path);
         if (_entry_name.empty()) {
-            if (is_directory) {
-                return make_exception_future<inode_t>(invalid_path_exception());
-            } else {
-                return make_exception_future<inode_t>(std::runtime_error("Path has to end with character different than '/'"));
-            }
+            return make_exception_future<inode_t>(invalid_path_exception());
         }
         assert(path.empty() or path.back() == '/'); // Hence fast-checking for "is directory" is done in path_lookup
 
@@ -119,7 +116,7 @@ class create_file_operation {
         case metadata_log::append_result::TOO_BIG:
             assert(false and "ondisk entry cannot be too big");
         case metadata_log::append_result::NO_SPACE:
-            return make_exception_future<size_t>(no_more_space_exception());
+            return make_exception_future<inode_t>(no_more_space_exception());
         case metadata_log::append_result::APPENDED:
             _metadata_log.memory_only_create_inode(ondisk_entry.entry_inode.inode, _is_directory, unx_mtdt);
             _metadata_log.memory_only_add_dir_entry(*_dir_info, ondisk_entry.entry_inode.inode, std::move(_entry_name));
