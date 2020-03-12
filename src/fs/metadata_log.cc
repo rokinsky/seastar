@@ -27,6 +27,7 @@
 #include "fs/metadata_log.hh"
 #include "fs/metadata_log_bootstrap.hh"
 #include "fs/metadata_log_operations/create_file.hh"
+#include "fs/metadata_log_operations/link_file.hh"
 #include "fs/metadata_log_operations/read.hh"
 #include "fs/metadata_log_operations/truncate.hh"
 #include "fs/metadata_log_operations/unlink_or_remove_file.hh"
@@ -384,6 +385,24 @@ future<> metadata_log::create_directory(std::string path, file_permissions perms
     return create_file_operation::perform(*this, std::move(path), std::move(perms), true).discard_result();
 }
 
+future<> metadata_log::link_file(inode_t inode, std::string path) {
+    return link_file_operation::perform(*this, inode, std::move(path));
+}
+
+future<> metadata_log::link_file(std::string source, std::string destination) {
+    return path_lookup(std::move(source)).then([this, destination = std::move(destination)](inode_t inode) {
+        return link_file(inode, std::move(destination));
+    });
+}
+
+future<> metadata_log::unlink_file(std::string path) {
+    return unlink_or_remove_file_operation::perform(*this, std::move(path), false);
+}
+
+future<> metadata_log::remove(std::string path) {
+    return unlink_or_remove_file_operation::perform(*this, std::move(path), true);
+}
+
 future<inode_t> metadata_log::open_file(std::string path) {
     return path_lookup(path).then([this](inode_t inode) {
         auto inode_it = _inodes.find(inode);
@@ -433,26 +452,18 @@ future<> metadata_log::close_file(inode_t inode) {
     });
 }
 
-future<size_t> metadata_log::write(inode_t inode, file_offset_t pos, const void* buffer, size_t len,
-        const io_priority_class& pc) {
-    return write_operation::perform(*this, inode, pos, buffer, len, pc);
-}
-
 future<size_t> metadata_log::read(inode_t inode, file_offset_t pos, void* buffer, size_t len,
         const io_priority_class& pc) {
     return read_operation::perform(*this, inode, pos, buffer, len, pc);
 }
 
+future<size_t> metadata_log::write(inode_t inode, file_offset_t pos, const void* buffer, size_t len,
+        const io_priority_class& pc) {
+    return write_operation::perform(*this, inode, pos, buffer, len, pc);
+}
+
 future<> metadata_log::truncate(inode_t inode, file_offset_t size) {
     return truncate_operation::perform(*this, inode, size);
-}
-
-future<> metadata_log::unlink_file(std::string path) {
-    return unlink_or_remove_file_operation::perform(*this, std::move(path), false);
-}
-
-future<> metadata_log::remove(std::string path) {
-    return unlink_or_remove_file_operation::perform(*this, std::move(path), true);
 }
 
 // TODO: think about how to make filesystem recoverable from ENOSPACE situation: flush() (or something else) throws ENOSPACE,

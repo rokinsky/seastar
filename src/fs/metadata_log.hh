@@ -216,8 +216,10 @@ class metadata_log {
     //       the real size of metadata log taken on disk to allow for detecting when compaction
 
     friend class metadata_log_bootstrap;
+
     friend class close_file_operation;
     friend class create_file_operation;
+    friend class link_file_operation;
     friend class read_operation;
     friend class truncate_operation;
     friend class unlink_or_remove_file_operation;
@@ -366,19 +368,17 @@ public:
         });
     }
 
-    // TODO: add stat
+    // TODO: add ? stat(inode_t inode);
+    // TODO: add ? stat(std::string path);
 
     // Returns size of the file or throws exception iff @p inode is invalid
     file_offset_t file_size(inode_t inode) const;
 
     future<inode_t> create_file(std::string path, file_permissions perms);
 
+    // TODO: add future<inode_t> create_unlinked_file(file_permissions perms);
+
     future<> create_directory(std::string path, file_permissions perms);
-
-    // TODO: what about permissions, uid, gid etc.
-    future<inode_t> open_file(std::string path);
-
-    future<> close_file(inode_t inode);
 
     // Creates name (@p path) for a file (@p inode)
     future<> link_file(inode_t inode, std::string path);
@@ -388,10 +388,17 @@ public:
 
     future<> unlink_file(std::string path);
 
+    // TODO: add future<> remove_directory(std::string path);
+
     // Removes empty directory or unlinks file
     future<> remove(std::string path);
 
-    // Unaligned reads and writes are supported but discouraged because of bad performace impact
+    // TODO: what about permissions, uid, gid etc.
+    future<inode_t> open_file(std::string path);
+
+    future<> close_file(inode_t inode);
+
+    // Unaligned reads and writes are supported but discouraged because of bad performance impact
     future<size_t> read(inode_t inode, file_offset_t pos, void* buffer, size_t len,
             const io_priority_class& pc = default_priority_class());
 
