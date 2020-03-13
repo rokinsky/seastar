@@ -647,8 +647,25 @@ add_library (Seastar::seastar ALIAS seastar)
 if (Seastar_EXPERIMENTAL_PARQUET)
   message(STATUS "Experimental Parquet is enabled")
   target_sources(seastar
-    PRIVATE
     # Parquet source files
+    PRIVATE
+    include/seastar/parquet/bpacking.hh
+    include/seastar/parquet/cql_reader.hh
+    include/seastar/parquet/exception.hh
+    include/seastar/parquet/file_reader.hh
+    include/seastar/parquet/overloaded.hh
+    include/seastar/parquet/parquet_types.h
+    include/seastar/parquet/record_reader.hh
+    include/seastar/parquet/rle_encoding.hh
+    include/seastar/parquet/schema.hh
+    src/parquet/compression.cc
+    src/parquet/compression.hh
+    src/parquet/cql_reader.cc
+    src/parquet/file_reader.cc
+    src/parquet/parquet.thrift
+    src/parquet/parquet_types.cpp
+    src/parquet/record_reader.cc
+    src/parquet/schema.cc
   )
 endif()
 
@@ -714,6 +731,15 @@ if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "Sanitize"
       Sanitizers::address
       Sanitizers::undefined_behavior)
 endif ()
+
+if (Seastar_EXPERIMENTAL_PARQUET)
+  target_link_libraries (seastar
+    PUBLIC
+      Snappy::snappy
+      Thrift::thrift
+    PRIVATE
+      ZLIB::ZLIB)
+endif()
 
 #
 # We want asserts enabled on all modes, but cmake defaults to passing
@@ -1165,6 +1191,13 @@ if (Seastar_INSTALL)
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Findyaml-cpp.cmake
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/SeastarDependencies.cmake
     DESTINATION ${install_cmakedir})
+
+  if (Seastar_EXPERIMENTAL_PARQUET)
+    install (
+      FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindThrift.cmake
+      DESTINATION ${install_cmakedir})
+  endif()
 
   install (
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/code_tests

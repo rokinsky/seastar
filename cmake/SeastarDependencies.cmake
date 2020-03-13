@@ -75,6 +75,13 @@ macro (seastar_find_dependencies)
     rt
     yaml-cpp)
 
+  if (Seastar_EXPERIMENTAL_PARQUET)
+    list(APPEND _seastar_all_dependencies
+      Thrift
+      Snappy
+      ZLIB)
+  endif()
+
   # Arguments to `find_package` for each 3rd-party dependency.
   # Note that the version specification is a "minimal" version requirement.
 
