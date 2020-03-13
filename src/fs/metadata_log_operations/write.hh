@@ -70,22 +70,22 @@ private:
     }
 
     future<size_t> iterate_writes(const uint8_t* buffer, size_t write_len, file_offset_t file_offset) {
-        return do_with((size_t)0, [this, buffer, write_len, file_offset](size_t& valid_write_len) {
-            return repeat([this, &valid_write_len, buffer, write_len, file_offset] {
-                if (valid_write_len == write_len) {
+        return do_with((size_t)0, [this, buffer, write_len, file_offset](size_t& completed_write_len) {
+            return repeat([this, &completed_write_len, buffer, write_len, file_offset] {
+                if (completed_write_len == write_len) {
                     return make_ready_future<bool_class<stop_iteration_tag>>(stop_iteration::yes);
                 }
 
-                size_t remaining_write_len = write_len - valid_write_len;
+                size_t remaining_write_len = write_len - completed_write_len;
 
                 size_t expected_write_len;
                 if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
                     expected_write_len = remaining_write_len;
                 } else {
-                    if (size_t buffer_alignment = mod_by_power_of_2(reinterpret_cast<size_t>(buffer) + valid_write_len,
+                    if (size_t buffer_alignment = mod_by_power_of_2(reinterpret_cast<size_t>(buffer) + completed_write_len,
                             _metadata_log._alignment); buffer_alignment != 0) {
                         // When buffer is not aligned then align it using one small write
-                        expected_write_len = std::min(_metadata_log._alignment - buffer_alignment, write_len - valid_write_len);
+                        expected_write_len = std::min(_metadata_log._alignment - buffer_alignment, write_len - completed_write_len);
                     } else {
                         if (remaining_write_len >= _metadata_log._cluster_size) {
                             expected_write_len = _metadata_log._cluster_size;
@@ -97,8 +97,8 @@ private:
                     }
                 }
 
-                auto new_buffer = buffer + valid_write_len;
-                auto new_file_offset = file_offset + valid_write_len;
+                auto new_buffer = buffer + completed_write_len;
+                auto new_file_offset = file_offset + completed_write_len;
                 auto write_future = make_ready_future<size_t>(0);
                 if (expected_write_len <= SMALL_WRITE_THRESHOLD) {
                     write_future = do_small_write(new_buffer, expected_write_len, new_file_offset);
@@ -107,25 +107,29 @@ private:
                 } else {
                     // TODO: maybe we could get rid of that updating mtime switch?
                     // Update mtime only for the first large write
-                    write_future = do_large_write(new_buffer, new_file_offset, valid_write_len == 0);
+                    write_future = do_large_write(new_buffer, new_file_offset, completed_write_len == 0);
                 }
 
-                return write_future.then([&valid_write_len, expected_write_len](size_t write_len) {
-                    valid_write_len += write_len;
+                return write_future.then([&completed_write_len, expected_write_len](size_t write_len) {
+                    completed_write_len += write_len;
                     if (write_len != expected_write_len) {
                         return stop_iteration::yes;
                     }
                     return stop_iteration::no;
                 });
-            }).then([&valid_write_len] {
-                return make_ready_future<size_t>(valid_write_len);
+            }).then([&completed_write_len] {
+                return make_ready_future<size_t>(completed_write_len);
             });
         });
     }
 
-    future<size_t> do_small_write(const uint8_t* buffer, size_t expected_write_len, file_offset_t file_offset) {
+    decltype(unix_metadata::mtime_ns) get_current_time_ns() {
         using namespace std::chrono;
-        uint64_t mtime_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+        return duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+    }
+
+    future<size_t> do_small_write(const uint8_t* buffer, size_t expected_write_len, file_offset_t file_offset) {
+        auto mtime_ns = get_current_time_ns();
         ondisk_small_write_header ondisk_entry {
             _inode,
             file_offset,
@@ -154,16 +158,16 @@ private:
         // for that and allow only limited number of medium writes? Or we could add to to_disk_buffer option for
         // space 'reservation' to make sure that after division our write will fit into the buffer?
         // That would also limit medium write to at most two smaller writes.
-        return do_with((size_t)0, [this, aligned_buffer, aligned_expected_write_len, file_offset](size_t& valid_write_len) {
-            return repeat([this, &valid_write_len, aligned_buffer, aligned_expected_write_len, file_offset] {
-                if (valid_write_len == aligned_expected_write_len) {
+        return do_with((size_t)0, [this, aligned_buffer, aligned_expected_write_len, file_offset](size_t& completed_write_len) {
+            return repeat([this, &completed_write_len, aligned_buffer, aligned_expected_write_len, file_offset] {
+                if (completed_write_len == aligned_expected_write_len) {
                     return make_ready_future<bool_class<stop_iteration_tag>>(stop_iteration::yes);
                 }
 
-                size_t remaining_write_len = aligned_expected_write_len - valid_write_len;
+                size_t remaining_write_len = aligned_expected_write_len - completed_write_len;
                 size_t curr_expected_write_len;
-                auto new_buffer = aligned_buffer + valid_write_len;
-                auto new_file_offset = file_offset + valid_write_len;
+                auto new_buffer = aligned_buffer + completed_write_len;
+                auto new_file_offset = file_offset + completed_write_len;
                 auto write_future = make_ready_future<size_t>(0);
                 if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
                     // We can use small write for the remaining data
@@ -198,15 +202,15 @@ private:
                             _metadata_log._curr_data_writer);
                 }
 
-                return write_future.then([&valid_write_len, curr_expected_write_len](size_t write_len) {
-                    valid_write_len += write_len;
+                return write_future.then([&completed_write_len, curr_expected_write_len](size_t write_len) {
+                    completed_write_len += write_len;
                     if (write_len != curr_expected_write_len) {
                         return stop_iteration::yes;
                     }
                     return stop_iteration::no;
                 });
-            }).then([&valid_write_len] {
-                return make_ready_future<size_t>(valid_write_len);
+            }).then([&completed_write_len] {
+                return make_ready_future<size_t>(completed_write_len);
             });;
         });
     }
@@ -224,8 +228,7 @@ private:
             // On partial write return aligned write length
             write_len = round_down_to_multiple_of_power_of_2(write_len, _metadata_log._alignment);
 
-            using namespace std::chrono;
-            uint64_t mtime_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+            auto mtime_ns = get_current_time_ns();
             ondisk_medium_write ondisk_entry {
                 _inode,
                 file_offset,
@@ -267,8 +270,7 @@ private:
 
             metadata_log::append_result append_result;
             if (update_mtime) {
-                using namespace std::chrono;
-                uint64_t mtime_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+                auto mtime_ns = get_current_time_ns();
                 ondisk_large_write ondisk_entry {
                     _inode,
                     file_offset,

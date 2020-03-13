@@ -58,6 +58,7 @@ class read_operation {
                 return make_exception_future<size_t>(operation_became_invalid_exception());
             }
 
+            // TODO: we can change it to deque to pop from data_vecs instead of iterating
             std::vector<inode_data_vec> data_vecs;
             // Extract data vectors from file_info
             file_info->execute_on_data_range({file_offset, file_offset + read_len}, [&data_vecs](inode_data_vec data_vec) {
@@ -69,18 +70,10 @@ class read_operation {
         });
     }
 
-    struct disk_temp_buffer {
-        disk_range _disk_range;
-        temporary_buffer<uint8_t> _data;
-    };
-    // Keep last disk read to accelerate next disk reads in cases where next read is intersecting previous disk read
-    // (after alignment)
-    disk_temp_buffer _prev_disk_read;
-
     future<size_t> iterate_reads(uint8_t* buffer, file_offset_t file_offset, std::vector<inode_data_vec> data_vecs) {
         return do_with(std::move(data_vecs), (size_t)0, (size_t)0,
-                [this, buffer, file_offset](std::vector<inode_data_vec>& data_vecs, size_t& vec_idx, size_t& valid_read_len) {
-            return repeat([this, &valid_read_len, &data_vecs, &vec_idx, buffer, file_offset] {
+                [this, buffer, file_offset](std::vector<inode_data_vec>& data_vecs, size_t& vec_idx, size_t& completed_read_len) {
+            return repeat([this, &completed_read_len, &data_vecs, &vec_idx, buffer, file_offset] {
                 if (vec_idx == data_vecs.size()) {
                     return make_ready_future<bool_class<stop_iteration_tag>>(stop_iteration::yes);
                 }
@@ -89,18 +82,26 @@ class read_operation {
                 size_t expected_read_len = data_vec.data_range.size();
 
                 return do_read(data_vec, buffer + data_vec.data_range.beg - file_offset).then(
-                        [&valid_read_len, expected_read_len](size_t read_len) {
-                    valid_read_len += read_len;
+                        [&completed_read_len, expected_read_len](size_t read_len) {
+                    completed_read_len += read_len;
                     if (read_len != expected_read_len) {
                         return stop_iteration::yes;
                     }
                     return stop_iteration::no;
                 });
-            }).then([&valid_read_len] {
-                return make_ready_future<size_t>(valid_read_len);
+            }).then([&completed_read_len] {
+                return make_ready_future<size_t>(completed_read_len);
             });
         });
     }
+
+    struct disk_temp_buffer {
+        disk_range _disk_range;
+        temporary_buffer<uint8_t> _data;
+    };
+    // Keep last disk read to accelerate next disk reads in cases where next read is intersecting previous disk read
+    // (after alignment)
+    disk_temp_buffer _prev_disk_read;
 
     future<size_t> do_read(inode_data_vec& data_vec, uint8_t* buffer) {
         size_t expected_read_len = data_vec.data_range.size();
@@ -118,21 +119,19 @@ class read_operation {
                 // TODO: we can optimize the case when disk_data.device_offset is aligned
                 // Copies data from source_buffer corresponding to the intersection of dest_disk_range
                 // and source_buffer.disk_range into buffer. dest_disk_range.beg corresponds to first byte of buffer
-                auto copy_intersecting_data =
+                // Works when dest_disk_range.beg <= source_buffer._disk_range.beg
+                auto copy_left_intersecting_data =
                         [](uint8_t* buffer, disk_range dest_disk_range, const disk_temp_buffer& source_buffer) -> size_t {
+                    assert(dest_disk_range.beg > source_buffer._disk_range.beg and
+                            "Beggining of source buffer on disk should be before beggining of destination buffer on disk");
                     disk_range intersect = intersection(dest_disk_range, source_buffer._disk_range);
                     if (not intersect.is_empty()) {
                         // We can copy _data from disk_temp_buffer
-                        size_t common_data_len = intersect.size();
-                        if (dest_disk_range.beg > source_buffer._disk_range.beg) {
-                            size_t source_data_offset = dest_disk_range.beg - source_buffer._disk_range.beg;
-                            // TODO: maybe we should split that memcpy to multiple parts because large reads can lead
-                            // to spikes in latency
-                            std::memcpy(buffer, source_buffer._data.get() + source_data_offset, common_data_len);
-                        } else {
-                            size_t dest_data_offset = source_buffer._disk_range.beg - dest_disk_range.beg;
-                            std::memcpy(buffer + dest_data_offset, source_buffer._data.get(), common_data_len);
-                        }
+                        disk_offset_t common_data_len = intersect.size();
+                        disk_offset_t source_data_offset = dest_disk_range.beg - source_buffer._disk_range.beg;
+                        // TODO: maybe we should split that memcpy to multiple parts because large reads can lead
+                        // to spikes in latency
+                        std::memcpy(buffer, source_buffer._data.get() + source_data_offset, common_data_len);
                         return common_data_len;
                     } else {
                         return 0;
@@ -144,14 +143,14 @@ class read_operation {
                     disk_data.device_offset + expected_read_len
                 };
 
-                size_t copied = 0;
+                size_t current_read_len = 0;
                 if (not _prev_disk_read._data.empty()) {
-                    copied = copy_intersecting_data(buffer, remaining_read_range, _prev_disk_read);
-                    if (copied == expected_read_len) {
+                    current_read_len = copy_left_intersecting_data(buffer, remaining_read_range, _prev_disk_read);
+                    if (current_read_len == expected_read_len) {
                         return make_ready_future<size_t>(expected_read_len);
                     }
-                    remaining_read_range.beg += copied;
-                    buffer += copied;
+                    remaining_read_range.beg += current_read_len;
+                    buffer += current_read_len;
                 }
 
                 disk_temp_buffer new_disk_read;
@@ -163,13 +162,13 @@ class read_operation {
 
                 return _metadata_log._device.read(new_disk_read._disk_range.beg, new_disk_read._data.get_write(),
                         new_disk_read._disk_range.size(), _pc).then(
-                        [this, copy_intersecting_data = std::move(copy_intersecting_data),
+                        [this, copy_left_intersecting_data = std::move(copy_left_intersecting_data),
                         new_disk_read = std::move(new_disk_read),
-                        remaining_read_range, buffer, copied](size_t read_len) mutable {
+                        remaining_read_range, buffer, current_read_len](size_t read_len) mutable {
                     new_disk_read._disk_range.end = new_disk_read._disk_range.beg + read_len;
-                    copied += copy_intersecting_data(buffer, remaining_read_range, new_disk_read);
+                    current_read_len += copy_left_intersecting_data(buffer, remaining_read_range, new_disk_read);
                     _prev_disk_read = std::move(new_disk_read);
-                    return copied;
+                    return current_read_len;
                 });
             },
         }, data_vec.data_location);
