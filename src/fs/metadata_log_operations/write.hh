@@ -183,7 +183,7 @@ private:
 
                         auto cluster_id = cluster_opt.value();
                         disk_offset_t cluster_disk_offset = cluster_id_to_offset(cluster_id, _metadata_log._cluster_size);
-                        _metadata_log._curr_data_writer = make_shared<cluster_writer>();
+                        _metadata_log._curr_data_writer = _metadata_log._curr_data_writer->virtual_constructor();
                         _metadata_log._curr_data_writer->init(_metadata_log._cluster_size, _metadata_log._alignment,
                                 cluster_disk_offset);
                         buff_bytes_left = _metadata_log._curr_data_writer->bytes_left();
