@@ -27,6 +27,8 @@
 
 namespace seastar::fs {
 
+using shard_info_vec = std::vector<bootstrap_record::shard_info>;
+
 future<> filesystem::init(std::string device_path) {
     return do_with_device(std::move(device_path), [=](block_device &device) {
         return bootstrap_record::read_from_disk(device).then([this, &device]
@@ -52,6 +54,73 @@ future<> filesystem::stop() {
     } else {
         return make_ready_future();
     }
+}
+
+cluster_range which_cluster_bucket(cluster_range available_clusters, uint32_t shards_nb, uint32_t shard_id) {
+    const cluster_id_t clusters_nb = available_clusters.end - available_clusters.beg;
+
+    assert(available_clusters.end >= available_clusters.beg); /* TODO: invalid range, so throw some exception */
+    assert(clusters_nb >= shards_nb); /* TODO: shard should have at least 1 cluster, so throw some exception */
+
+    const uint32_t lower_bucket_size = clusters_nb / shards_nb;
+    const uint32_t with_upper_bucket = clusters_nb % shards_nb;
+
+    const cluster_id_t beg = shard_id * lower_bucket_size + std::min(shard_id, with_upper_bucket);
+    const cluster_id_t end = (shard_id + 1) * lower_bucket_size + std::min(shard_id + 1, with_upper_bucket);
+
+    return { available_clusters.beg + beg, available_clusters.beg + end };
+}
+
+future<> distribute_clusters(cluster_range available_clusters, shard_info_vec& shards_info) {
+    const auto all_shards = boost::irange<uint32_t>(0, shards_info.size());
+    return parallel_for_each(std::move(all_shards), [available_clusters, &shards_info](uint32_t shard_id) {
+        const cluster_range bucket = which_cluster_bucket(available_clusters, shards_info.size(), shard_id);
+        shards_info[shard_id] = { bucket.beg, bucket };
+        return make_ready_future();
+    });
+}
+
+future<bootstrap_record> make_bootstrap_record(uint64_t version, unit_size_t alignment, unit_size_t cluster_size,
+        inode_t root_directory, uint32_t shards_nb, disk_offset_t block_device_size) {
+    constexpr cluster_id_t first_available_cluster = 1; /* TODO: we don't support copies of bootstrap_record yet */
+    const cluster_id_t last_available_cluster = offset_to_cluster_id(block_device_size, cluster_size);
+    const cluster_range available_clusters = { first_available_cluster, last_available_cluster };
+
+    return do_with(shard_info_vec(shards_nb), [=](auto& shards_info) {
+        return distribute_clusters(available_clusters, shards_info).then([=, &shards_info] {
+            return bootstrap_record(version, alignment, cluster_size, root_directory, shards_info);
+        });
+    });
+}
+
+future<sharded<filesystem>> bootfs(std::string device_path) {
+    return do_with(sharded<filesystem>(), std::move(device_path), [](sharded<filesystem>& fs, std::string& dev_path) {
+        return fs.start().then([=, &fs, &dev_path]() {
+            return fs.invoke_on_all(&filesystem::init, std::move(dev_path));
+        }).then([&fs] {
+            return std::move(fs);
+        });
+    });
+}
+
+future<> mkfs(block_device device, uint64_t version, unit_size_t cluster_size, unit_size_t alignment,
+        inode_t root_directory, uint32_t shards_nb) {
+    return do_with(std::move(device), [=](block_device& device) {
+        return device.size().then([=](disk_offset_t device_size) {
+            return make_bootstrap_record(version, alignment, cluster_size, root_directory, shards_nb, device_size);
+        }).then([&device](bootstrap_record record) {
+            return record.write_to_disk(device);
+        });
+    });
+}
+
+future<> mkfs(std::string device_path, uint64_t version, unit_size_t cluster_size, unit_size_t alignment,
+        inode_t root_directory, uint32_t shards_nb) {
+    return do_with_device(std::move(device_path), [=](block_device& device) {
+        return mkfs(device, version, cluster_size, alignment, root_directory, shards_nb).finally([&device]() {
+            return device.close();
+        });
+    });
 }
 
 } // namespace seastar::fs

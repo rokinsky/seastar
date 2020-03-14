@@ -26,6 +26,7 @@
 #include "fs/metadata_log.hh"
 
 #include "seastar/core/future.hh"
+#include "seastar/core/sharded.hh"
 #include "seastar/core/shared_ptr.hh"
 #include "seastar/core/units.hh"
 
@@ -44,5 +45,13 @@ public:
 
     future<> stop();
 };
+
+future<sharded<filesystem>> bootfs(std::string device_path);
+
+future<> mkfs(block_device device, uint64_t version, unit_size_t cluster_size, unit_size_t alignment,
+        inode_t root_directory, uint32_t shards_nb);
+
+future<> mkfs(std::string device_path, uint64_t version, unit_size_t cluster_size, unit_size_t alignment,
+        inode_t root_directory, uint32_t shards_nb);
 
 } // namespace seastar::fs
