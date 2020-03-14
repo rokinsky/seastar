@@ -19,19 +19,33 @@
  * Copyright (C) 2019 ScyllaDB
  */
 
+#include "fs/inode.hh"
+
 #include "seastar/core/future.hh"
 #include "seastar/fs/block_device.hh"
 #include "seastar/fs/file.hh"
 
 namespace seastar::fs {
 
+/* TODO remove after refactored unit test */
 seastarfs_file_impl::seastarfs_file_impl(block_device dev, open_flags flags)
     : _block_device(std::move(dev))
+    , _inode(0)
+    , _open_flags(flags) {}
+
+seastarfs_file_impl::seastarfs_file_impl(lw_shared_ptr<metadata_log> metadata_log, inode_t inode,
+        seastar::open_flags flags)
+    : _metadata_log(std::move(metadata_log))
+    , _inode(inode)
     , _open_flags(flags) {}
 
 future<size_t>
 seastarfs_file_impl::write_dma(uint64_t pos, const void* buffer, size_t len, const io_priority_class& pc) {
-    return _block_device.write(pos, buffer, len, pc);
+    if (_metadata_log and _inode) {
+        return _metadata_log->write(_inode.value(), pos, buffer, len, pc);
+    } else { /* TODO remove after refactored unit test */
+        return _block_device.write(pos, buffer, len, pc);
+    }
 }
 
 future<size_t>
@@ -41,7 +55,11 @@ seastarfs_file_impl::write_dma(uint64_t pos, std::vector<iovec> iov, const io_pr
 
 future<size_t>
 seastarfs_file_impl::read_dma(uint64_t pos, void* buffer, size_t len, const io_priority_class& pc) {
-    return _block_device.read(pos, buffer, len, pc);
+    if (_metadata_log and _inode) {
+        return _metadata_log->read(_inode.value(), pos, buffer, len, pc);
+    } else { /* TODO remove after refactored unit test */
+        return _block_device.read(pos, buffer, len, pc);
+    }
 }
 
 future<size_t>
@@ -51,7 +69,11 @@ seastarfs_file_impl::read_dma(uint64_t pos, std::vector<iovec> iov, const io_pri
 
 future<>
 seastarfs_file_impl::flush() {
-    return _block_device.flush();
+    if (_metadata_log and _inode) {
+        return _metadata_log->flush_log();
+    } else { /* TODO remove after refactored unit test */
+        return _block_device.flush();
+    }
 }
 
 future<struct stat>
@@ -60,8 +82,12 @@ seastarfs_file_impl::stat() {
 }
 
 future<>
-seastarfs_file_impl::truncate(uint64_t) {
-    throw std::bad_function_call();
+seastarfs_file_impl::truncate(uint64_t length) {
+    if (_metadata_log and _inode) {
+        return _metadata_log->truncate(_inode.value(), length);
+    } else {
+        return make_exception_future(std::bad_function_call());
+    }
 }
 
 future<>
@@ -76,12 +102,18 @@ seastarfs_file_impl::allocate(uint64_t position, uint64_t length) {
 
 future<uint64_t>
 seastarfs_file_impl::size() {
-    throw std::bad_function_call();
+    return make_ready_future<uint64_t>(_metadata_log->file_size(_inode.value()));
 }
 
 future<>
 seastarfs_file_impl::close() noexcept {
-    return _block_device.close();
+    if (_metadata_log and _inode) {
+        return _metadata_log->close_file(_inode.value()).then([this] {
+            _inode = std::nullopt;
+        });
+    } else { /* TODO remove after refactored unit test */
+        return _block_device.close();
+    }
 }
 
 std::unique_ptr<file_handle_impl>
