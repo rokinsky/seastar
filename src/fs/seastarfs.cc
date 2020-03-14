@@ -56,6 +56,32 @@ future<> filesystem::stop() {
     }
 }
 
+future<file> filesystem::open_file_dma(sstring name, open_flags flags) {
+    return prepare_file(std::move(name), flags).then([=](inode_t inode) {
+        return file(make_shared<seastarfs_file_impl>(_metadata_log, inode, flags));
+    });
+}
+
+future<inode_t> filesystem::create_file(sstring name) {
+    return _metadata_log->create_file(std::move(name), file_permissions::default_file_permissions);
+}
+
+future<inode_t> filesystem::prepare_file(sstring name, open_flags flags) {
+    if ((flags & open_flags::create) == open_flags::create) {
+        return create_file(std::move(name));
+    }
+
+    return _metadata_log->open_file(name).then([=](inode_t inode) {
+        if ((flags & open_flags::truncate) == open_flags::truncate) {
+            auto file_size = _metadata_log->file_size(inode);
+            return _metadata_log->truncate(inode, file_size).then([=] {
+                return inode;
+            });
+        }
+        return make_ready_future<inode_t>(inode);
+    });
+}
+
 cluster_range which_cluster_bucket(cluster_range available_clusters, uint32_t shards_nb, uint32_t shard_id) {
     const cluster_id_t clusters_nb = available_clusters.end - available_clusters.beg;
 
