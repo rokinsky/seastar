@@ -19,14 +19,20 @@
  * Copyright (C) 2019 ScyllaDB
  */
 
+#include "fs/inode.hh"
+#include "fs/units.hh"
+
 #include "seastar/core/aligned_buffer.hh"
 #include "seastar/core/file-types.hh"
 #include "seastar/core/file.hh"
 #include "seastar/core/thread.hh"
 #include "seastar/core/units.hh"
 #include "seastar/fs/file.hh"
+#include "seastar/fs/seastarfs.hh"
 #include "seastar/fs/temporary_file.hh"
 #include "seastar/testing/thread_test_case.hh"
+
+#include "mock_block_device.hh"
 
 using namespace seastar;
 using namespace fs;
@@ -59,4 +65,85 @@ SEASTAR_THREAD_TEST_CASE(parallel_read_write_test) {
 
     f.flush().wait();
     f.close().wait();
+}
+
+constexpr uint64_t version = 1;
+constexpr unit_size_t cluster_size = 1 * MB;
+constexpr unit_size_t alignment = 4 * KB;
+constexpr inode_t root_directory = 0;
+
+BOOST_TEST_DONT_PRINT_LOG_VALUE(bootstrap_record)
+
+SEASTAR_THREAD_TEST_CASE(valid_path_mkfs_test) {
+    const auto tf = temporary_file(device_path);
+    tf.truncate(device_size);
+
+    const std::vector<bootstrap_record::shard_info> shards_info({{1,  {1,  device_size / MB}}});
+
+    const bootstrap_record write_record(
+        version, alignment, cluster_size, root_directory, shards_info
+    );
+
+    auto dev = open_block_device(tf.path()).get0();
+
+    fs::mkfs(tf.path(), version, cluster_size, alignment, root_directory, write_record.shards_nb()).wait();
+
+    const auto read_record = bootstrap_record::read_from_disk(dev).get0();
+    dev.close().wait();
+
+    BOOST_REQUIRE_EQUAL(write_record, read_record);
+}
+
+SEASTAR_THREAD_TEST_CASE(valid_dev_mkfs_test) {
+    const auto tf = temporary_file(device_path);
+    tf.truncate(device_size);
+
+    const std::vector<bootstrap_record::shard_info> shards_info({{1,  {1,  device_size / MB}}});
+
+    const bootstrap_record write_record(version, alignment, cluster_size, root_directory, shards_info);
+
+    auto dev = open_block_device(tf.path()).get0();
+
+    fs::mkfs(dev, version, cluster_size, alignment, root_directory, write_record.shards_nb()).wait();
+
+    const auto read_record = bootstrap_record::read_from_disk(dev).get0();
+    dev.close().wait();
+
+    BOOST_REQUIRE_EQUAL(write_record, read_record);
+}
+
+SEASTAR_THREAD_TEST_CASE(valid_cluster_distribution_mkfs_test) {
+    const auto tf = temporary_file(device_path);
+    tf.truncate(device_size);
+
+    const std::vector<bootstrap_record::shard_info> shards_info({
+        { 1,  { 1,  4  } }, // 3
+        { 4,  { 4,  7  } }, // 3
+        { 7,  { 7,  10 } }, // 3
+        { 10, { 10, 12 } }, // 2
+        { 12, { 12, 14 } }, // 2
+        { 14, { 14, 16 } }, // 2
+    });
+
+    const bootstrap_record write_record(version, alignment, cluster_size, root_directory, shards_info);
+
+    auto dev = open_block_device(tf.path()).get0();
+
+    fs::mkfs(tf.path(), version, cluster_size, alignment, root_directory, write_record.shards_nb()).wait();
+
+    const auto read_record = bootstrap_record::read_from_disk(dev).get0();
+    dev.close().wait();
+
+    BOOST_REQUIRE_EQUAL(write_record, read_record);
+}
+
+SEASTAR_THREAD_TEST_CASE(valid_basic_bootfs_test) {
+    const auto tf = temporary_file(device_path);
+    tf.truncate(device_size);
+
+    fs::mkfs(tf.path(), version, cluster_size, alignment, root_directory, smp::count).wait();
+
+    auto fs = fs::bootfs(tf.path()).get0();
+
+    fs.stop().wait();
 }
