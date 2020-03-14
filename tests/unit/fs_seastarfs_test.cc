@@ -147,3 +147,23 @@ SEASTAR_THREAD_TEST_CASE(valid_basic_bootfs_test) {
 
     fs.stop().wait();
 }
+
+SEASTAR_THREAD_TEST_CASE(valid_basic_open_test) {
+    const auto tf = temporary_file(device_path);
+    tf.truncate(device_size);
+
+    const std::vector<bootstrap_record::shard_info> shards_info({{1,  {1,  device_size / MB}}});
+
+    const bootstrap_record write_record(version, alignment, cluster_size, root_directory, shards_info);
+
+    fs::mkfs(tf.path(), version, cluster_size, alignment, root_directory, write_record.shards_nb()).wait();
+
+    auto fs = filesystem();
+    fs.init(tf.path()).get0();
+
+    // TODO: doesn't work
+    // auto file = fs.open_file_dma("test", open_flags::create).get0();
+    // file.close().wait();
+
+    fs.stop().wait();
+}
