@@ -46,6 +46,10 @@ public:
     temporary_file(temporary_file&&) noexcept = delete;
     temporary_file& operator=(temporary_file&&) noexcept = delete;
 
+    void truncate(off_t length) const {
+        throw_system_error_on(::truncate(_path.data(), length) == -1);
+    }
+
     const std::string& path() const noexcept {
         return _path;
     }
