@@ -22,7 +22,6 @@
 #pragma once
 
 #include "fs/cluster_writer.hh"
-#include "fs_print_tmp_buff.hh"
 
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/temporary_buffer.hh>
@@ -48,7 +47,7 @@ public:
     }
 
     struct write_to_device {
-        size_t disk_offset;
+        disk_offset_t disk_offset;
         temporary_buffer<uint8_t> data;
     };
 
@@ -75,21 +74,5 @@ public:
     }
 
 };
-
-inline std::ostream& operator<<(std::ostream& os, const mock_cluster_writer::write_to_device& wr) {
-    os << "[offset=" << wr.disk_offset;
-    os << ", data=" << wr.data;
-    return os << "]";
-}
-
-inline std::ostream& operator<<(std::ostream& os, const std::vector<mock_cluster_writer::write_to_device>& writes) {
-    for (size_t i = 0; i < writes.size(); ++i) {
-        if (i != 0) {
-            os << '\n';
-        }
-        os << writes[i];
-    }
-    return os;
-}
 
 } // namespace seastar::fs
