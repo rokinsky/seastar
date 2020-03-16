@@ -70,6 +70,7 @@ public:
     }
     void end_struct() {
         _out << '}';
+        first_field = false;
     }
     void start_field(const std::string& s) {
         if (first_field) {
