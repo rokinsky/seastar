@@ -21,6 +21,7 @@
 
 #include "fs/metadata_disk_entries.hh"
 #include "fs/metadata_log.hh"
+#include "fs_metadata_common.hh"
 #include "fs_mock_cluster_writer.hh"
 #include "fs_mock_metadata_to_disk_buffer.hh"
 #include "fs_mock_block_device.hh"
@@ -42,12 +43,6 @@ using flush_to_disk = mock_metadata_to_disk_buffer::action::flush_to_disk;
 
 namespace {
 
-// Returns copy of given value. Needed to solve misalignment iiss
-template<typename T>
-T copy_value(T x) {
-    return x;
-}
-
 std::string to_string(const temporary_buffer<uint8_t>& a) {
     return std::string(a.get(), a.get() + a.size());
 }
@@ -57,22 +52,14 @@ constexpr unit_size_t default_alignment = 4096;
 constexpr cluster_range default_cluster_range = {1, 10};
 constexpr cluster_id_t default_metadata_log_cluster = 1;
 
-template<typename BlockDevice = mock_block_device_impl,
-        typename MetadataToDiskBuffer = mock_metadata_to_disk_buffer,
-        typename ClusterWriter = mock_cluster_writer>
-auto init_structs() {
-    auto dev_impl = make_shared<BlockDevice>();
-    metadata_log log(block_device(dev_impl), default_cluster_size, default_alignment,
-            make_shared<MetadataToDiskBuffer>(), make_shared<ClusterWriter>());
-    log.bootstrap(0, default_metadata_log_cluster, default_cluster_range, 1, 0).get();
-
-    return std::pair{std::move(dev_impl), std::move(log)};
+auto default_init_metadata_log() {
+    return init_metadata_log(default_cluster_size, default_alignment, default_metadata_log_cluster, default_cluster_range);
 }
 
 } // namespace
 
 SEASTAR_THREAD_TEST_CASE(some_tests) {
-    auto [dev, log] = init_structs();
+    auto [dev, log] = default_init_metadata_log();
 
     log.create_directory("/test/", file_permissions::default_dir_permissions).get();
     log.create_file("/test/test", file_permissions::default_dir_permissions).get();
@@ -80,9 +67,9 @@ SEASTAR_THREAD_TEST_CASE(some_tests) {
     auto& created_buffers = mock_metadata_to_disk_buffer::virtually_constructed_buffers;
     auto& buff = created_buffers.back();
     BOOST_REQUIRE_EQUAL(buff->actions.size(), 2);
-    BOOST_REQUIRE(buff->is_append_type<ondisk_create_inode_as_dir_entry>(0));
-    BOOST_REQUIRE(buff->is_append_type<ondisk_create_inode_as_dir_entry>(1));
-    auto& ondisk_file_header = buff->get_by_append_type<ondisk_create_inode_as_dir_entry>(1).header;
+    BOOST_REQUIRE(is_append_type<ondisk_create_inode_as_dir_entry>(buff->actions[0]));
+    BOOST_REQUIRE(is_append_type<ondisk_create_inode_as_dir_entry>(buff->actions[1]));
+    auto& ondisk_file_header = get_by_append_type<ondisk_create_inode_as_dir_entry>(buff->actions[1]).header;
 
     inode_t file_inode = log.open_file("/test/test").get0();
     BOOST_REQUIRE_EQUAL(file_inode, ondisk_file_header.entry_inode.inode);
@@ -92,16 +79,16 @@ SEASTAR_THREAD_TEST_CASE(some_tests) {
     size_t wrote = log.write(file_inode, offset, str_write.data(), str_write.size()).get0();
     BOOST_REQUIRE_EQUAL(wrote, str_write.size());
     BOOST_REQUIRE_EQUAL(buff->actions.size(), 3);
-    BOOST_REQUIRE(buff->is_append_type<ondisk_small_write>(2));
-    BOOST_REQUIRE_EQUAL(to_string(buff->get_by_append_type<ondisk_small_write>(2).data), str_write);
-    BOOST_REQUIRE_EQUAL(copy_value(buff->get_by_append_type<ondisk_small_write>(2).header.offset), offset);
+    BOOST_REQUIRE(is_append_type<ondisk_small_write>(buff->actions[2]));
+    BOOST_REQUIRE_EQUAL(to_string(get_by_append_type<ondisk_small_write>(buff->actions[2]).data), str_write);
+    BOOST_REQUIRE_EQUAL(copy_value(get_by_append_type<ondisk_small_write>(buff->actions[2]).header.offset), offset);
 
     log.truncate(file_inode, 4).get0();
     BOOST_REQUIRE_EQUAL(buff->actions.size(), 4);
-    BOOST_REQUIRE(buff->is_append_type<ondisk_truncate>(3));
+    BOOST_REQUIRE(is_append_type<ondisk_truncate>(buff->actions[3]));
 
     log.close_file(file_inode).get();
     log.flush_log().get();
     BOOST_REQUIRE_EQUAL(buff->actions.size(), 5);
-    BOOST_REQUIRE(buff->is_type<flush_to_disk>(4));
+    BOOST_REQUIRE(is_type<flush_to_disk>(buff->actions[4]));
 }
