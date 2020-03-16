@@ -15,8 +15,6 @@
 
 namespace parquet {
 
-////////////////////////////////////////////////////////////////////////////////
-
 /* A dynamically sized buffer. Rounds up the size given in constructor to a power of 2.
  */
 class buffer {
@@ -33,8 +31,6 @@ public:
     uint8_t* data() { return _data.get(); }
     size_t size() { return _size; }
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 /* The problem: we need to read a stream of objects of unknown, variable size (page headers)
  * placing each of them into contiguous memory for deserialization. Because we can only learn the size
@@ -60,8 +56,6 @@ public:
     seastar::future<> advance(size_t n);
 };
 
-////////////////////////////////////////////////////////////////////////////////
-
 struct page {
     const format::PageHeader* header;
     std::basic_string_view<uint8_t> contents;
@@ -80,8 +74,6 @@ public:
     seastar::future<std::optional<page>> next_page(uint32_t expected_header_size=_default_expected_header_size);
 };
 
-////////////////////////////////////////////////////////////////////////////////
-
 // A uniform interface to multiple compression algorithms.
 class decompressor {
     const format::CompressionCodec::type _codec;
@@ -91,8 +83,6 @@ public:
     // View the decompressed data. Will throw if the size of decompressed data doesn't match decompressed_len.
     std::basic_string_view<uint8_t> operator()(std::basic_string_view<uint8_t> compressed, size_t decompressed_len);
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 /* There are two encodings used for definition and repetition levels: RLE and BIT_PACKED.
  * level_decoder provides a uniform interface to them.
@@ -118,7 +108,7 @@ public:
 
     // Read a batch of n levels (the last batch may be smaller than n).
     template <typename T>
-    size_t read_batch(int n, T *out) {
+    size_t read_batch(int n, T out[]) {
         n = std::min(n, _num_values - _values_read);
         if (_bit_width == 0) {
             std::fill(out, out + n, 0);
@@ -139,8 +129,6 @@ public:
         }, _decoder);
     }
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 /* Refer to the parquet documentation for the description of various encodings:
  * https://github.com/apache/parquet-format/blob/master/Encodings.md
@@ -178,22 +166,18 @@ public:
     size_t read_batch(size_t n, seastar::temporary_buffer<uint8_t> out[]);
 };
 
-////////////////////////////////////////////////////////////////////////////////
-
 template <typename T>
 class dict_decoder {
     T* _dict;
     size_t _dict_size;
     RleDecoder _rle_decoder;
 public:
-    explicit dict_decoder(T* dict, size_t dict_size)
+    explicit dict_decoder(T dict[], size_t dict_size)
         : _dict(dict)
         , _dict_size(dict_size) {};
     void reset(std::basic_string_view<uint8_t> data);
     size_t read_batch(size_t n, T out[]);
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 class rle_decoder_boolean {
     RleDecoder _rle_decoder;
@@ -201,8 +185,6 @@ public:
     void reset(std::basic_string_view<uint8_t> data);
     size_t read_batch(size_t n, uint8_t out[]);
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
 class delta_binary_packed_decoder {
@@ -222,8 +204,6 @@ public:
     size_t read_batch(size_t n, T out[]);
     void reset(std::basic_string_view<uint8_t> data);
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 template<format::Type::type T>
 struct value_decoder_traits;
@@ -303,8 +283,6 @@ template<> struct value_decoder_traits<format::Type::FIXED_LEN_BYTE_ARRAY> {
     >;
 };
 
-////////////////////////////////////////////////////////////////////////////////
-
 // A uniform interface to all the various value decoders.
 template<format::Type::type T>
 class value_decoder {
@@ -329,8 +307,6 @@ public:
     // Read a batch of n values (the last batch may be smaller than n).
     size_t read_batch(size_t n, output_type out[]);
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 // The core low-level interface. Takes the relevant metadata and an input_stream set to the beginning of a column chunk
 // and extracts batches of (repetition level, definition level, value (optional)) from it.
@@ -409,8 +385,6 @@ inline column_chunk_reader<T>::read_batch(size_t n, LevelT def[], LevelT rep[], 
     return seastar::make_ready_future<size_t>(def_levels_read);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
 // The entry class of this library. All other objects are spawned from the file_reader,
 // and are forbidden from outliving their parent file_reader.
 class file_reader {
@@ -436,8 +410,6 @@ public:
     seastar::future<column_chunk_reader<T>>
     open_column_chunk_reader(int row_group, int column) const;
 };
-
-////////////////////////////////////////////////////////////////////////////////
 
 extern template class column_chunk_reader<format::Type::INT32>;
 extern template class column_chunk_reader<format::Type::INT64>;

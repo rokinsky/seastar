@@ -16,9 +16,6 @@
 
 namespace parquet {
 
-////////////////////////////////////////////////////////////////////////////////
-// thrift deserialization
-
 namespace {
 
 template <typename DeserializedType>
@@ -37,9 +34,6 @@ void deserialize_thrift_msg(
 }
 
 } // namespace
-
-////////////////////////////////////////////////////////////////////////////////
-// peekable_stream
 
 /* Assuming there is k bytes remaining in stream, append exactly min(k, n) bytes to the internal buffer.
  * seastar::input_stream has a read_exactly method of it's own, which does exactly what we want internally,
@@ -123,9 +117,6 @@ seastar::future<> peekable_stream::advance(size_t n) {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// page_reader
-
 seastar::future<std::optional<page>> page_reader::next_page(uint32_t expected_header_size) {
     *_latest_header = format::PageHeader{};
     return _source.peek(expected_header_size).then(
@@ -160,9 +151,6 @@ seastar::future<std::optional<page>> page_reader::next_page(uint32_t expected_he
     });
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// page_decompressor
-
 std::basic_string_view<uint8_t>
 decompressor::operator()(std::basic_string_view<uint8_t> input, size_t decompressed_len) {
     if (_codec == format::CompressionCodec::UNCOMPRESSED) {
@@ -185,9 +173,6 @@ decompressor::operator()(std::basic_string_view<uint8_t> input, size_t decompres
         return {_buffer.data(), decompressed_len};
     }
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// level_decoder
 
 size_t level_decoder::reset_v1(
         std::basic_string_view<uint8_t> buffer,
@@ -236,9 +221,6 @@ void level_decoder::reset_v2(std::basic_string_view<uint8_t> encoded_levels, int
     _decoder = RleDecoder{encoded_levels.data(), static_cast<int>(encoded_levels.size()), _bit_width};
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// plain_decoders
-
 template <typename T>
 void plain_decoder_trivial<T>::reset(std::basic_string_view<uint8_t> data) {
     _buffer = std::move(data);
@@ -278,7 +260,7 @@ size_t plain_decoder_byte_array::read_batch(size_t n, seastar::temporary_buffer<
         if (_buffer.size() == 0) {
             return i;
         }
-        if (4 > _buffer.size()) {
+        if (_buffer.size() < 4) {
             throw parquet_exception::corrupted_file("Could not read BYTE_ARRAY length");
         }
         uint32_t len;
@@ -306,9 +288,6 @@ size_t plain_decoder_fixed_len_byte_array::read_batch(size_t n, seastar::tempora
     }
     return n;
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// dict_decoder<T>
 
 template <typename T>
 void dict_decoder<T>::reset(std::basic_string_view<uint8_t> data) {
@@ -350,9 +329,6 @@ size_t dict_decoder<T>::read_batch(size_t n, T out[]) {
     return n;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// rle_decoder_boolean
-
 void rle_decoder_boolean::reset(std::basic_string_view<uint8_t> data) {
     _rle_decoder.Reset(data.data(), data.size(), 1);
 }
@@ -360,9 +336,6 @@ void rle_decoder_boolean::reset(std::basic_string_view<uint8_t> data) {
 size_t rle_decoder_boolean::read_batch(size_t n, uint8_t out[]) {
     return _rle_decoder.GetBatch(out, n);
 }
-
-//////////////////////////////////////////////////////////////////////////////////////////
-// delta_binary_packed_decoder
 
 template <typename T>
 void delta_binary_packed_decoder<T>::reset(std::basic_string_view<uint8_t> data) {
@@ -374,10 +347,10 @@ void delta_binary_packed_decoder<T>::reset(std::basic_string_view<uint8_t> data)
 template <typename T>
 void delta_binary_packed_decoder<T>::init_block() {
     int32_t block_size;
-    if (!_decoder.GetVlqInt(&block_size)) throw parquet_exception::eof();
-    if (!_decoder.GetVlqInt(&_num_mini_blocks)) throw parquet_exception::eof();
-    if (!_decoder.GetVlqInt(&_values_current_block)) throw parquet_exception::eof();
-    if (!_decoder.GetZigZagVlqInt(&_last_value)) throw parquet_exception::eof();
+    if (!_decoder.GetVlqInt(&block_size)) { throw parquet_exception::eof(); }
+    if (!_decoder.GetVlqInt(&_num_mini_blocks)) { throw parquet_exception::eof(); }
+    if (!_decoder.GetVlqInt(&_values_current_block)) { throw parquet_exception::eof(); }
+    if (!_decoder.GetZigZagVlqInt(&_last_value)) { throw parquet_exception::eof(); }
 
     if (_delta_bit_widths.size() < static_cast<size_t>(_num_mini_blocks)) {
         _delta_bit_widths = buffer(_num_mini_blocks);
@@ -412,7 +385,7 @@ size_t delta_binary_packed_decoder<T>::read_batch(size_t n, T out[]) {
 
         // TODO: the key to this algorithm is to decode the entire miniblock at once.
         int64_t delta;
-        if (!_decoder.GetValue(_delta_bit_width, &delta)) throw parquet_exception::eof();
+        if (!_decoder.GetValue(_delta_bit_width, &delta)) { throw parquet_exception::eof(); }
         delta += _min_delta;
         _last_value += static_cast<int32_t>(delta);
         out[i] = _last_value;
@@ -421,11 +394,8 @@ size_t delta_binary_packed_decoder<T>::read_batch(size_t n, T out[]) {
     return n;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// value_decoder<T>
-
 template<format::Type::type T>
-void value_decoder<T>::reset_dict(output_type* dictionary, size_t dictionary_size) {
+void value_decoder<T>::reset_dict(output_type dictionary[], size_t dictionary_size) {
     _dict = dictionary;
     _dict_size = dictionary_size;
     _dict_set = true;
@@ -488,9 +458,6 @@ size_t value_decoder<T>::read_batch(size_t n, output_type out[]) {
     _remaining_values -= n_read;
     return n_read;
 };
-
-////////////////////////////////////////////////////////////////////////////////
-// column_chunk_reader<T>
 
 template<format::Type::type T>
 void column_chunk_reader<T>::load_data_page(page p) {
@@ -585,9 +552,6 @@ seastar::future<> column_chunk_reader<T>::load_next_page() {
         }
     });
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// file_reader
 
 seastar::future<std::unique_ptr<format::FileMetaData>> file_reader::read_file_metadata(seastar::file file) {
     return file.size().then([file] (uint64_t size) mutable {
@@ -709,8 +673,6 @@ file_reader::open_column_chunk_reader(int row_group, int column) const {
         });
     });
 }
-
-////////////////////////////////////////////////////////////////////////////////
 
 template class column_chunk_reader<format::Type::INT32>;
 template class column_chunk_reader<format::Type::INT64>;
