@@ -22,7 +22,7 @@
 #include "fs/metadata_disk_entries.hh"
 #include "fs/metadata_log.hh"
 #include "fs_mock_metadata_to_disk_buffer.hh"
-#include "mock_block_device.hh"
+#include "fs_mock_block_device.hh"
 
 #include <seastar/core/print.hh>
 #include <seastar/core/temporary_buffer.hh>

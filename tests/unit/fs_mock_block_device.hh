@@ -33,7 +33,18 @@ public:
     buf_type buf;
     ~mock_block_device_impl() override = default;
 
+    struct write_operation {
+        uint64_t disk_offset;
+        temporary_buffer<uint8_t> data;
+    };
+
+    std::vector<write_operation> writes;
+
     future<size_t> write(uint64_t pos, const void* buffer, size_t len, const io_priority_class&) override {
+        writes.emplace_back(write_operation {
+            pos,
+            temporary_buffer<uint8_t>(static_cast<const uint8_t*>(buffer), len)
+        });
         if (buf.size() < pos + len)
             buf.resize(pos + len);
         std::memcpy(buf.data() + pos, buffer, len);

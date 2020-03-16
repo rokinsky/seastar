@@ -22,7 +22,7 @@
 #include "fs/bitwise.hh"
 #include "fs/to_disk_buffer.hh"
 #include "fs/units.hh"
-#include "mock_block_device.hh"
+#include "fs_mock_block_device.hh"
 
 #include <cstring>
 #include <seastar/core/units.hh>

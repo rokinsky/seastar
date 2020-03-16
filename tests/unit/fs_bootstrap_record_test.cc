@@ -22,7 +22,7 @@
 #include "fs/bootstrap_record.hh"
 #include "fs/cluster.hh"
 #include "fs/crc.hh"
-#include "mock_block_device.hh"
+#include "fs_mock_block_device.hh"
 
 #include <boost/crc.hpp>
 #include <cstring>

@@ -365,7 +365,7 @@ if (Seastar_EXPERIMENTAL_FS)
   seastar_add_test (fs_bootstrap_record
     SOURCES
       fs_bootstrap_record_test.cc
-      mock_block_device.hh)
+      fs_mock_block_device.hh)
   seastar_add_test (fs_cluster_allocator
     KIND BOOST
     SOURCES fs_cluster_allocator_test.cc)
@@ -393,7 +393,7 @@ if (Seastar_EXPERIMENTAL_FS)
   seastar_add_test (fs_to_disk_buffer
     SOURCES
       fs_to_disk_buffer_test.cc
-      mock_block_device.hh)
+      fs_mock_block_device.hh)
 endif()
 
 seastar_add_test (semaphore
