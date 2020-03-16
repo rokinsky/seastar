@@ -86,11 +86,15 @@ else()
   endif()
 endif()
 
+extract_thrift_version()
+
 find_package_handle_standard_args(Thrift
                                   REQUIRED_VARS
                                   THRIFT_STATIC_LIB
                                   THRIFT_INCLUDE_DIR
-                                  THRIFT_COMPILER)
+                                  THRIFT_COMPILER
+                                  VERSION_VAR
+                                  THRIFT_VERSION)
 
 if(Thrift_FOUND OR THRIFT_FOUND)
   set(Thrift_FOUND TRUE)
@@ -98,5 +102,4 @@ if(Thrift_FOUND OR THRIFT_FOUND)
   set_target_properties(Thrift::thrift
                         PROPERTIES IMPORTED_LOCATION "${THRIFT_STATIC_LIB}"
                                    INTERFACE_INCLUDE_DIRECTORIES "${THRIFT_INCLUDE_DIR}")
-  extract_thrift_version()
 endif()
