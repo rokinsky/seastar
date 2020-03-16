@@ -92,7 +92,7 @@ private:
                         } else {
                             // If the last write is medium then align write length by splitting last write into medium aligned
                             // write and small write
-                            expected_write_len = round_down_to_multiple_of_power_of_2(remaining_write_len, _metadata_log._alignment);
+                            expected_write_len = remaining_write_len;
                         }
                     }
                 }
@@ -151,20 +151,19 @@ private:
         __builtin_unreachable();
     }
 
-    future<size_t> medium_write(const uint8_t* aligned_buffer, size_t aligned_expected_write_len, file_offset_t file_offset) {
+    future<size_t> medium_write(const uint8_t* aligned_buffer, size_t expected_write_len, file_offset_t file_offset) {
         assert(reinterpret_cast<size_t>(aligned_buffer) % _metadata_log._alignment == 0);
-        assert(aligned_expected_write_len % _metadata_log._alignment == 0);
-        // TODO: medium write can be divided into bigger number of smaller medium writes. Maybe we should add checks
+        // TODO: medium write can be divided into bigger number of smaller writes. Maybe we should add checks
         // for that and allow only limited number of medium writes? Or we could add to to_disk_buffer option for
         // space 'reservation' to make sure that after division our write will fit into the buffer?
         // That would also limit medium write to at most two smaller writes.
-        return do_with((size_t)0, [this, aligned_buffer, aligned_expected_write_len, file_offset](size_t& completed_write_len) {
-            return repeat([this, &completed_write_len, aligned_buffer, aligned_expected_write_len, file_offset] {
-                if (completed_write_len == aligned_expected_write_len) {
+        return do_with((size_t)0, [this, aligned_buffer, expected_write_len, file_offset](size_t& completed_write_len) {
+            return repeat([this, &completed_write_len, aligned_buffer, expected_write_len, file_offset] {
+                if (completed_write_len == expected_write_len) {
                     return make_ready_future<bool_class<stop_iteration_tag>>(stop_iteration::yes);
                 }
 
-                size_t remaining_write_len = aligned_expected_write_len - completed_write_len;
+                size_t remaining_write_len = expected_write_len - completed_write_len;
                 size_t curr_expected_write_len;
                 auto new_buffer = aligned_buffer + completed_write_len;
                 auto new_file_offset = file_offset + completed_write_len;
@@ -174,6 +173,9 @@ private:
                     curr_expected_write_len = remaining_write_len;
                     write_future = do_small_write(new_buffer, curr_expected_write_len, new_file_offset);
                 } else {
+                    size_t rounded_remaining_write_len =
+                            round_down_to_multiple_of_power_of_2(remaining_write_len, _metadata_log._alignment);
+
                     // We must use medium write
                     size_t buff_bytes_left = _metadata_log._curr_data_writer->bytes_left();
                     if (buff_bytes_left <= SMALL_WRITE_THRESHOLD) {
@@ -192,10 +194,11 @@ private:
                                 cluster_disk_offset);
                         buff_bytes_left = _metadata_log._curr_data_writer->bytes_left();
 
-                        curr_expected_write_len = remaining_write_len;
+                        curr_expected_write_len = rounded_remaining_write_len;
                     } else {
                         // There is enough space for medium write
-                        curr_expected_write_len = buff_bytes_left >= remaining_write_len ? remaining_write_len : buff_bytes_left;
+                        curr_expected_write_len = buff_bytes_left >= rounded_remaining_write_len ?
+                                rounded_remaining_write_len : buff_bytes_left;
                     }
 
                     write_future = do_medium_write(new_buffer, curr_expected_write_len, new_file_offset,
