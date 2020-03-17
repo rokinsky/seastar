@@ -11,22 +11,24 @@ struct raw_node {
     std::vector<raw_node> children;
     const format::SchemaElement& info;
     std::vector<std::string> path;
-    int column_index;
-    int def_level;
-    int rep_level;
+    uint32_t column_index;
+    uint32_t def_level;
+    uint32_t rep_level;
 };
 
 raw_node compute_shape(const std::vector<format::SchemaElement>& flat_schema) {
     size_t index = 0;
     return y_combinator{[&] (auto&& convert) -> raw_node {
         if (index >= flat_schema.size()) {
-            throw parquet_exception::corrupted_file("invalid number of children in schema");
+            throw parquet_exception::corrupted_file(
+                    "The flat schema contains less nodes than required by the cumulative size of num_children");
         }
         const format::SchemaElement &current = flat_schema[index];
         ++index;
         if (current.__isset.num_children) {
             if (current.num_children < 0) {
-                throw parquet_exception::corrupted_file("negative num_children");
+                throw parquet_exception::corrupted_file(seastar::format(
+                        "Negative num_children in SchemaElement: {}", current));
             }
             std::vector<raw_node> children;
             children.reserve(current.num_children);
@@ -41,7 +43,7 @@ raw_node compute_shape(const std::vector<format::SchemaElement>& flat_schema) {
 }
 
 void compute_column_index(raw_node& raw_schema) {
-    int column_index = 0;
+    uint32_t column_index = 0;
     y_combinator{[&] (auto&& compute, raw_node& r) -> void {
         if (r.children.empty()) {
             r.column_index = column_index;
@@ -56,7 +58,7 @@ void compute_column_index(raw_node& raw_schema) {
 }
 
 void compute_levels(raw_node& raw_schema) {
-    y_combinator{[&] (auto&& compute, raw_node& r, int def, int rep) -> void {
+    y_combinator{[&] (auto&& compute, raw_node& r, uint32_t def, uint32_t rep) -> void {
         if (r.info.repetition_type == format::FieldRepetitionType::REPEATED) {
             ++def;
             ++rep;
@@ -155,8 +157,8 @@ logical_type::logical_type determine_logical_type(const format::SchemaElement& x
             return logical_type::UINT64{};
         } else if (x.converted_type == format::ConvertedType::DECIMAL) {
             verify(x.__isset.precision && x.__isset.scale, "precision and scale must be set for DECIMAL");
-            int precision = x.precision;
-            int scale = x.scale;
+            uint32_t precision = x.precision;
+            uint32_t scale = x.scale;
             if (x.type == format::Type::INT32) {
                 verify(1 <= precision && precision <= 9,
                         "precision " + std::to_string(precision) + " out of bounds for INT32 decimal");
@@ -166,8 +168,6 @@ logical_type::logical_type determine_logical_type(const format::SchemaElement& x
                         "precision " + std::to_string(precision) + " out of bounds for INT64 decimal");
                 return logical_type::DECIMAL_INT64{scale, precision};
             } else if (x.type == format::Type::BYTE_ARRAY) {
-                verify(precision > 0,
-                        "precision " + std::to_string(precision) + " out of bounds for BYTE_ARRAY decimal");
                 return logical_type::DECIMAL_BYTE_ARRAY{scale, precision};
             } else if (x.type == format::Type::FIXED_LEN_BYTE_ARRAY) {
                 verify(precision > 0,
@@ -229,17 +229,23 @@ raw_node flat_schema_to_raw_schema(const std::vector<format::SchemaElement>& fla
 node build_logical_node(const raw_node& raw_schema);
 
 primitive_node build_primitive_node(const raw_node& r) {
-    return primitive_node{{r.info, r.path, r.def_level, r.rep_level}, determine_logical_type(r.info), r.column_index};
+    try {
+        return primitive_node{{r.info, r.path, r.def_level, r.rep_level}, determine_logical_type(r.info),
+                              r.column_index};
+    } catch (const std::exception& e) {
+        throw parquet_exception(seastar::format("Error while processing schema node {}: {}",
+                r.path, e.what()));
+    }
 }
 
 list_node build_list_node(const raw_node& r) {
     if (r.children.size() != 1 || r.info.repetition_type == format::FieldRepetitionType::REPEATED) {
-        throw parquet_exception::corrupted_file(std::string("Invalid list node: ") + r.info.name);
+        throw parquet_exception::corrupted_file(seastar::format("Invalid list node: {}", r.info));
     }
 
     const raw_node& repeated_node = r.children[0];
     if (repeated_node.info.repetition_type != format::FieldRepetitionType::REPEATED) {
-        throw parquet_exception::corrupted_file(std::string("Invalid list element: ") + r.info.name);
+        throw parquet_exception::corrupted_file(seastar::format("Invalid list element node: {}", r.info));
     }
 
     if ((repeated_node.children.size() != 1)
@@ -260,19 +266,19 @@ list_node build_list_node(const raw_node& r) {
 
 map_node build_map_node(const raw_node& r) {
     if (r.children.size() != 1) {
-        throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
+        throw parquet_exception(seastar::format("Invalid map node: {}", r.info));
     }
 
     const raw_node& repeated_node = r.children[0];
     if (repeated_node.children.size() != 2
         || repeated_node.info.repetition_type != format::FieldRepetitionType::REPEATED) {
-        throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
+        throw parquet_exception(seastar::format("Invalid map node: {}", r.info));
     }
 
     const raw_node& key_node = repeated_node.children[0];
     const raw_node& value_node = repeated_node.children[1];
     if (!key_node.children.empty()) {
-        throw parquet_exception(std::string("Invalid map node: ") + r.info.name);
+        throw parquet_exception(seastar::format("Invalid map node: {}", r.info));
     }
 
     return map_node{

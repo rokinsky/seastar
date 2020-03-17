@@ -27,23 +27,23 @@ struct UINT32 { static constexpr format::Type::type physical_type = format::Type
 struct UINT64 { static constexpr format::Type::type physical_type = format::Type::INT64; };
 struct DECIMAL_INT32 {
     static constexpr format::Type::type physical_type = format::Type::INT32;
-    int32_t scale;
-    int32_t precision;
+    uint32_t scale;
+    uint32_t precision;
 };
 struct DECIMAL_INT64 {
     static constexpr format::Type::type physical_type = format::Type::INT64;
-    int32_t scale;
-    int32_t precision;
+    uint32_t scale;
+    uint32_t precision;
 };
 struct DECIMAL_BYTE_ARRAY {
     static constexpr format::Type::type physical_type = format::Type::BYTE_ARRAY;
-    int32_t scale;
-    int32_t precision;
+    uint32_t scale;
+    uint32_t precision;
 };
 struct DECIMAL_FIXED_LEN_BYTE_ARRAY {
     static constexpr format::Type::type physical_type = format::Type::FIXED_LEN_BYTE_ARRAY;
-    int32_t scale;
-    int32_t precision;
+    uint32_t scale;
+    uint32_t precision;
 };
 struct DATE { static constexpr format::Type::type physical_type = format::Type::INT32; };
 struct TIME_INT32 {
@@ -109,13 +109,13 @@ using node = std::variant<
 struct node_base {
     const format::SchemaElement& info;
     std::vector<std::string> path;
-    int def_level;
-    int rep_level;
+    uint32_t def_level;
+    uint32_t rep_level;
 };
 
 struct primitive_node : node_base {
     logical_type::logical_type logical_type;
-    int column_index;
+    uint32_t column_index;
 };
 
 struct list_node : node_base {

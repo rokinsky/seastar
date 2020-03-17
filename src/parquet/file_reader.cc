@@ -8,32 +8,13 @@
 #include <seastar/core/seastar.hh>
 
 #include <thrift/protocol/TCompactProtocol.h>
+#include <thrift/protocol/TProtocolException.h>
 #include <thrift/transport/TBufferTransports.h>
-
 #include <iostream>
 #include <sstream>
 #include <limits>
 
 namespace parquet {
-
-namespace {
-
-template <typename DeserializedType>
-void deserialize_thrift_msg(
-        const uint8_t serialized_msg[],
-        uint32_t* serialized_len,
-        DeserializedType& deserialized_msg
-) {
-    using ThriftBuffer = apache::thrift::transport::TMemoryBuffer;
-    auto tmem_transport = std::make_shared<ThriftBuffer>(const_cast<uint8_t*>(serialized_msg), *serialized_len);
-    apache::thrift::protocol::TCompactProtocolFactoryT<ThriftBuffer> tproto_factory;
-    std::shared_ptr<apache::thrift::protocol::TProtocol> tproto = tproto_factory.getProtocol(tmem_transport);
-    deserialized_msg.read(tproto.get());
-    uint32_t bytes_left = tmem_transport->available_read();
-    *serialized_len = *serialized_len - bytes_left;
-}
-
-} // namespace
 
 /* Assuming there is k bytes remaining in stream, append exactly min(k, n) bytes to the internal buffer.
  * seastar::input_stream has a read_exactly method of it's own, which does exactly what we want internally,
@@ -117,35 +98,85 @@ seastar::future<> peekable_stream::advance(size_t n) {
     }
 }
 
-seastar::future<std::optional<page>> page_reader::next_page(uint32_t expected_header_size) {
-    *_latest_header = format::PageHeader{};
-    return _source.peek(expected_header_size).then(
-    [this, expected_header_size] (std::basic_string_view<uint8_t> peek) {
-        if (peek.size() == 0) {
+namespace {
+
+// Deserialize a single thrift structure. Return the number of bytes used.
+template <typename DeserializedType>
+uint32_t deserialize_thrift_msg(
+        const uint8_t serialized_msg[],
+        uint32_t serialized_len,
+        DeserializedType& deserialized_msg) {
+    using ThriftBuffer = apache::thrift::transport::TMemoryBuffer;
+    auto tmem_transport = std::make_shared<ThriftBuffer>(const_cast<uint8_t*>(serialized_msg), serialized_len);
+    apache::thrift::protocol::TCompactProtocolFactoryT<ThriftBuffer> tproto_factory;
+    std::shared_ptr<apache::thrift::protocol::TProtocol> tproto = tproto_factory.getProtocol(tmem_transport);
+    deserialized_msg.read(tproto.get());
+    uint32_t bytes_left = tmem_transport->available_read();
+    return serialized_len - bytes_left;
+}
+
+// Deserialize (and consume from the stream) a single thrift structure.
+// Return false if the stream is empty.
+template <typename DeserializedType>
+seastar::future<bool> read_thrift_from_stream(
+        peekable_stream& stream,
+        DeserializedType& deserialized_msg,
+        size_t expected_size = 1024,
+        size_t max_allowed_size = 1024 * 1024 * 16
+) {
+    if (expected_size > max_allowed_size) {
+        return seastar::make_exception_future<bool>(parquet_exception(seastar::format(
+                "Could not deserialize thrift: max allowed size of {} exceeded", max_allowed_size)));
+    }
+    return stream.peek(expected_size).then(
+    [&stream, &deserialized_msg, expected_size, max_allowed_size] (std::basic_string_view<uint8_t> peek) {
+        uint32_t len = peek.size();
+        if (len == 0) {
+            return seastar::make_ready_future<bool>(false);
+        }
+        try {
+            len = deserialize_thrift_msg(peek.data(), len, deserialized_msg);
+        } catch (const apache::thrift::transport::TTransportException& e) {
+            if (e.getType() == apache::thrift::transport::TTransportException::END_OF_FILE) {
+                // The serialized structure was bigger than expected. Retry with a bigger expectation.
+                if (peek.size() < expected_size) {
+                    throw parquet_exception(seastar::format(
+                            "Could not deserialize thrift: unexpected end of stream at {}B", peek.size()));
+                }
+                return read_thrift_from_stream(stream, deserialized_msg, expected_size * 2, max_allowed_size);
+            } else {
+                throw parquet_exception(seastar::format("Could not deserialize thrift: {}", e.what()));
+            }
+        } catch (const std::exception& e) {
+            throw parquet_exception(seastar::format("Could not deserialize thrift: {}", e.what()));
+        }
+        return stream.advance(len).then([] {
+            return true;
+        });
+    });
+}
+
+} // namespace
+
+seastar::future<std::optional<page>> page_reader::next_page() {
+    *_latest_header = format::PageHeader{}; // Thrift does not clear the structure by itself before writing to it.
+    return read_thrift_from_stream(_source, *_latest_header).then([this] (bool read) {
+        if (!read) {
             return seastar::make_ready_future<std::optional<page>>();
         }
-        uint32_t len = peek.size();
-        try {
-            deserialize_thrift_msg(peek.data(), &len, *_latest_header);
-        } catch (std::exception& e) {
-            if (expected_header_size > _max_allowed_header_size || expected_header_size > peek.size()) {
-                std::stringstream ss;
-                ss << e.what();
-                ss << "Deserializing page header failed.\n";
-                throw parquet_exception(ss.str());
-            }
-            return next_page(expected_header_size * 2);
+        if (_latest_header->compressed_page_size < 0) {
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "Negative compressed_page_size in header: {}", *_latest_header));
         }
-        return _source.advance(len).then([this] {
-            return _source.peek(_latest_header->compressed_page_size);
-        }).then([this] (std::basic_string_view<uint8_t> contents) {
-            if (contents.size() < static_cast<size_t>(_latest_header->compressed_page_size)) {
-                throw parquet_exception::eof();
+        size_t compressed_size = static_cast<uint32_t>(_latest_header->compressed_page_size);
+        return _source.peek(compressed_size).then([=] (std::basic_string_view<uint8_t> page_contents) {
+            if (page_contents.size() < compressed_size) {
+                throw parquet_exception::corrupted_file(seastar::format(
+                        "Unexpected end of column chunk while reading compressed page contents (expected {}B, got {}B)",
+                        compressed_size, page_contents.size()));
             }
-            return _source.advance(_latest_header->compressed_page_size).then(
-            [this, contents=std::move(contents)] () mutable {
-                page p{_latest_header.get(), std::move(contents)};
-                return seastar::make_ready_future<std::optional<page>>(std::move(p));
+            return _source.advance(compressed_size).then([=] {
+                return seastar::make_ready_future<std::optional<page>>(page{_latest_header.get(), page_contents});
             });
         });
     });
@@ -156,9 +187,6 @@ decompressor::operator()(std::basic_string_view<uint8_t> input, size_t decompres
     if (_codec == format::CompressionCodec::UNCOMPRESSED) {
         return input;
     } else {
-        if (decompressed_len == 0) {
-            return {};
-        }
         if (decompressed_len > _buffer.size()) {
             _buffer = buffer{decompressed_len};
         }
@@ -168,7 +196,7 @@ decompressor::operator()(std::basic_string_view<uint8_t> input, size_t decompres
             break;
         // TODO GZIP, LZO, BROTLI, LZ4, ZSTD
         default:
-            throw parquet_exception::nyi("Unsupported compression type");
+            throw parquet_exception::not_implemented(seastar::format("Unsupported compression ({})", _codec));
         }
         return {_buffer.data(), decompressed_len};
     }
@@ -177,8 +205,7 @@ decompressor::operator()(std::basic_string_view<uint8_t> input, size_t decompres
 size_t level_decoder::reset_v1(
         std::basic_string_view<uint8_t> buffer,
         format::Encoding::type encoding,
-        int num_values) {
-    assert(num_values >= 0);
+        uint32_t num_values) {
     _num_values = num_values;
     _values_read = 0;
     if (_bit_width == 0) {
@@ -186,44 +213,53 @@ size_t level_decoder::reset_v1(
     }
     if (encoding == format::Encoding::RLE) {
         if (buffer.size() < 4) {
-            throw parquet_exception::corrupted_file("Unexpected end of page");
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "End of page while reading levels (needed {}B, got {}B)", 4, buffer.size()));
         }
         int32_t len;
         std::memcpy(&len, buffer.data(), 4);
         if (len < 0) {
-            throw parquet_exception::corrupted_file("Negative rle encoding length");
+            throw parquet_exception::corrupted_file(seastar::format("Negative RLE levels length ({})", len));
         }
         if (static_cast<size_t>(len) > buffer.size()) {
-            throw parquet_exception::corrupted_file("Unexpected end of page");
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "End of page while reading levels (needed {}B, got {}B)", len, buffer.size()));
         }
-        _decoder = RleDecoder{buffer.data() + 4, len, _bit_width};
+        _decoder = RleDecoder{buffer.data() + 4, len, static_cast<int>(_bit_width)};
         return 4 + len;
     } else if (encoding == format::Encoding::BIT_PACKED) {
-        int64_t bit_len = static_cast<int64_t>(num_values) * _bit_width;
-        int64_t byte_len = (bit_len + 7) >> 3;
-        if (byte_len > std::numeric_limits<int>::max()) {
-            throw parquet_exception::corrupted_file("BIT_PACKED length exceeds int");
+        uint64_t bit_len = static_cast<uint64_t>(num_values) * _bit_width;
+        uint64_t byte_len = (bit_len + 7) >> 3;
+        if (byte_len > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+            throw parquet_exception::corrupted_file(seastar::format("BIT_PACKED length exceeds int ({}B)", byte_len));
         }
-        if (static_cast<size_t>(byte_len) > buffer.size()) {
-            throw parquet_exception::corrupted_file("Unexpected end of page");
+        if (byte_len > buffer.size()) {
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "End of page while reading levels (needed {}B, got {}B)", byte_len, buffer.size()));
         }
         _decoder = BitReader{buffer.data(), static_cast<int>(byte_len)};
         return byte_len;
     } else {
-        throw parquet_exception::nyi("Unknown level encoding");
+        throw parquet_exception::not_implemented(seastar::format("Unknown level encoding ({})", encoding));
     }
 }
 
-void level_decoder::reset_v2(std::basic_string_view<uint8_t> encoded_levels, int num_values) {
-    assert(num_values >= 0);
+void level_decoder::reset_v2(std::basic_string_view<uint8_t> encoded_levels, uint32_t num_values) {
     _num_values = num_values;
     _values_read = 0;
-    _decoder = RleDecoder{encoded_levels.data(), static_cast<int>(encoded_levels.size()), _bit_width};
+    if (encoded_levels.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Levels length exceeds int ({}B)", encoded_levels.size()));
+    }
+    _decoder = RleDecoder{
+        encoded_levels.data(),
+        static_cast<int>(encoded_levels.size()),
+        static_cast<int>(_bit_width)};
 }
 
 template <typename T>
 void plain_decoder_trivial<T>::reset(std::basic_string_view<uint8_t> data) {
-    _buffer = std::move(data);
+    _buffer = data;
 }
 
 void plain_decoder_boolean::reset(std::basic_string_view<uint8_t> data) {
@@ -261,13 +297,15 @@ size_t plain_decoder_byte_array::read_batch(size_t n, seastar::temporary_buffer<
             return i;
         }
         if (_buffer.size() < 4) {
-            throw parquet_exception::corrupted_file("Could not read BYTE_ARRAY length");
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "End of page while reading BYTE_ARRAY length (needed {}B, got {}B)", 4, _buffer.size()));
         }
         uint32_t len;
         std::memcpy(&len, _buffer.get(), 4);
         _buffer.trim_front(4);
         if (len > _buffer.size()) {
-            throw parquet_exception::corrupted_file("Page ended while reading BYTE_ARRAY");
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "End of page while reading BYTE_ARRAY (needed {}B, got {}B)", len, _buffer.size()));
         }
         out[i] = _buffer.share(0, len);
         _buffer.trim_front(len);
@@ -281,7 +319,9 @@ size_t plain_decoder_fixed_len_byte_array::read_batch(size_t n, seastar::tempora
             return i;
         }
         if (_fixed_len > _buffer.size()) {
-            throw parquet_exception::corrupted_file("Page ended while reading FIXED_LEN_BYTE_ARRAY");
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "End of page while reading FIXED_LEN_BYTE_ARRAY (needed {}B, got {}B)",
+                    _fixed_len, _buffer.size()));
         }
         out[i] = _buffer.share(0, _fixed_len);
         _buffer.trim_front(_fixed_len);
@@ -296,21 +336,23 @@ void dict_decoder<T>::reset(std::basic_string_view<uint8_t> data) {
     }
     int bit_width = data.data()[0];
     if (bit_width < 0 || bit_width > 32) {
-        throw parquet_exception::corrupted_file("Illegal dictionary-encoded page bit width");
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Illegal dictionary index bit width (should be 0 <= bit width <= 32, got {})", bit_width));
     }
     _rle_decoder.Reset(data.data() + 1, data.size() - 1, bit_width);
 }
 
 template <typename T>
 size_t dict_decoder<T>::read_batch(size_t n, T out[]) {
-    std::array<uint32_t, 100> buf;
+    std::array<uint32_t, 1000> buf;
     size_t completed = 0;
     while (completed < n) {
         size_t n_to_read = std::min(n - completed, buf.size());
         size_t n_read = _rle_decoder.GetBatch(buf.data(), n_to_read);
         for (size_t i = 0; i < n_read; ++i) {
             if (buf[i] > _dict_size) {
-                throw parquet_exception::corrupted_file("Dictionary index bigger than dictionary size");
+                throw parquet_exception::corrupted_file(seastar::format(
+                        "Dict index exceeds dict size (dict size = {}, index = {})", _dict_size, buf[i]));
             }
         }
         for (size_t i = 0; i < n_read; ++i) {
@@ -347,19 +389,19 @@ void delta_binary_packed_decoder<T>::reset(std::basic_string_view<uint8_t> data)
 template <typename T>
 void delta_binary_packed_decoder<T>::init_block() {
     int32_t block_size;
-    if (!_decoder.GetVlqInt(&block_size)) { throw parquet_exception::eof(); }
-    if (!_decoder.GetVlqInt(&_num_mini_blocks)) { throw parquet_exception::eof(); }
-    if (!_decoder.GetVlqInt(&_values_current_block)) { throw parquet_exception::eof(); }
-    if (!_decoder.GetZigZagVlqInt(&_last_value)) { throw parquet_exception::eof(); }
+    if (!_decoder.GetVlqInt(&block_size)) { throw; }
+    if (!_decoder.GetVlqInt(&_num_mini_blocks)) { throw; }
+    if (!_decoder.GetVlqInt(&_values_current_block)) { throw; }
+    if (!_decoder.GetZigZagVlqInt(&_last_value)) { throw; }
 
-    if (_delta_bit_widths.size() < static_cast<size_t>(_num_mini_blocks)) {
+    if (_delta_bit_widths.size() < static_cast<uint32_t>(_num_mini_blocks)) {
         _delta_bit_widths = buffer(_num_mini_blocks);
     }
 
-    if (!_decoder.GetZigZagVlqInt(&_min_delta)) throw parquet_exception::eof();
+    if (!_decoder.GetZigZagVlqInt(&_min_delta)) { throw; };
     for (int i = 0; i < _num_mini_blocks; ++i) {
         if (!_decoder.GetAligned<uint8_t>(1, _delta_bit_widths.data() + i)) {
-            throw parquet_exception::eof();
+            throw;
         }
     }
     _values_per_mini_block = block_size / _num_mini_blocks;
@@ -370,26 +412,30 @@ void delta_binary_packed_decoder<T>::init_block() {
 
 template <typename T>
 size_t delta_binary_packed_decoder<T>::read_batch(size_t n, T out[]) {
-    for (size_t i = 0; i < n; ++i) {
-        if (__builtin_expect(_values_current_mini_block == 0, 0)) {
-            ++_mini_block_idx;
-            if (_mini_block_idx < static_cast<size_t>(_num_mini_blocks)) {
-                _delta_bit_width = _delta_bit_widths.data()[_mini_block_idx];
-                _values_current_mini_block = _values_per_mini_block;
-            } else {
-                init_block();
-                out[i] = _last_value;
-                continue;
+    try {
+        for (size_t i = 0; i < n; ++i) {
+            if (__builtin_expect(_values_current_mini_block == 0, 0)) {
+                ++_mini_block_idx;
+                if (_mini_block_idx < static_cast<size_t>(_num_mini_blocks)) {
+                    _delta_bit_width = _delta_bit_widths.data()[_mini_block_idx];
+                    _values_current_mini_block = _values_per_mini_block;
+                } else {
+                    init_block();
+                    out[i] = _last_value;
+                    continue;
+                }
             }
-        }
 
-        // TODO: the key to this algorithm is to decode the entire miniblock at once.
-        int64_t delta;
-        if (!_decoder.GetValue(_delta_bit_width, &delta)) { throw parquet_exception::eof(); }
-        delta += _min_delta;
-        _last_value += static_cast<int32_t>(delta);
-        out[i] = _last_value;
-        --_values_current_mini_block;
+            // TODO: the key to this algorithm is to decode the entire miniblock at once.
+            int64_t delta;
+            if (!_decoder.GetValue(_delta_bit_width, &delta)) { throw; }
+            delta += _min_delta;
+            _last_value += static_cast<int32_t>(delta);
+            out[i] = _last_value;
+            --_values_current_mini_block;
+        }
+    } catch (...) {
+        throw parquet_exception::corrupted_file("Could not decode DELTA_BINARY_PACKED batch");
     }
     return n;
 }
@@ -402,16 +448,7 @@ void value_decoder<T>::reset_dict(output_type dictionary[], size_t dictionary_si
 };
 
 template<format::Type::type T>
-void value_decoder<T>::reset(
-        std::basic_string_view<uint8_t> buf,
-        format::Encoding::type encoding,
-        size_t num_values,
-        int type_width
-) {
-    if (type_width < 0) {
-        throw parquet_exception::corrupted_file("Negative type_width");
-    }
-    _remaining_values = num_values;
+void value_decoder<T>::reset(std::basic_string_view<uint8_t> buf, format::Encoding::type encoding) {
     switch (encoding) {
     case format::Encoding::PLAIN:
         if constexpr (T == format::Type::BOOLEAN) {
@@ -419,7 +456,7 @@ void value_decoder<T>::reset(
         } else if constexpr (T == format::Type::BYTE_ARRAY) {
             _decoder = plain_decoder_byte_array{};
         } else if constexpr (T == format::Type::FIXED_LEN_BYTE_ARRAY) {
-            _decoder = plain_decoder_fixed_len_byte_array{static_cast<size_t>(type_width)};
+            _decoder = plain_decoder_fixed_len_byte_array{static_cast<size_t>(*_type_length)};
         } else {
             _decoder = plain_decoder_trivial<output_type>{};
         }
@@ -427,7 +464,7 @@ void value_decoder<T>::reset(
     case format::Encoding::RLE_DICTIONARY:
     case format::Encoding::PLAIN_DICTIONARY:
         if (!_dict_set) {
-            throw parquet_exception::corrupted_file("Missing dictionary page");
+            throw parquet_exception::corrupted_file("No dictionary page found before a dictionary-encoded page");
         }
         _decoder = dict_decoder<output_type>{_dict, _dict_size};
         break;
@@ -435,7 +472,7 @@ void value_decoder<T>::reset(
         if constexpr (T == format::Type::BOOLEAN) {
             _decoder = rle_decoder_boolean{};
         } else {
-            throw parquet_exception::corrupted_file("RLE encoding is valid only for BOOLEAN");
+            throw parquet_exception::corrupted_file("RLE encoding is valid only for BOOLEAN values");
         }
         break;
     case format::Encoding::DELTA_BINARY_PACKED:
@@ -446,106 +483,119 @@ void value_decoder<T>::reset(
         }
         break;
     default:
-        throw parquet_exception::nyi("Unsupported encoding");
+        throw parquet_exception::not_implemented("Unsupported encoding");
     }
     std::visit([&buf] (auto& dec) { dec.reset(buf); }, _decoder);
 };
 
 template<format::Type::type T>
 size_t value_decoder<T>::read_batch(size_t n, output_type out[]) {
-    n = std::min(n, _remaining_values);
-    size_t n_read = std::visit([n, out] (auto& d) { return d.read_batch(n, out); }, _decoder);
-    _remaining_values -= n_read;
-    return n_read;
+    return std::visit([n, out] (auto& d) { return d.read_batch(n, out); }, _decoder);
 };
 
 template<format::Type::type T>
 void column_chunk_reader<T>::load_data_page(page p) {
+    if (!p.header->__isset.data_page_header) {
+        throw parquet_exception::corrupted_file(seastar::format(
+                "DataPageHeader not set for DATA_PAGE header: {}", *p.header));
+    }
     const format::DataPageHeader& header = p.header->data_page_header;
     if (header.num_values < 0) {
-        throw parquet_exception::corrupted_file("Negative num_values");
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Negative num_values in header: {}", header));
     }
-    std::basic_string_view<uint8_t> contents = _decompressor(p.contents, p.header->uncompressed_page_size);
+    if (p.header->uncompressed_page_size < 0) {
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Negative uncompressed_page_size in header: {}", *p.header));
+    }
+    std::basic_string_view<uint8_t> contents = _decompressor(
+            p.contents, static_cast<uint32_t>(p.header->uncompressed_page_size));
     size_t n_read = 0;
-    n_read = _rep_decoder.reset_v1(
-            contents,
-            header.repetition_level_encoding,
-            header.num_values);
+    n_read = _rep_decoder.reset_v1(contents, header.repetition_level_encoding, header.num_values);
     contents.remove_prefix(n_read);
-    n_read = _def_decoder.reset_v1(
-            contents,
-            header.definition_level_encoding,
-            header.num_values);
+    n_read = _def_decoder.reset_v1(contents, header.definition_level_encoding, header.num_values);
     contents.remove_prefix(n_read);
-    _val_decoder.reset(
-            contents,
-            header.encoding,
-            header.num_values,
-            _schema_node.info.type_length);
+    _val_decoder.reset(contents, header.encoding);
 }
 
 template<format::Type::type T>
 void column_chunk_reader<T>::load_data_page_v2(page p) {
+    if (!p.header->__isset.data_page_header_v2) {
+        throw parquet_exception::corrupted_file(seastar::format(
+                "DataPageHeaderV2 not set for DATA_PAGE_V2 header: {}", *p.header));
+    }
     const format::DataPageHeaderV2& header = p.header->data_page_header_v2;
     if (header.num_values < 0) {
-        throw parquet_exception::corrupted_file("Negative num_values");
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Negative num_values in header: {}", header));
     }
     if (header.repetition_levels_byte_length < 0 || header.definition_levels_byte_length < 0) {
-        throw parquet_exception::corrupted_file("Negative levels byte length");
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Negative levels byte length in header: {}", header));
+    }
+    if (p.header->uncompressed_page_size < 0) {
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Negative uncompressed_page_size in header: {}", *p.header));
     }
     std::basic_string_view<uint8_t> contents = p.contents;
     _rep_decoder.reset_v2(contents.substr(0, header.repetition_levels_byte_length), header.num_values);
     contents.remove_prefix(header.repetition_levels_byte_length);
     _def_decoder.reset_v2(contents.substr(0, header.definition_levels_byte_length), header.num_values);
     contents.remove_prefix(header.definition_levels_byte_length);
-    size_t n_read = header.repetition_levels_byte_length + header.definition_levels_byte_length;
-    size_t uncompressed_values_size = p.header->uncompressed_page_size - n_read;
-    std::basic_string_view<uint8_t> values = _decompressor(contents, uncompressed_values_size);
-    _val_decoder.reset(
-            values,
-            header.encoding,
-            header.num_values,
-            _schema_node.info.type_length);
+    std::basic_string_view<uint8_t> values = contents;
+    if (header.__isset.is_compressed && header.is_compressed) {
+        size_t n_read = header.repetition_levels_byte_length + header.definition_levels_byte_length;
+        size_t uncompressed_values_size = static_cast<size_t>(p.header->uncompressed_page_size) - n_read;
+        values = _decompressor(contents, uncompressed_values_size);
+    }
+    _val_decoder.reset(values, header.encoding);
 }
 
 template<format::Type::type T>
 void column_chunk_reader<T>::load_dictionary_page(page p) {
+    if (!p.header->__isset.dictionary_page_header) {
+        throw parquet_exception::corrupted_file(seastar::format(
+                "DictionaryPageHeader not set for DICTIONARY_PAGE header: {}", *p.header));
+    }
     const format::DictionaryPageHeader& header = p.header->dictionary_page_header;
     if (header.num_values < 0) {
         throw parquet_exception::corrupted_file("Negative num_values");
     }
+    if (p.header->uncompressed_page_size < 0) {
+        throw parquet_exception::corrupted_file(
+                seastar::format("Negative uncompressed_page_size in header: {}", *p.header));
+    }
     _dict = std::vector<output_type>(header.num_values);
-    auto decompressed_values = _decompressor(p.contents, p.header->uncompressed_page_size);
-    value_decoder<T> vd;
-    vd.reset(
-            decompressed_values,
-            format::Encoding::PLAIN,
-            header.num_values,
-            _schema_node.info.type_length);
+    std::basic_string_view<uint8_t> decompressed_values =
+            _decompressor(p.contents, static_cast<size_t>(p.header->uncompressed_page_size));
+    value_decoder<T> vd{_schema_node.info.type_length};
+    vd.reset(decompressed_values, format::Encoding::PLAIN);
     size_t n_read = vd.read_batch(_dict->size(), _dict->data());
     if (n_read < _dict->size()) {
-        throw parquet_exception::corrupted_file("Unexpected end of dictionary page");
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Unexpected end of dictionary page (expected {} values, got {})", _dict->size(), n_read));
     }
     _val_decoder.reset_dict(_dict->data(), _dict->size());
 }
 
 template<format::Type::type T>
 seastar::future<> column_chunk_reader<T>::load_next_page() {
+    ++_page_ordinal;
     return _source.next_page().then([this] (std::optional<page> p) {
         if (!p) {
             _eof = true;
         } else {
             switch (p->header->type) {
             case format::PageType::DATA_PAGE:
-                load_data_page(std::move(*p));
+                load_data_page(*p);
                 _initialized = true;
                 return;
             case format::PageType::DATA_PAGE_V2:
-                load_data_page_v2(std::move(*p));
+                load_data_page_v2(*p);
                 _initialized = true;
                 return;
             case format::PageType::DICTIONARY_PAGE:
-                load_dictionary_page(std::move(*p));
+                load_dictionary_page(*p);
                 return;
             default:; // Unknown page types are to be skipped
             }
@@ -556,7 +606,8 @@ seastar::future<> column_chunk_reader<T>::load_next_page() {
 seastar::future<std::unique_ptr<format::FileMetaData>> file_reader::read_file_metadata(seastar::file file) {
     return file.size().then([file] (uint64_t size) mutable {
         if (size < 8) {
-            throw parquet_exception::corrupted_file("File too small to be a parquet file");
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "File too small ({}B) to be a parquet file", size));
         }
 
         // Parquet file structure:
@@ -567,21 +618,24 @@ seastar::future<std::unique_ptr<format::FileMetaData>> file_reader::read_file_me
         // EOF
         return file.dma_read_exactly<uint8_t>(size - 8, 8).then(
         [file, size] (seastar::temporary_buffer<uint8_t> footer) mutable {
-            if (std::memcmp(footer.get() + 4, "PAR1", 4) != 0) {
+            if (std::memcmp(footer.get() + 4, "PARE", 4) == 0) {
+                throw parquet_exception::not_implemented("Parquet encryption is currently unsupported");
+            } else if (std::memcmp(footer.get() + 4, "PAR1", 4) != 0) {
                 throw parquet_exception::corrupted_file("Magic bytes not found in footer");
             }
 
             uint32_t metadata_len;
             std::memcpy(&metadata_len, footer.get(), 4);
             if (metadata_len + 8 > size) {
-                throw parquet_exception::corrupted_file("Metadata size reported by footer greater than file size");
+                throw parquet_exception::corrupted_file(seastar::format(
+                        "Metadata size reported by footer ({}B) greater than file size ({}B)",
+                        metadata_len + 8, size));
             }
 
             return file.dma_read_exactly<uint8_t>(size - 8 - metadata_len, metadata_len);
-        }).then([](seastar::temporary_buffer<uint8_t> serialized_metadata) {
-            uint32_t serialized_metadata_len = serialized_metadata.size();
+        }).then([file] (seastar::temporary_buffer<uint8_t> serialized_metadata) {
             auto deserialized_metadata = std::make_unique<format::FileMetaData>();
-            deserialize_thrift_msg(serialized_metadata.get(), &serialized_metadata_len, *deserialized_metadata);
+            deserialize_thrift_msg(serialized_metadata.get(), serialized_metadata.size(), *deserialized_metadata);
             return deserialized_metadata;
         });
     });
@@ -589,7 +643,7 @@ seastar::future<std::unique_ptr<format::FileMetaData>> file_reader::read_file_me
 
 seastar::future<file_reader> file_reader::open(std::string&& path) {
     return seastar::open_file_dma(path, seastar::open_flags::ro).then(
-    [path = std::move(path)] (seastar::file file) {
+    [path] (seastar::file file) {
         return read_file_metadata(file).then(
         [path = std::move(path), file] (std::unique_ptr<format::FileMetaData> metadata) {
             file_reader fr;
@@ -599,36 +653,34 @@ seastar::future<file_reader> file_reader::open(std::string&& path) {
             fr._schema = std::make_unique<schema::schema>(schema::file_metadata_to_schema(*fr._metadata));
             return fr;
         });
+    }).handle_exception([path = std::move(path)] (std::exception_ptr eptr) {
+        try {
+            std::rethrow_exception(eptr);
+        } catch (const std::exception& e) {
+            return seastar::make_exception_future<file_reader>(parquet_exception(seastar::format(
+                    "Could not open parquet file {} for reading: {}", path, e.what())));
+        }
     });
 }
 
 namespace {
 
-seastar::future<std::unique_ptr<format::ColumnMetaData>> read_chunk_metadata(seastar::input_stream<char>&& s) {
+seastar::future<std::unique_ptr<format::ColumnMetaData>> read_chunk_metadata(seastar::input_stream<char> &&s) {
     using return_type = seastar::future<std::unique_ptr<format::ColumnMetaData>>;
-    return seastar::do_with(peekable_stream{std::move(s)}, [] (peekable_stream& stream) -> return_type {
-        constexpr size_t max_allowed_column_metadata_size = 16 * 1024 * 1024;
-        constexpr size_t expected_size = 1;
-        return y_combinator{[&stream] (auto&& retry, size_t peek_size) -> return_type {
-            return stream.peek(peek_size).then([peek_size, retry] (std::basic_string_view<uint8_t> peek) {
-                try {
-                    uint32_t len = peek.size();
-                    format::ColumnMetaData column_metadata;
-                    deserialize_thrift_msg(peek.data(), &len, column_metadata);
-                    return seastar::make_ready_future<std::unique_ptr<format::ColumnMetaData>>(
-                            std::make_unique<format::ColumnMetaData>(std::move(column_metadata)));
-                } catch (apache::thrift::transport::TTransportException& e) {
-                    if (peek_size > max_allowed_column_metadata_size || peek_size > peek.size()) {
-                        throw parquet_exception("Maximum allowed ColumnMetaData size exceeded.\n");
-                    }
-                    return retry(peek_size * 2);
-                }
-            });
-        }}(expected_size);
+    return seastar::do_with(peekable_stream{std::move(s)}, [](peekable_stream &stream) -> return_type {
+        auto column_metadata = std::make_unique<format::ColumnMetaData>();
+        return read_thrift_from_stream(stream, *column_metadata).then(
+        [column_metadata = std::move(column_metadata)](bool read) mutable {
+            if (read) {
+                return std::move(column_metadata);
+            } else {
+                throw parquet_exception::corrupted_file("Could not deserialize ColumnMetaData: empty stream");
+            }
+        });
     });
 }
 
-}
+} // namespace
 
 /* ColumnMetaData is a structure that has to be read in order to find the beginning of a column chunk.
  * It is written directly after the chunk it describes, and its offset is saved to the FileMetaData.
@@ -640,12 +692,16 @@ seastar::future<std::unique_ptr<format::ColumnMetaData>> read_chunk_metadata(sea
  */
 template <format::Type::type T>
 seastar::future<column_chunk_reader<T>>
-file_reader::open_column_chunk_reader(int row_group, int column) const {
-    assert(static_cast<size_t>(column) < schema().leaves.size());
-    assert(static_cast<size_t>(row_group) < metadata().row_groups.size());
-    assert(schema().leaves[column]->info.type == T);
-    if (static_cast<size_t>(column) >= metadata().row_groups[row_group].columns.size()) {
-        throw parquet_exception::corrupted_file("Selected column not found not found in row group metadata");
+file_reader::open_column_chunk_reader_internal(uint32_t row_group, uint32_t column) const {
+    assert(column < schema().leaves.size());
+    assert(row_group < metadata().row_groups.size());
+    assert(schema().leaves[column]->info.type == T
+            || std::holds_alternative<schema::logical_type::UNKNOWN>(schema().leaves[column]->logical_type));
+    if (column >= metadata().row_groups[row_group].columns.size()) {
+        return seastar::make_exception_future<column_chunk_reader<T>>(
+                parquet_exception::corrupted_file(seastar::format(
+                        "Selected column metadata is missing from row group metadata: {}",
+                        metadata().row_groups[row_group])));
     }
     const format::ColumnChunk& column_chunk = metadata().row_groups[row_group].columns[column];
     const schema::primitive_node& leaf = *schema().leaves[column];
@@ -673,6 +729,20 @@ file_reader::open_column_chunk_reader(int row_group, int column) const {
         });
     });
 }
+
+template <format::Type::type T>
+seastar::future<column_chunk_reader<T>>
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const {
+    return open_column_chunk_reader_internal<T>(row_group, column).handle_exception([=] (std::exception_ptr eptr) {
+        try {
+            std::rethrow_exception(eptr);
+        } catch (const std::exception& e) {
+            return seastar::make_exception_future<column_chunk_reader<T>>(parquet_exception(seastar::format(
+                    "Could not open column chunk {} in row group {}: {}", column, row_group, e.what())));
+        }
+    });
+}
+
 
 template class column_chunk_reader<format::Type::INT32>;
 template class column_chunk_reader<format::Type::INT64>;
@@ -707,20 +777,20 @@ template class value_decoder<format::Type::BOOLEAN>;
 template class value_decoder<format::Type::BYTE_ARRAY>;
 template class value_decoder<format::Type::FIXED_LEN_BYTE_ARRAY>;
 template seastar::future<column_chunk_reader<format::Type::INT32>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 template seastar::future<column_chunk_reader<format::Type::INT64>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 template seastar::future<column_chunk_reader<format::Type::INT96>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 template seastar::future<column_chunk_reader<format::Type::FLOAT>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 template seastar::future<column_chunk_reader<format::Type::DOUBLE>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 template seastar::future<column_chunk_reader<format::Type::BOOLEAN>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 template seastar::future<column_chunk_reader<format::Type::BYTE_ARRAY>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 template seastar::future<column_chunk_reader<format::Type::FIXED_LEN_BYTE_ARRAY>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 
 } // namespace parquet

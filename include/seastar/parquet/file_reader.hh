@@ -47,7 +47,7 @@ private:
     void ensure_space(size_t n);
     seastar::future<> read_exactly(size_t n);
 public:
-    explicit peekable_stream(seastar::input_stream<char> source)
+    explicit peekable_stream(seastar::input_stream<char>&& source)
         : _source{std::move(source)} {};
 
     // Assuming there is k bytes remaining in stream, view the next unconsumed min(k, n) bytes.
@@ -67,11 +67,11 @@ class page_reader {
     static constexpr uint32_t _default_expected_header_size = 1024;
     static constexpr uint32_t _max_allowed_header_size = 16 * 1024 * 1024;
 public:
-    explicit page_reader(seastar::input_stream<char> source)
+    explicit page_reader(seastar::input_stream<char>&& source)
         : _source{std::move(source)}
         , _latest_header{std::make_unique<format::PageHeader>()} {};
     // View the next page. Returns an empty result on eof.
-    seastar::future<std::optional<page>> next_page(uint32_t expected_header_size=_default_expected_header_size);
+    seastar::future<std::optional<page>> next_page();
 };
 
 // A uniform interface to multiple compression algorithms.
@@ -89,26 +89,25 @@ public:
  */
 class level_decoder {
     std::variant<RleDecoder, BitReader> _decoder;
-    int _bit_width;
-    int _num_values;
-    int _values_read;
-    int bit_width(int max_n) {
-        assert (max_n >= 0);
-        return (max_n == 0) ? 0 : (32 - __builtin_clz(static_cast<int32_t>(max_n)));
+    uint32_t _bit_width;
+    uint32_t _num_values;
+    uint32_t _values_read;
+    uint32_t bit_width(uint32_t max_n) {
+        return (max_n == 0) ? 0 : (32 - __builtin_clz(max_n));
     }
 public:
-    explicit level_decoder(int max_level) : _bit_width(bit_width(max_level)) {}
+    explicit level_decoder(uint32_t max_level) : _bit_width(bit_width(max_level)) {}
 
     // Set a new source of levels. V1 and V2 are for data pages V1 and V2 respectively.
     // In data pages V1 the size of levels is not specified in the metadata,
     // so reset_v1 receives a view of the full page and returns the number of bytes consumed.
-    size_t reset_v1(std::basic_string_view<uint8_t> buffer, format::Encoding::type encoding, int num_values);
+    size_t reset_v1(std::basic_string_view<uint8_t> buffer, format::Encoding::type encoding, uint32_t num_values);
     // reset_v2 is passed a view of the levels only, because the size of levels is known in advance.
-    void reset_v2(std::basic_string_view<uint8_t> encoded_levels, int num_values);
+    void reset_v2(std::basic_string_view<uint8_t> encoded_levels, uint32_t num_values);
 
     // Read a batch of n levels (the last batch may be smaller than n).
     template <typename T>
-    size_t read_batch(int n, T out[]) {
+    uint32_t read_batch(uint32_t n, T out[]) {
         n = std::min(n, _num_values - _values_read);
         if (_bit_width == 0) {
             std::fill(out, out + n, 0);
@@ -291,19 +290,23 @@ public:
     using decoder_type = typename value_decoder_traits<T>::decoder_type;
 private:
     decoder_type _decoder;
-    size_t _remaining_values = 0;
+    std::optional<uint32_t> _type_length;
+    bool _dict_set = false;
     output_type* _dict = nullptr;
     size_t _dict_size = 0;
-    bool _dict_set = false;
 public:
+    value_decoder(std::optional<uint32_t>(type_length))
+        : _type_length(type_length) {
+        if constexpr (T == format::Type::FIXED_LEN_BYTE_ARRAY) {
+            if (!_type_length) {
+                throw parquet_exception::corrupted_file("type_length not set for FIXED_LEN_BYTE_ARRAY");
+            }
+        }
+    }
     // Set a new dictionary (to be used for decoding RLE_DICTIONARY) for this reader.
     void reset_dict(output_type* dictionary, size_t dictionary_size);
     // Set a new source of encoded data.
-    void reset(
-            std::basic_string_view<uint8_t> buf,
-            format::Encoding::type encoding,
-            size_t num_values,
-            int type_length);
+    void reset(std::basic_string_view<uint8_t> buf, format::Encoding::type encoding);
     // Read a batch of n values (the last batch may be smaller than n).
     size_t read_batch(size_t n, output_type out[]);
 };
@@ -324,21 +327,26 @@ private:
     std::optional<std::vector<output_type>> _dict;
     bool _initialized = false;
     bool _eof = false;
+    int64_t _page_ordinal = -1; // Only used for error reporting.
 private:
     seastar::future<> load_next_page();
     void load_dictionary_page(page p);
     void load_data_page(page p);
     void load_data_page_v2(page p);
+
+    template<typename LevelT>
+    seastar::future<size_t> read_batch_internal(size_t n, LevelT def[], LevelT rep[], output_type val[]);
 public:
     explicit column_chunk_reader(
             const schema::primitive_node& schema_node,
-            page_reader source,
+            page_reader&& source,
             format::CompressionCodec::type codec)
-        : _schema_node(schema_node)
-        , _source(std::move(source))
-        , _decompressor(codec)
-        , _rep_decoder(schema_node.rep_level)
-        , _def_decoder(schema_node.def_level) {};
+        : _schema_node{schema_node}
+        , _source{std::move(source)}
+        , _decompressor{codec}
+        , _rep_decoder{schema_node.rep_level}
+        , _def_decoder{schema_node.def_level}
+        , _val_decoder{_schema_node.info.type_length} {};
     // Read a batch of n (rep, def, value) triplets. The last batch may be smaller than n.
     // Return the number of triplets read. Note that null values are not read into the output array.
     // Example output: def == [1, 1, 0, 1, 0], rep = [0, 0, 0, 0, 0], val = ["a", "b", "d"].
@@ -349,40 +357,65 @@ public:
 template<format::Type::type T>
 template<typename LevelT>
 seastar::future<size_t>
-inline column_chunk_reader<T>::read_batch(size_t n, LevelT def[], LevelT rep[], output_type val[]) {
+column_chunk_reader<T>::read_batch_internal(size_t n, LevelT def[], LevelT rep[], output_type val[]) {
     if (_eof) {
         return seastar::make_ready_future<size_t>(0);
     }
     if (!_initialized) {
         return load_next_page().then([=] {
-            return read_batch(n, def, rep, val);
+            return read_batch_internal(n, def, rep, val);
         });
     }
     size_t def_levels_read = _def_decoder.read_batch(n, def);
     size_t rep_levels_read = _rep_decoder.read_batch(n, rep);
     if (def_levels_read != rep_levels_read) {
-        throw parquet_exception::corrupted_file(
-                "Number of definition levels does not equal the number of repetition levels");
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Number of definition levels {} does not equal the number of repetition levels {} in batch",
+                def_levels_read, rep_levels_read));
     }
     if (def_levels_read == 0) {
-        return load_next_page().then([=] {
-            return read_batch(n, def, rep, val);
-        });
+        _initialized = false;
+        return read_batch_internal(n, def, rep, val);
+    }
+    for (size_t i = 0; i < def_levels_read; ++i) {
+        if (def[i] < 0 || def[i] > static_cast<LevelT>(_schema_node.def_level)) {
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "Definition level ({}) out of range (0 to {})", def[i], _schema_node.def_level));
+        }
+        if (rep[i] < 0 || rep[i] > static_cast<LevelT>(_schema_node.rep_level)) {
+            throw parquet_exception::corrupted_file(seastar::format(
+                    "Repetition level ({}) out of range (0 to {})", rep[i], _schema_node.rep_level));
+        }
     }
     size_t values_to_read = 0;
     for (size_t i = 0; i < def_levels_read; ++i) {
-        if (def[i] < 0 || def[i] > _schema_node.def_level) {
-            throw parquet_exception::corrupted_file("Definition level out of range");
-        }
-        if (def[i] == _schema_node.def_level) {
+        if (def[i] == static_cast<LevelT>(_schema_node.def_level)) {
             ++values_to_read;
         }
     }
     size_t values_read = _val_decoder.read_batch(values_to_read, val);
     if (values_read != values_to_read) {
-        throw parquet_exception::corrupted_file("Number of values in the page doesn't match the levels");
+        throw parquet_exception::corrupted_file(seastar::format(
+                "Number of values in batch {} is less than indicated by def levels {}", values_read, values_to_read));
     }
     return seastar::make_ready_future<size_t>(def_levels_read);
+}
+
+template<format::Type::type T>
+template<typename LevelT>
+seastar::future<size_t>
+inline column_chunk_reader<T>::read_batch(size_t n, LevelT def[], LevelT rep[], output_type val[]) {
+    return seastar::futurize_apply([=] {
+        return read_batch_internal(n, def, rep, val);
+    }).handle_exception([this] (std::exception_ptr eptr) {
+        try {
+            std::rethrow_exception(eptr);
+        } catch (const std::exception& e) {
+            return seastar::make_exception_future<size_t>(parquet_exception(seastar::format(
+                    "Error while reading page number {} (in parquet column {} (path = {})): {}",
+                    _page_ordinal, _schema_node.column_index, _schema_node.path, e.what())));
+        }
+    });
 }
 
 // The entry class of this library. All other objects are spawned from the file_reader,
@@ -394,8 +427,10 @@ class file_reader {
     std::unique_ptr<schema::schema> _schema;
 private:
     file_reader() {};
-    static seastar::future<std::unique_ptr<format::FileMetaData>>
-    read_file_metadata(seastar::file file);
+    static seastar::future<std::unique_ptr<format::FileMetaData>> read_file_metadata(seastar::file file);
+    template <format::Type::type T>
+    seastar::future<column_chunk_reader<T>>
+    open_column_chunk_reader_internal(uint32_t row_group, uint32_t column) const;
 public:
     // The entry point to this library.
     static seastar::future<file_reader> open(std::string&& path);
@@ -407,8 +442,7 @@ public:
 
     // Open a column_chunk_reader. The child column_chunk_reader MUST NOT outlive the parent file_reader.
     template <format::Type::type T>
-    seastar::future<column_chunk_reader<T>>
-    open_column_chunk_reader(int row_group, int column) const;
+    seastar::future<column_chunk_reader<T>> open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 };
 
 extern template class column_chunk_reader<format::Type::INT32>;
@@ -428,20 +462,20 @@ extern template class value_decoder<format::Type::BOOLEAN>;
 extern template class value_decoder<format::Type::BYTE_ARRAY>;
 extern template class value_decoder<format::Type::FIXED_LEN_BYTE_ARRAY>;
 extern template seastar::future<column_chunk_reader<format::Type::INT32>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 extern template seastar::future<column_chunk_reader<format::Type::INT64>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 extern template seastar::future<column_chunk_reader<format::Type::INT96>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 extern template seastar::future<column_chunk_reader<format::Type::FLOAT>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 extern template seastar::future<column_chunk_reader<format::Type::DOUBLE>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 extern template seastar::future<column_chunk_reader<format::Type::BOOLEAN>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 extern template seastar::future<column_chunk_reader<format::Type::BYTE_ARRAY>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 extern template seastar::future<column_chunk_reader<format::Type::FIXED_LEN_BYTE_ARRAY>>
-file_reader::open_column_chunk_reader(int row_group, int column) const;
+file_reader::open_column_chunk_reader(uint32_t row_group, uint32_t column) const;
 
 } // namespace parquet

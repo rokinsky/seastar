@@ -5,6 +5,7 @@
 #include <boost/multiprecision/cpp_int.hpp>
 #include <ostream>
 #include <iomanip>
+#include <limits>
 
 namespace parquet::record {
 
@@ -22,10 +23,10 @@ private:
     std::vector<int16_t> _rep_levels;
     std::vector<int16_t> _def_levels;
     std::vector<output_type> _values;
-    int _levels_offset = 0;
-    int _values_offset = 0;
-    int _levels_buffered = 0;
-    int _values_buffered = 0;
+    size_t _levels_offset = 0;
+    size_t _values_offset = 0;
+    size_t _levels_buffered = 0;
+    size_t _values_buffered = 0;
 
     struct triplet {
         int16_t def_level;
@@ -35,15 +36,20 @@ private:
 public:
     explicit typed_primitive_reader(
             const schema::primitive_node& node,
-            column_chunk_reader<LogicalType::physical_type> source,
+            column_chunk_reader<LogicalType::physical_type>&& source,
             int64_t batch_size = DEFAULT_BATCH_SIZE)
         : _node{node}
         , _logical_type(std::get<LogicalType>(_node.logical_type))
         , _source{std::move(source)}
         , _rep_levels(batch_size)
         , _def_levels(batch_size)
-        , _values(batch_size)
-        {}
+        , _values(batch_size) {
+        if (_node.def_level > static_cast<uint32_t>(std::numeric_limits<int16_t>::max())
+                || _node.rep_level > static_cast<uint32_t>(std::numeric_limits<int16_t>::max())) {
+            throw parquet_exception::not_implemented(seastar::format(
+                    "Levels greater than {} are not supported", std::numeric_limits<int16_t>::max()));
+        }
+    }
 
     template <typename Consumer>
     seastar::future<> read_field(Consumer& c);
@@ -64,7 +70,7 @@ public:
 
     explicit struct_reader(
             const schema::struct_node& node,
-            std::vector<field_reader> readers)
+            std::vector<field_reader>&& readers)
         : _readers(std::move(readers))
         , _node(node) {
         assert(_readers.size() > 0);
@@ -189,7 +195,7 @@ class record_reader {
     std::vector<field_reader> _field_readers;
     explicit record_reader(
             const schema::schema& schema,
-            std::vector<field_reader> field_readers)
+            std::vector<field_reader>&& field_readers)
         : _schema(schema), _field_readers(std::move(field_readers)) {
         assert(_field_readers.size() > 0);
     }
@@ -227,11 +233,11 @@ template <typename Consumer>
 inline seastar::future<> list_reader::read_field(Consumer& c) {
     c.start_list();
     return current_levels().then([this, &c] (int def, int) {
-        if (def > _node.def_level) {
+        if (def > static_cast<int>(_node.def_level)) {
             return _reader->read_field(c).then([this, &c] {
                 return seastar::repeat([this, &c] {
                     return current_levels().then([this, &c] (int def, int rep) {
-                        if (rep > _node.rep_level) {
+                        if (rep > static_cast<int>(_node.rep_level)) {
                             c.separate_list_values();
                             return _reader->read_field(c).then([] {
                                 return seastar::stop_iteration::no;
@@ -253,7 +259,7 @@ inline seastar::future<> list_reader::read_field(Consumer& c) {
 template <typename Consumer>
 inline seastar::future<> optional_reader::read_field(Consumer& c) {
     return current_levels().then([this, &c] (int def, int) {
-        if (def > _node.def_level) {
+        if (def > static_cast<int>(_node.def_level)) {
             return _reader->read_field(c);
         } else {
             c.append_null();
@@ -266,11 +272,11 @@ template <typename Consumer>
 inline seastar::future<> map_reader::read_field(Consumer& c) {
     c.start_map();
     return current_levels().then([this, &c] (int def, int) {
-        if (def > _node.def_level) {
+        if (def > static_cast<int>(_node.def_level)) {
             return read_pair<Consumer>(c).then([this, &c] {
                 return seastar::repeat([this, &c] {
                     return current_levels().then([this, &c] (int def, int rep) {
-                        if (rep > _node.rep_level) {
+                        if (rep > static_cast<int>(_node.rep_level)) {
                             c.separate_map_values();
                             return read_pair<Consumer>(c).then([this, &c] {
                                 return seastar::stop_iteration::no;
@@ -379,7 +385,7 @@ inline seastar::future<> typed_primitive_reader<L>::refill_when_empty() {
             _levels_buffered = levels_read;
             _values_buffered = 0;
             for (size_t i = 0; i < levels_read; ++i) {
-                if (_def_levels[i] == _node.def_level) {
+                if (_def_levels[i] == static_cast<int>(_node.def_level)) {
                     ++_values_buffered;
                 }
             }
@@ -399,15 +405,15 @@ inline seastar::future<std::optional<typename typed_primitive_reader<L>::triplet
         int16_t def_level = current_def_level();
         int16_t rep_level = current_rep_level();
         _levels_offset++;
-        bool is_null = def_level < _node.def_level;
+        bool is_null = def_level < static_cast<int>(_node.def_level);
         if (is_null) {
-            return std::optional<triplet>{triplet{def_level, rep_level, std::nullopt}};
+            return std::optional<triplet>{{def_level, rep_level, std::nullopt}};
         }
         if (_values_offset == _values_buffered) {
             throw parquet_exception("Value was non-null, but has not been buffered");
         }
         output_type& val = _values[_values_offset++];
-        return std::optional<triplet>{triplet{def_level, rep_level, std::move(val)}};
+        return std::optional<triplet>{{def_level, rep_level, std::move(val)}};
     });
 }
 
