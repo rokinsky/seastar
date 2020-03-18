@@ -123,7 +123,7 @@ class metadata_log {
     inode_t _root_dir;
     shard_inode_allocator _inode_allocator;
 
-    // Locks used to ensure metadata consistency while allowing concurrent usage.
+    // Locks are used to ensure metadata consistency while allowing concurrent usage.
     //
     // Whenever one wants to create or delete inode or directory entry, one has to acquire appropriate unique lock for
     // the inode / dir entry that will appear / disappear and only after locking that operation should take place.
