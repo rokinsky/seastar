@@ -31,9 +31,15 @@
 
 namespace seastar::fs {
 
+enum class remove_semantics {
+    FILE_ONLY,
+    DIR_ONLY,
+    FILE_OR_DIR,
+};
+
 class unlink_or_remove_file_operation {
     metadata_log& _metadata_log;
-    bool _remove_if_directory;
+    remove_semantics _remove_semantics;
     std::string _entry_name;
     inode_t _dir_inode;
     inode_info::directory* _dir_info;
@@ -42,8 +48,8 @@ class unlink_or_remove_file_operation {
 
     unlink_or_remove_file_operation(metadata_log& metadata_log) : _metadata_log(metadata_log) {}
 
-    future<> unlink_or_remove(std::string path, bool remove_if_directory) {
-        _remove_if_directory = remove_if_directory;
+    future<> unlink_or_remove(std::string path, remove_semantics remove_semantics) {
+        _remove_semantics = remove_semantics;
         while (not path.empty() and path.back() == '/') {
             path.pop_back();
         }
@@ -72,11 +78,25 @@ class unlink_or_remove_file_operation {
 
             _entry_inode_info = &_metadata_log._inodes.at(_entry_inode);
             if (_entry_inode_info->is_directory()) {
-                if (not _remove_if_directory) {
+                switch (_remove_semantics) {
+                case remove_semantics::FILE_ONLY:
                     return make_exception_future(is_directory_exception());
+                case remove_semantics::DIR_ONLY:
+                case remove_semantics::FILE_OR_DIR:
+                    break;
                 }
+
                 if (not _entry_inode_info->get_directory().entries.empty()) {
                     return make_exception_future(directory_not_empty_exception());
+                }
+            } else {
+                assert(_entry_inode_info->is_file());
+                switch (_remove_semantics) {
+                case remove_semantics::DIR_ONLY:
+                    return make_exception_future(is_directory_exception());
+                case remove_semantics::FILE_ONLY:
+                case remove_semantics::FILE_OR_DIR:
+                    break;
                 }
             }
 
@@ -166,9 +186,9 @@ class unlink_or_remove_file_operation {
     }
 
 public:
-    static future<> perform(metadata_log& metadata_log, std::string path, bool remove_if_directory) {
-        return do_with(unlink_or_remove_file_operation(metadata_log), [path = std::move(path), remove_if_directory](auto& obj) {
-            return obj.unlink_or_remove(std::move(path), remove_if_directory);
+    static future<> perform(metadata_log& metadata_log, std::string path, remove_semantics remove_semantics) {
+        return do_with(unlink_or_remove_file_operation(metadata_log), [path = std::move(path), remove_semantics](auto& obj) {
+            return obj.unlink_or_remove(std::move(path), remove_semantics);
         });
     }
 };
