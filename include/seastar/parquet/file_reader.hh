@@ -22,7 +22,7 @@ class buffer {
     std::unique_ptr<uint8_t[]> _data;
     static constexpr inline uint64_t next_power_of_2(uint64_t n) {
         if (n < 2) return n;
-        return 1ull << (64 - __builtin_clzll(n - 1));
+        return 1ull << seastar::log2ceil(n);
     }
 public:
     explicit buffer(size_t size = 0)
@@ -93,7 +93,7 @@ class level_decoder {
     uint32_t _num_values;
     uint32_t _values_read;
     uint32_t bit_width(uint32_t max_n) {
-        return (max_n == 0) ? 0 : (32 - __builtin_clz(max_n));
+        return (max_n == 0) ? 0 : seastar::log2floor(max_n) + 1;
     }
 public:
     explicit level_decoder(uint32_t max_level) : _bit_width(bit_width(max_level)) {}
