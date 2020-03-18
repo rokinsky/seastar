@@ -7,6 +7,10 @@
 
 namespace parquet::schema {
 
+/* Refer to the parquet documentation for the description of supported logical data types:
+ * https://github.com/apache/parquet-format/blob/master/LogicalTypes.md
+ * doc/parquet/LogicalTypes.md
+ */
 namespace logical_type {
 struct BOOLEAN { static constexpr format::Type::type physical_type = format::Type::BOOLEAN; };
 struct INT32 { static constexpr format::Type::type physical_type = format::Type::INT32; };

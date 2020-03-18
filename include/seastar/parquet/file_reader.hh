@@ -129,8 +129,9 @@ public:
     }
 };
 
-/* Refer to the parquet documentation for the description of various encodings:
+/* Refer to the parquet documentation for the description of supported encodings:
  * https://github.com/apache/parquet-format/blob/master/Encodings.md
+ * doc/parquet/Encodings.md
  */
 
 template <typename T>

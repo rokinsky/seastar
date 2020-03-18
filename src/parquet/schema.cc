@@ -86,6 +86,10 @@ void compute_path(raw_node& raw_schema) {
     }
 }
 
+/* Refer to the parquet documentation for the interpretation rules of the logical type annotations:
+ * https://github.com/apache/parquet-format/blob/master/LogicalTypes.md
+ * doc/parquet/LogicalTypes.md
+ */
 logical_type::logical_type determine_logical_type(const format::SchemaElement& x) {
     static auto verify = [] (bool condition, const std::string& error) {
         if (!condition) { throw parquet_exception::corrupted_file(error); }
