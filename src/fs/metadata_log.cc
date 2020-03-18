@@ -396,11 +396,15 @@ future<> metadata_log::link_file(std::string source, std::string destination) {
 }
 
 future<> metadata_log::unlink_file(std::string path) {
-    return unlink_or_remove_file_operation::perform(*this, std::move(path), false);
+    return unlink_or_remove_file_operation::perform(*this, std::move(path), remove_semantics::FILE_ONLY);
+}
+
+future<> metadata_log::remove_directory(std::string path) {
+    return unlink_or_remove_file_operation::perform(*this, std::move(path), remove_semantics::FILE_OR_DIR);
 }
 
 future<> metadata_log::remove(std::string path) {
-    return unlink_or_remove_file_operation::perform(*this, std::move(path), true);
+    return unlink_or_remove_file_operation::perform(*this, std::move(path), remove_semantics::DIR_ONLY);
 }
 
 future<inode_t> metadata_log::open_file(std::string path) {

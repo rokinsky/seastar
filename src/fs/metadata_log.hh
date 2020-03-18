@@ -388,7 +388,7 @@ public:
 
     future<> unlink_file(std::string path);
 
-    // TODO: add future<> remove_directory(std::string path);
+    future<> remove_directory(std::string path);
 
     // Removes empty directory or unlinks file
     future<> remove(std::string path);
