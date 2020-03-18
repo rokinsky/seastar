@@ -194,6 +194,9 @@ decompressor::operator()(std::basic_string_view<uint8_t> input, size_t decompres
         case format::CompressionCodec::SNAPPY:
             compression::snappy_decompress(input.data(), input.size(), _buffer.data(), decompressed_len);
             break;
+        case format::CompressionCodec::GZIP:
+            compression::zlib_decompress(input.data(), input.size(), _buffer.data(), decompressed_len);
+            break;
         // TODO GZIP, LZO, BROTLI, LZ4, ZSTD
         default:
             throw parquet_exception::not_implemented(seastar::format("Unsupported compression ({})", _codec));
