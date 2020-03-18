@@ -116,11 +116,11 @@ public:
             print_hex_byte(v[i]);
         }
     }
-    void append_value(schema::logical_type::INT8, int32_t v) { _out << static_cast<int8_t>(v); }
+    void append_value(schema::logical_type::INT8, int32_t v) { _out << static_cast<int16_t>(static_cast<int8_t>(v)); }
     void append_value(schema::logical_type::INT16, int32_t v) { _out << static_cast<int16_t>(v); }
     void append_value(schema::logical_type::INT32, int32_t v) { _out << static_cast<int32_t>(v); }
     void append_value(schema::logical_type::INT64, int64_t v) { _out << static_cast<int64_t>(v); }
-    void append_value(schema::logical_type::UINT8, int32_t v) { _out << static_cast<uint8_t>(v); }
+    void append_value(schema::logical_type::UINT8, int32_t v) { _out << static_cast<uint16_t>(static_cast<uint8_t>(v)); }
     void append_value(schema::logical_type::UINT16, int32_t v) { _out << static_cast<uint16_t>(v); }
     void append_value(schema::logical_type::UINT32, int32_t v) { _out << static_cast<uint32_t>(v); }
     void append_value(schema::logical_type::UINT64, int64_t v) { _out << static_cast<uint64_t>(v); }
