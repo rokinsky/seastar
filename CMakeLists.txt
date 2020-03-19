@@ -655,6 +655,7 @@ if (Seastar_EXPERIMENTAL_FS)
     PRIVATE
     # SeastarFS source files
     include/seastar/fs/block_device.hh
+    include/seastar/fs/exceptions.hh
     include/seastar/fs/file.hh
     include/seastar/fs/overloaded.hh
     include/seastar/fs/temporary_file.hh
