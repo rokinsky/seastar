@@ -190,7 +190,7 @@ private:
     // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them not overlap
     void cut_out_data_range(inode_info::file& file, file_range range);
 
-    void memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata);
+    inode_info& memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata);
     void memory_only_update_metadata(inode_t inode, unix_metadata metadata);
     void memory_only_delete_inode(inode_t inode);
     void memory_only_small_write(inode_t inode, disk_offset_t offset, temporary_buffer<uint8_t> data);
@@ -315,9 +315,11 @@ public:
     // Returns size of the file or throws exception iff @p inode is invalid
     file_offset_t file_size(inode_t inode) const;
 
-    future<inode_t> create_file(std::string path, file_permissions perms);
+    future<> create_file(std::string path, file_permissions perms);
 
-    // TODO: add future<inode_t> create_unlinked_file(file_permissions perms);
+    future<inode_t> create_and_open_file(std::string path, file_permissions perms);
+
+    // TODO: add future<inode_t> create_and_open_unlinked_file(file_permissions perms);
 
     future<> create_directory(std::string path, file_permissions perms);
 

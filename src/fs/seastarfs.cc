@@ -73,7 +73,7 @@ future<file> filesystem::open_file_dma(sstring name, open_flags flags) {
 }
 
 future<inode_t> filesystem::create_file(sstring name) {
-    return _metadata_log->create_file(std::move(name), file_permissions::default_file_permissions);
+    return _metadata_log->create_and_open_file(std::move(name), file_permissions::default_file_permissions);
 }
 
 future<inode_t> filesystem::prepare_file(sstring name, open_flags flags) {

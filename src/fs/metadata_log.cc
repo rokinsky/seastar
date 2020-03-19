@@ -108,9 +108,9 @@ void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) 
     });
 }
 
-void metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata) {
+inode_info& metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata) {
     assert(_inodes.count(inode) == 0);
-    _inodes.emplace(inode, inode_info {
+    return _inodes.emplace(inode, inode_info {
         0,
         0,
         metadata,
@@ -121,7 +121,7 @@ void metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, un
 
             return inode_info::file {};
         }()
-    });
+    }).first->second;
 }
 
 void metadata_log::memory_only_update_metadata(inode_t inode, unix_metadata metadata) {
@@ -377,12 +377,16 @@ file_offset_t metadata_log::file_size(inode_t inode) const {
     }, it->second.contents);
 }
 
-future<inode_t> metadata_log::create_file(std::string path, file_permissions perms) {
-    return create_file_operation::perform(*this, std::move(path), std::move(perms), false);
+future<> metadata_log::create_file(std::string path, file_permissions perms) {
+    return create_file_operation::perform(*this, std::move(path), std::move(perms), create_semantics::CREATE_FILE).discard_result();
+}
+
+future<inode_t> metadata_log::create_and_open_file(std::string path, file_permissions perms) {
+    return create_file_operation::perform(*this, std::move(path), std::move(perms), create_semantics::CREATE_AND_OPEN_FILE);
 }
 
 future<> metadata_log::create_directory(std::string path, file_permissions perms) {
-    return create_file_operation::perform(*this, std::move(path), std::move(perms), true).discard_result();
+    return create_file_operation::perform(*this, std::move(path), std::move(perms), create_semantics::CREATE_DIR).discard_result();
 }
 
 future<> metadata_log::link_file(inode_t inode, std::string path) {
