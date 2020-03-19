@@ -164,8 +164,8 @@ public:
     static future<inode_t> perform(metadata_log& metadata_log, std::string path, file_permissions perms,
             create_semantics create_semantics) {
         return do_with(create_file_operation(metadata_log),
-                [path = std::move(path), perms = std::move(perms), create_semantics](auto& cfo) {
-            return cfo.create_file(std::move(path), std::move(perms), create_semantics);
+                [path = std::move(path), perms = std::move(perms), create_semantics](auto& obj) {
+            return obj.create_file(std::move(path), std::move(perms), create_semantics);
         });
     }
 };
