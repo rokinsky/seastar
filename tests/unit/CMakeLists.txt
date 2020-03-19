@@ -452,4 +452,6 @@ seastar_add_test (weak_ptr
 if (Seastar_EXPERIMENTAL_PARQUET)
   seastar_add_test (parquet
     SOURCES parquet_test.cc)
+  seastar_add_test (parquet2
+    SOURCES parquet_test2.cc)
 endif()
