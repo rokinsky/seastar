@@ -137,7 +137,7 @@ class create_file_operation {
 
         switch (_metadata_log.append_ondisk_entry(ondisk_entry, _entry_name.data())) {
         case metadata_log::append_result::TOO_BIG:
-            assert(false and "ondisk entry cannot be too big");
+            return make_exception_future<inode_t>(cluster_size_too_small_to_perform_operation_exception());
         case metadata_log::append_result::NO_SPACE:
             return make_exception_future<inode_t>(no_more_space_exception());
         case metadata_log::append_result::APPENDED:

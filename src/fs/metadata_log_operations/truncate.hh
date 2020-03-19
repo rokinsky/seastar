@@ -43,15 +43,15 @@ class truncate_operation {
     future<> truncate(file_offset_t size) {
         auto inode_it = _metadata_log._inodes.find(_inode);
         if (inode_it == _metadata_log._inodes.end()) {
-            return make_exception_future<>(invalid_inode_exception());
+            return make_exception_future(invalid_inode_exception());
         }
         if (inode_it->second.is_directory()) {
-            return make_exception_future<>(is_directory_exception());
+            return make_exception_future(is_directory_exception());
         }
 
         return _metadata_log._locks.with_lock(metadata_log::locks::shared {_inode}, [this, size] {
             if (not _metadata_log.inode_exists(_inode)) {
-                return make_exception_future<>(operation_became_invalid_exception());
+                return make_exception_future(operation_became_invalid_exception());
             }
             return do_truncate(size);
         });
@@ -68,13 +68,13 @@ class truncate_operation {
 
         switch (_metadata_log.append_ondisk_entry(ondisk_entry)) {
         case metadata_log::append_result::TOO_BIG:
-            assert(false and "ondisk entry cannot be too big");
+            return make_exception_future(cluster_size_too_small_to_perform_operation_exception());
         case metadata_log::append_result::NO_SPACE:
-            return make_exception_future<>(no_more_space_exception());
+            return make_exception_future(no_more_space_exception());
         case metadata_log::append_result::APPENDED:
             _metadata_log.memory_only_truncate(_inode, size);
             _metadata_log.memory_only_update_mtime(_inode, mtime_ns);
-            return make_ready_future<>();
+            return make_ready_future();
         }
         __builtin_unreachable();
     }
