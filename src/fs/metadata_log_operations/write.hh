@@ -129,12 +129,12 @@ private:
     }
 
     future<size_t> do_small_write(const uint8_t* buffer, size_t expected_write_len, file_offset_t file_offset) {
-        auto mtime_ns = get_current_time_ns();
+        auto curr_time_ns = get_current_time_ns();
         ondisk_small_write_header ondisk_entry {
             _inode,
             file_offset,
             static_cast<decltype(ondisk_small_write_header::length)>(expected_write_len),
-            mtime_ns
+            curr_time_ns
         };
 
         switch (_metadata_log.append_ondisk_entry(ondisk_entry, buffer)) {
@@ -145,7 +145,7 @@ private:
         case metadata_log::append_result::APPENDED:
             temporary_buffer<uint8_t> tmp_buffer(buffer, expected_write_len);
             _metadata_log.memory_only_small_write(_inode, file_offset, std::move(tmp_buffer));
-            _metadata_log.memory_only_update_mtime(_inode, mtime_ns);
+            _metadata_log.memory_only_update_mtime(_inode, curr_time_ns);
             return make_ready_future<size_t>(expected_write_len);
         }
         __builtin_unreachable();
@@ -231,13 +231,13 @@ private:
             // On partial write return aligned write length
             write_len = round_down_to_multiple_of_power_of_2(write_len, _metadata_log._alignment);
 
-            auto mtime_ns = get_current_time_ns();
+            auto curr_time_ns = get_current_time_ns();
             ondisk_medium_write ondisk_entry {
                 _inode,
                 file_offset,
                 device_offset,
                 static_cast<decltype(ondisk_medium_write::length)>(write_len),
-                mtime_ns
+                curr_time_ns
             };
 
             switch (_metadata_log.append_ondisk_entry(ondisk_entry)) {
@@ -247,7 +247,7 @@ private:
                 return make_exception_future<size_t>(no_more_space_exception());
             case metadata_log::append_result::APPENDED:
                 _metadata_log.memory_only_disk_write(_inode, file_offset, device_offset, write_len);
-                _metadata_log.memory_only_update_mtime(_inode, mtime_ns);
+                _metadata_log.memory_only_update_mtime(_inode, curr_time_ns);
                 return make_ready_future<size_t>(write_len);
             }
             __builtin_unreachable();
@@ -273,16 +273,16 @@ private:
 
             metadata_log::append_result append_result;
             if (update_mtime) {
-                auto mtime_ns = get_current_time_ns();
+                auto curr_time_ns = get_current_time_ns();
                 ondisk_large_write ondisk_entry {
                     _inode,
                     file_offset,
                     cluster_id,
-                    mtime_ns
+                    curr_time_ns
                 };
                 append_result = _metadata_log.append_ondisk_entry(ondisk_entry);
                 if (append_result == metadata_log::append_result::APPENDED) {
-                    _metadata_log.memory_only_update_mtime(_inode, mtime_ns);
+                    _metadata_log.memory_only_update_mtime(_inode, curr_time_ns);
                 }
             } else {
                 ondisk_large_write_without_mtime ondisk_entry {

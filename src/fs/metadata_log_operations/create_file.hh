@@ -102,13 +102,14 @@ class create_file_operation {
         entry_name_length = _entry_name.size();
 
         using namespace std::chrono;
-        uint64_t now_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+        uint64_t curr_time_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
         unix_metadata unx_mtdt = {
             _perms,
             0, // TODO: Eventually, we'll want a user to be able to pass his credentials when bootstrapping the
             0, //       file system -- that will allow us to authorize users on startup (e.g. via LDAP or whatnot).
-            now_ns,
-            now_ns
+            curr_time_ns,
+            curr_time_ns,
+            curr_time_ns
         };
 
         bool creating_dir = [this] {

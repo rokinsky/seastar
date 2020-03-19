@@ -32,6 +32,7 @@ struct unix_metadata {
     file_permissions perms;
     uid_t uid;
     gid_t gid;
+    uint64_t btime_ns;
     uint64_t mtime_ns;
     uint64_t ctime_ns;
 };

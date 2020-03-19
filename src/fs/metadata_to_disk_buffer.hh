@@ -181,10 +181,6 @@ public:
         return append_simple(TRUNCATE, truncate);
     }
 
-    [[nodiscard]] virtual append_result append(const ondisk_mtime_update& mtime_update) noexcept {
-        return append_simple(MTIME_UPDATE, mtime_update);
-    }
-
     [[nodiscard]] virtual append_result append(const ondisk_small_write_header& small_write, const void* data) noexcept {
         ondisk_type type = SMALL_WRITE;
         if (not fits_for_append(ondisk_entry_size(small_write))) {

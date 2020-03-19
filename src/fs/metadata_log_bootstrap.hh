@@ -258,8 +258,6 @@ class metadata_log_bootstrap {
                     return bootstrap_large_write_without_mtime();
                 case TRUNCATE:
                     return bootstrap_truncate();
-                case MTIME_UPDATE:
-                    return bootstrap_mtime_update();
                 case ADD_DIR_ENTRY:
                     return bootstrap_add_dir_entry();
                 case CREATE_INODE_AS_DIR_ENTRY:
@@ -358,7 +356,7 @@ class metadata_log_bootstrap {
         temporary_buffer<uint8_t>& data = *data_opt;
 
         _metadata_log.memory_only_small_write(entry.inode, entry.offset, std::move(data));
-        _metadata_log.memory_only_update_mtime(entry.inode, entry.mtime_ns);
+        _metadata_log.memory_only_update_mtime(entry.inode, entry.time_ns);
         return now();
     }
 
@@ -381,7 +379,7 @@ class metadata_log_bootstrap {
         _taken_clusters.emplace(data_cluster_id);
 
         _metadata_log.memory_only_disk_write(entry.inode, entry.offset, entry.disk_offset, entry.length);
-        _metadata_log.memory_only_update_mtime(entry.inode, entry.mtime_ns);
+        _metadata_log.memory_only_update_mtime(entry.inode, entry.time_ns);
         return now();
     }
 
@@ -404,7 +402,7 @@ class metadata_log_bootstrap {
 
         _metadata_log.memory_only_disk_write(entry.inode, entry.offset,
                 cluster_id_to_offset(entry.data_cluster, _metadata_log._cluster_size), _metadata_log._cluster_size);
-        _metadata_log.memory_only_update_mtime(entry.inode, entry.mtime_ns);
+        _metadata_log.memory_only_update_mtime(entry.inode, entry.time_ns);
         return now();
     }
 
@@ -442,17 +440,7 @@ class metadata_log_bootstrap {
         }
 
         _metadata_log.memory_only_truncate(entry.inode, entry.size);
-        _metadata_log.memory_only_update_mtime(entry.inode, entry.mtime_ns);
-        return now();
-    }
-
-    future<> bootstrap_mtime_update() {
-        ondisk_mtime_update entry;
-        if (not _curr_checkpoint.read_entry(entry) or not inode_exists(entry.inode)) {
-            return invalid_entry_exception();
-        }
-
-        _metadata_log.memory_only_update_mtime(entry.inode, entry.mtime_ns);
+        _metadata_log.memory_only_update_mtime(entry.inode, entry.time_ns);
         return now();
     }
 

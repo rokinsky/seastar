@@ -59,11 +59,11 @@ class truncate_operation {
 
     future<> do_truncate(file_offset_t size) {
         using namespace std::chrono;
-        uint64_t mtime_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+        uint64_t curr_time_ns = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
         ondisk_truncate ondisk_entry {
             _inode,
             size,
-            mtime_ns
+            curr_time_ns
         };
 
         switch (_metadata_log.append_ondisk_entry(ondisk_entry)) {
@@ -73,7 +73,7 @@ class truncate_operation {
             return make_exception_future(no_more_space_exception());
         case metadata_log::append_result::APPENDED:
             _metadata_log.memory_only_truncate(_inode, size);
-            _metadata_log.memory_only_update_mtime(_inode, mtime_ns);
+            _metadata_log.memory_only_update_mtime(_inode, curr_time_ns);
             return make_ready_future();
         }
         __builtin_unreachable();
