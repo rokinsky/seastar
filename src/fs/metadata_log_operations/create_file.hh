@@ -150,7 +150,7 @@ class create_file_operation {
             case create_semantics::CREATE_DIR:
                 break;
             case create_semantics::CREATE_AND_OPEN_FILE:
-                // We don't have to lock, as there was no context switch since the allocation of the inode
+                // We don't have to lock, as there was no context switch since the allocation of the inode number
                 ++new_inode_info.opened_files_count;
                 break;
             }

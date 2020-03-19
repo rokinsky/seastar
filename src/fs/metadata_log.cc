@@ -16,7 +16,7 @@
  * under the License.
  */
 /*
- * Copyright (C) 2019 ScyllaDB
+ * Copyright (C) 2020 ScyllaDB
  */
 
 #include "fs/cluster.hh"
@@ -26,6 +26,7 @@
 #include "fs/metadata_disk_entries.hh"
 #include "fs/metadata_log.hh"
 #include "fs/metadata_log_bootstrap.hh"
+#include "fs/metadata_log_operations/create_and_open_unlinked_file.hh"
 #include "fs/metadata_log_operations/create_file.hh"
 #include "fs/metadata_log_operations/link_file.hh"
 #include "fs/metadata_log_operations/read.hh"
@@ -383,6 +384,10 @@ future<> metadata_log::create_file(std::string path, file_permissions perms) {
 
 future<inode_t> metadata_log::create_and_open_file(std::string path, file_permissions perms) {
     return create_file_operation::perform(*this, std::move(path), std::move(perms), create_semantics::CREATE_AND_OPEN_FILE);
+}
+
+future<inode_t> metadata_log::create_and_open_unlinked_file(file_permissions perms) {
+    return create_and_open_unlinked_file_operation::perform(*this, std::move(perms));
 }
 
 future<> metadata_log::create_directory(std::string path, file_permissions perms) {
