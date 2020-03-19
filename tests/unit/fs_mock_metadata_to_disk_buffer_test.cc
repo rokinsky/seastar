@@ -96,7 +96,6 @@ SEASTAR_THREAD_TEST_CASE(actions_index_test) {
     BOOST_REQUIRE_EQUAL(mock_buf->append(ondisk_large_write_without_mtime {6, 8, 1}), APPENDED);
     mock_buf->flush_to_disk(dev).get();
     BOOST_REQUIRE_EQUAL(mock_buf->append(ondisk_truncate {64, 28, 62}), APPENDED);
-    BOOST_REQUIRE_EQUAL(mock_buf->append(ondisk_mtime_update {4, 26}), APPENDED);
     mock_buf->flush_to_disk(dev).get();
 
     auto& actions = mock_buf->actions;
@@ -111,8 +110,7 @@ SEASTAR_THREAD_TEST_CASE(actions_index_test) {
     BOOST_REQUIRE(is_append_type<ondisk_large_write_without_mtime>(actions[8]));
     BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[9]));
     BOOST_REQUIRE(is_append_type<ondisk_truncate>(actions[10]));
-    BOOST_REQUIRE(is_append_type<ondisk_mtime_update>(actions[11]));
-    BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[12]));
+    BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[11]));
 }
 
 // The folowing test checks that constructed buffers are distinct and correctly added to
@@ -302,21 +300,6 @@ SEASTAR_THREAD_TEST_CASE(truncate_test) {
 
     BOOST_REQUIRE_EQUAL(mock_buf->actions.size(), 1);
     CHECK_CALL(check_metadata_entries_equal(mock_buf->actions[0], truncate_op));
-}
-
-SEASTAR_THREAD_TEST_CASE(mtime_update_test) {
-    BOOST_TEST_MESSAGE("\nTest name: " << get_name());
-    auto mock_buf = create_metadata_buffer<mock_metadata_to_disk_buffer>();
-    auto buf = create_metadata_buffer<metadata_to_disk_buffer>();
-
-    ondisk_mtime_update mtime_update_op {4, 26};
-    BOOST_REQUIRE_EQUAL(buf->append(mtime_update_op), APPENDED);
-    BOOST_REQUIRE_EQUAL(mock_buf->append(mtime_update_op), APPENDED);
-
-    BOOST_REQUIRE_EQUAL(mock_buf->bytes_left(), buf->bytes_left());
-
-    BOOST_REQUIRE_EQUAL(mock_buf->actions.size(), 1);
-    CHECK_CALL(check_metadata_entries_equal(mock_buf->actions[0], mtime_update_op));
 }
 
 SEASTAR_THREAD_TEST_CASE(add_dir_entry_test) {

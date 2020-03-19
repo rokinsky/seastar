@@ -163,6 +163,7 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_unix_metadata& me
     os << "[" << metadata.perms << ",";
     os << metadata.uid << ",";
     os << metadata.gid << ",";
+    os << metadata.btime_ns << ",";
     os << metadata.mtime_ns << ",";
     os << metadata.ctime_ns;
     return os << "]";
@@ -195,7 +196,7 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_small_write_heade
     os << "{" << "inode=" << entry.inode;
     os << ", offset=" << entry.offset;
     os << ", length=" << entry.length;
-    // os << ", mtime_ns=" << entry.mtime_ns;
+    // os << ", time_ns=" << entry.time_ns;
     return os << "}";
 }
 
@@ -204,7 +205,7 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_medium_write& ent
     os << ", offset=" << entry.offset;
     os << ", disk_offset=" << entry.disk_offset;
     os << ", length=" << entry.length;
-    // os << ", mtime_ns=" << entry.mtime_ns;
+    // os << ", time_ns=" << entry.time_ns;
     return os << "}";
 }
 
@@ -212,7 +213,7 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_large_write& entr
     os << "{" << "inode=" << entry.inode;
     os << ", offset=" << entry.offset;
     os << ", data_cluster=" << entry.data_cluster;
-    // os << ", mtime_ns=" << entry.mtime_ns;
+    // os << ", time_ns=" << entry.time_ns;
     return os << "}";
 }
 
@@ -226,13 +227,7 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_large_write_witho
 inline std::ostream& operator<<(std::ostream& os, const ondisk_truncate& entry) {
     os << "{" << "inode=" << entry.inode;
     os << ", size=" << entry.size;
-    // os << ", mtime_ns=" << entry.mtime_ns;
-    return os << "}";
-}
-
-inline std::ostream& operator<<(std::ostream& os, const ondisk_mtime_update& entry) {
-    os << "{" << "inode=" << entry.inode;
-    // os << ", mtime_ns=" << entry.mtime_ns;
+    // os << ", time_ns=" << entry.time_ns;
     return os << "}";
 }
 
@@ -340,9 +335,6 @@ inline std::ostream& operator<<(std::ostream& os, const mock_metadata_to_disk_bu
                 [&os](const ondisk_truncate& entry) {
                     os << "truncate=" << entry;
                 },
-                [&os](const ondisk_mtime_update& entry) {
-                    os << "mtime_update=" << entry;
-                },
                 [&os](const ondisk_add_dir_entry& entry) {
                     os << "add_dir_entry=" << entry;
                 },
@@ -417,8 +409,8 @@ inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::act
     BOOST_CHECK_EQUAL(copy_value(given_entry.header.inode), copy_value(expected_entry.header.inode));
     BOOST_CHECK_EQUAL(copy_value(given_entry.header.offset), copy_value(expected_entry.header.offset));
     BOOST_CHECK_EQUAL(copy_value(given_entry.header.length), copy_value(expected_entry.header.length));
-    BOOST_CHECK_GE(copy_value(given_entry.header.mtime_ns), copy_value(expected_entry.header.mtime_ns));
-    BOOST_CHECK_LE(copy_value(given_entry.header.mtime_ns), get_current_time_ns());
+    BOOST_CHECK_GE(copy_value(given_entry.header.time_ns), copy_value(expected_entry.header.time_ns));
+    BOOST_CHECK_LE(copy_value(given_entry.header.time_ns), get_current_time_ns());
 }
 
 inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::action& given_action,
@@ -429,8 +421,8 @@ inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::act
     BOOST_CHECK_EQUAL(copy_value(given_entry.offset), copy_value(expected_entry.offset));
     BOOST_CHECK_EQUAL(copy_value(given_entry.disk_offset), copy_value(expected_entry.disk_offset));
     BOOST_CHECK_EQUAL(copy_value(given_entry.length), copy_value(expected_entry.length));
-    BOOST_CHECK_GE(copy_value(given_entry.mtime_ns), copy_value(expected_entry.mtime_ns));
-    BOOST_CHECK_LE(copy_value(given_entry.mtime_ns), get_current_time_ns());
+    BOOST_CHECK_GE(copy_value(given_entry.time_ns), copy_value(expected_entry.time_ns));
+    BOOST_CHECK_LE(copy_value(given_entry.time_ns), get_current_time_ns());
 }
 
 inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::action& given_action,
@@ -440,8 +432,8 @@ inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::act
     BOOST_CHECK_EQUAL(copy_value(given_entry.inode), copy_value(expected_entry.inode));
     BOOST_CHECK_EQUAL(copy_value(given_entry.offset), copy_value(expected_entry.offset));
     BOOST_CHECK_EQUAL(copy_value(given_entry.data_cluster), copy_value(expected_entry.data_cluster));
-    BOOST_CHECK_GE(copy_value(given_entry.mtime_ns), copy_value(expected_entry.mtime_ns));
-    BOOST_CHECK_LE(copy_value(given_entry.mtime_ns), get_current_time_ns());
+    BOOST_CHECK_GE(copy_value(given_entry.time_ns), copy_value(expected_entry.time_ns));
+    BOOST_CHECK_LE(copy_value(given_entry.time_ns), get_current_time_ns());
 }
 
 inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::action& given_action,
@@ -459,17 +451,8 @@ inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::act
     auto& given_entry = mock_metadata_to_disk_buffer::get_by_append_type<ondisk_truncate>(given_action);
     BOOST_CHECK_EQUAL(copy_value(given_entry.inode), copy_value(expected_entry.inode));
     BOOST_CHECK_EQUAL(copy_value(given_entry.size), copy_value(expected_entry.size));
-    BOOST_CHECK_GE(copy_value(given_entry.mtime_ns), copy_value(expected_entry.mtime_ns));
-    BOOST_CHECK_LE(copy_value(given_entry.mtime_ns), get_current_time_ns());
-}
-
-inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::action& given_action,
-        const ondisk_mtime_update& expected_entry) {
-    BOOST_REQUIRE(mock_metadata_to_disk_buffer::is_append_type<ondisk_mtime_update>(given_action));
-    auto& given_entry = mock_metadata_to_disk_buffer::get_by_append_type<ondisk_mtime_update>(given_action);
-    BOOST_CHECK_EQUAL(copy_value(given_entry.inode), copy_value(expected_entry.inode));
-    BOOST_CHECK_GE(copy_value(given_entry.mtime_ns), copy_value(expected_entry.mtime_ns));
-    BOOST_CHECK_LE(copy_value(given_entry.mtime_ns), get_current_time_ns());
+    BOOST_CHECK_GE(copy_value(given_entry.time_ns), copy_value(expected_entry.time_ns));
+    BOOST_CHECK_LE(copy_value(given_entry.time_ns), get_current_time_ns());
 }
 
 inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::action& given_action,

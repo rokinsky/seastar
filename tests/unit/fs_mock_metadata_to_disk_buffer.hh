@@ -88,7 +88,6 @@ public:
                     ondisk_large_write,
                     ondisk_large_write_without_mtime,
                     ondisk_truncate,
-                    ondisk_mtime_update,
                     ondisk_add_dir_entry,
                     ondisk_create_inode_as_dir_entry,
                     ondisk_delete_dir_entry,
@@ -270,14 +269,6 @@ public:
         append_result ret = mock_append(ondisk_entry_size(truncate));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_truncate {truncate}});
-        }
-        return ret;
-    }
-
-    append_result append(const ondisk_mtime_update& mtime_update) noexcept override {
-        append_result ret = mock_append(ondisk_entry_size(mtime_update));
-        if (ret == APPENDED) {
-            actions.emplace_back(action::append {ondisk_mtime_update {mtime_update}});
         }
         return ret;
     }

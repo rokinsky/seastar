@@ -31,6 +31,7 @@ struct ondisk_unix_metadata {
     uint32_t perms;
     uint32_t uid;
     uint32_t gid;
+    uint64_t btime_ns;
     uint64_t mtime_ns;
     uint64_t ctime_ns;
 } __attribute__((packed));
@@ -38,15 +39,18 @@ struct ondisk_unix_metadata {
 static_assert(sizeof(decltype(ondisk_unix_metadata::perms)) >= sizeof(decltype(unix_metadata::perms)));
 static_assert(sizeof(decltype(ondisk_unix_metadata::uid)) >= sizeof(decltype(unix_metadata::uid)));
 static_assert(sizeof(decltype(ondisk_unix_metadata::gid)) >= sizeof(decltype(unix_metadata::gid)));
+static_assert(sizeof(decltype(ondisk_unix_metadata::btime_ns)) >= sizeof(decltype(unix_metadata::btime_ns)));
 static_assert(sizeof(decltype(ondisk_unix_metadata::mtime_ns)) >= sizeof(decltype(unix_metadata::mtime_ns)));
 static_assert(sizeof(decltype(ondisk_unix_metadata::ctime_ns)) >= sizeof(decltype(unix_metadata::ctime_ns)));
 
 inline unix_metadata ondisk_metadata_to_metadata(const ondisk_unix_metadata& ondisk_metadata) noexcept {
     unix_metadata res;
-    static_assert(sizeof(ondisk_metadata) == 28, "metadata size changed: check if below assignments need update");
+    static_assert(sizeof(ondisk_metadata) == 36,
+            "metadata size changed: check if above static asserts and below assignments need update");
     res.perms = static_cast<file_permissions>(ondisk_metadata.perms);
     res.uid = ondisk_metadata.uid;
     res.gid = ondisk_metadata.gid;
+    res.btime_ns = ondisk_metadata.btime_ns;
     res.mtime_ns = ondisk_metadata.mtime_ns;
     res.ctime_ns = ondisk_metadata.ctime_ns;
     return res;
@@ -54,10 +58,11 @@ inline unix_metadata ondisk_metadata_to_metadata(const ondisk_unix_metadata& ond
 
 inline ondisk_unix_metadata metadata_to_ondisk_metadata(const unix_metadata& metadata) noexcept {
     ondisk_unix_metadata res;
-    static_assert(sizeof(res) == 28, "metadata size changed: check if below assignments need update");
+    static_assert(sizeof(res) == 36, "metadata size changed: check if below assignments need update");
     res.perms = static_cast<decltype(res.perms)>(metadata.perms);
     res.uid = metadata.uid;
     res.gid = metadata.gid;
+    res.btime_ns = metadata.btime_ns;
     res.mtime_ns = metadata.mtime_ns;
     res.ctime_ns = metadata.ctime_ns;
     return res;
@@ -75,7 +80,6 @@ enum ondisk_type : uint8_t {
     LARGE_WRITE,
     LARGE_WRITE_WITHOUT_MTIME,
     TRUNCATE,
-    MTIME_UPDATE,
     ADD_DIR_ENTRY,
     CREATE_INODE_AS_DIR_ENTRY,
     DELETE_DIR_ENTRY,
@@ -123,7 +127,7 @@ struct ondisk_small_write_header {
     inode_t inode;
     file_offset_t offset;
     uint16_t length;
-    decltype(unix_metadata::mtime_ns) mtime_ns;
+    decltype(unix_metadata::mtime_ns) time_ns;
     // After header comes data
 } __attribute__((packed));
 
@@ -132,14 +136,14 @@ struct ondisk_medium_write {
     file_offset_t offset;
     disk_offset_t disk_offset;
     uint32_t length;
-    decltype(unix_metadata::mtime_ns) mtime_ns;
+    decltype(unix_metadata::mtime_ns) time_ns;
 } __attribute__((packed));
 
 struct ondisk_large_write {
     inode_t inode;
     file_offset_t offset;
     cluster_id_t data_cluster; // length == cluster_size
-    decltype(unix_metadata::mtime_ns) mtime_ns;
+    decltype(unix_metadata::mtime_ns) time_ns;
 } __attribute__((packed));
 
 struct ondisk_large_write_without_mtime {
@@ -151,12 +155,7 @@ struct ondisk_large_write_without_mtime {
 struct ondisk_truncate {
     inode_t inode;
     file_offset_t size;
-    decltype(unix_metadata::mtime_ns) mtime_ns;
-} __attribute__((packed));
-
-struct ondisk_mtime_update {
-    inode_t inode;
-    decltype(unix_metadata::mtime_ns) mtime_ns;
+    decltype(unix_metadata::mtime_ns) time_ns;
 } __attribute__((packed));
 
 struct ondisk_add_dir_entry_header {
@@ -203,8 +202,7 @@ constexpr size_t ondisk_entry_size(const T& entry) noexcept {
             std::is_same_v<T, ondisk_medium_write> or
             std::is_same_v<T, ondisk_large_write> or
             std::is_same_v<T, ondisk_large_write_without_mtime> or
-            std::is_same_v<T, ondisk_truncate> or
-            std::is_same_v<T, ondisk_mtime_update>, "ondisk entry size not defined for given type");
+            std::is_same_v<T, ondisk_truncate>, "ondisk entry size not defined for given type");
     return sizeof(ondisk_type) + sizeof(entry);
 }
 constexpr size_t ondisk_entry_size(const ondisk_small_write_header& entry) noexcept {

@@ -178,6 +178,10 @@ void metadata_log::memory_only_update_mtime(inode_t inode, decltype(unix_metadat
     auto it = _inodes.find(inode);
     assert(it != _inodes.end());
     it->second.metadata.mtime_ns = mtime_ns;
+    // ctime should be updated when contents is modified
+    if (it->second.metadata.ctime_ns < mtime_ns) {
+        it->second.metadata.ctime_ns = mtime_ns;
+    }
 }
 
 void metadata_log::memory_only_truncate(inode_t inode, file_offset_t size) {

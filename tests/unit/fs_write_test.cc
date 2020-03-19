@@ -79,7 +79,7 @@ auto default_aligned_write(metadata_log& log, inode_t inode, size_t bytes_num) {
 SEASTAR_THREAD_TEST_CASE(ondisk_data_small_write_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 7312;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     for (auto write_len : std::vector<small_write_len_t> {
             1,
             10,
@@ -103,7 +103,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_small_write_test) {
                 inode,
                 write_offset,
                 write_len,
-                mtime_ns_start
+                time_ns_start
             },
             buff.share()
         };
@@ -116,7 +116,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_small_write_test) {
 SEASTAR_THREAD_TEST_CASE(ondisk_data_medium_write_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 7331;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     for (auto write_len : std::vector<medium_write_len_t> {
             min_medium_write_len,
             default_cluster_size - default_alignment,
@@ -147,7 +147,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_medium_write_test) {
             write_offset,
             clst_writer_ops[0].disk_offset,
             write_len,
-            mtime_ns_start
+            time_ns_start
         };
         CHECK_CALL(check_metadata_entries_equal(meta_buff->actions[1], expected_entry));
 
@@ -158,7 +158,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_medium_write_test) {
 SEASTAR_THREAD_TEST_CASE(ondisk_data_second_medium_write_without_new_data_cluster_allocation_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 1337;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     constexpr medium_write_len_t second_write_len =
             round_up_to_multiple_of_power_of_2(2 * SMALL_WRITE_THRESHOLD + 1, default_alignment);
     static_assert(get_write_type(second_write_len) == write_type::MEDIUM);
@@ -202,7 +202,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_second_medium_write_without_new_data_cluste
             write_offset,
             clst_writer_ops[1].disk_offset,
             second_write_len,
-            mtime_ns_start
+            time_ns_start
         };
         CHECK_CALL(check_metadata_entries_equal(meta_buff->actions[2], expected_entry));
 
@@ -213,7 +213,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_second_medium_write_without_new_data_cluste
 SEASTAR_THREAD_TEST_CASE(ondisk_data_second_medium_write_with_new_data_cluster_allocation_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 1337;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     constexpr medium_write_len_t second_write_len = min_medium_write_len;
     static_assert(get_write_type(second_write_len) == write_type::MEDIUM);
     for (auto first_write_len : std::vector<medium_write_len_t> {
@@ -254,7 +254,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_second_medium_write_with_new_data_cluster_a
             write_offset,
             clst_writer_ops[0].disk_offset,
             second_write_len,
-            mtime_ns_start
+            time_ns_start
         };
         CHECK_CALL(check_metadata_entries_equal(meta_buff->actions[2], expected_entry));
 
@@ -265,7 +265,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_second_medium_write_with_new_data_cluster_a
 SEASTAR_THREAD_TEST_CASE(ondisk_data_split_medium_write_with_small_write_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 1337;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     for (auto [first_write_len, second_write_len] : std::vector<std::pair<medium_write_len_t, medium_write_len_t>> {
             {
                 default_cluster_size - min_medium_write_len,
@@ -313,7 +313,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_split_medium_write_with_small_write_test) {
             write_offset,
             clst_writer_ops[1].disk_offset,
             remaining_space_in_cluster,
-            mtime_ns_start
+            time_ns_start
         };
         CHECK_CALL(check_metadata_entries_equal(meta_buff->actions[2], expected_entry1));
         ondisk_small_write expected_entry2 {
@@ -321,7 +321,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_split_medium_write_with_small_write_test) {
                 inode,
                 write_offset + remaining_space_in_cluster,
                 static_cast<small_write_len_t>(second_write_len - remaining_space_in_cluster),
-                mtime_ns_start
+                time_ns_start
             },
             buff.share(remaining_space_in_cluster, second_write_len - remaining_space_in_cluster)
         };
@@ -334,7 +334,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_split_medium_write_with_small_write_test) {
 SEASTAR_THREAD_TEST_CASE(ondisk_data_split_medium_write_with_medium_write_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 1337;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     for (auto [first_write_len, second_write_len] : std::vector<std::pair<medium_write_len_t, medium_write_len_t>> {
             {
                 default_cluster_size - min_medium_write_len,
@@ -388,7 +388,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_split_medium_write_with_medium_write_test) 
             write_offset,
             prev_clst_writer_ops[1].disk_offset,
             remaining_space_in_cluster,
-            mtime_ns_start
+            time_ns_start
         };
         CHECK_CALL(check_metadata_entries_equal(meta_buff->actions[2], expected_entry1));
         ondisk_medium_write expected_entry2 {
@@ -396,7 +396,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_split_medium_write_with_medium_write_test) 
             write_offset + remaining_space_in_cluster,
             clst_writer_ops[0].disk_offset,
             second_write_len - remaining_space_in_cluster,
-            mtime_ns_start
+            time_ns_start
         };
         CHECK_CALL(check_metadata_entries_equal(meta_buff->actions[3], expected_entry2));
 
@@ -407,7 +407,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_split_medium_write_with_medium_write_test) 
 SEASTAR_THREAD_TEST_CASE(ondisk_data_large_write_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 7331;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     constexpr uint64_t write_len = default_cluster_size * 2;
     // TODO: asserts
 
@@ -437,7 +437,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_large_write_test) {
         inode,
         write_offset,
         part1_cluster_id,
-        mtime_ns_start
+        time_ns_start
     };
     CHECK_CALL(check_metadata_entries_equal(meta_buff->actions[1], expected_entry1));
     ondisk_large_write_without_mtime expected_entry2 {
@@ -453,7 +453,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_large_write_test) {
 SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_two_small_writes_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 7331;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
 
     // medium write split into two small writes
     constexpr medium_write_len_t write_len = SMALL_WRITE_THRESHOLD + 1;
@@ -479,7 +479,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_two_small_writes
             inode,
             write_offset,
             part1_write_len,
-            mtime_ns_start
+            time_ns_start
         },
         buff.share(0, part1_write_len)
     };
@@ -489,7 +489,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_two_small_writes
             inode,
             write_offset + part1_write_len,
             part2_write_len,
-            mtime_ns_start
+            time_ns_start
         },
         buff.share(part1_write_len, part2_write_len)
     };
@@ -501,7 +501,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_two_small_writes
 SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_medium_and_small_writes_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 7331;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     for (auto write_len : std::vector<unit_size_t> {
             default_cluster_size - default_alignment,
             default_cluster_size}) {
@@ -534,7 +534,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_medium_and
                 inode,
                 write_offset,
                 part1_write_len,
-                mtime_ns_start
+                time_ns_start
             },
             buff.share(0, part1_write_len)
         };
@@ -544,7 +544,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_medium_and
             write_offset + part1_write_len,
             clst_writer_ops.back().disk_offset,
             part2_write_len,
-            mtime_ns_start
+            time_ns_start
         };
         CHECK_CALL(check_metadata_entries_equal(meta_buff->actions[2], expected_entry2));
         ondisk_small_write expected_entry3 {
@@ -552,7 +552,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_medium_and
                 inode,
                 write_offset + part1_write_len + part2_write_len,
                 part3_write_len,
-                mtime_ns_start
+                time_ns_start
             },
             buff.share(part1_write_len + part2_write_len, part3_write_len)
         };
@@ -565,7 +565,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_medium_and
 SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_large_and_small_writes_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr file_offset_t write_offset = 7331;
-    const unix_time_t mtime_ns_start = get_current_time_ns();
+    const unix_time_t time_ns_start = get_current_time_ns();
     constexpr uint64_t write_len = default_cluster_size + 2 * default_alignment;
     // TODO: asserts
 
@@ -596,7 +596,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_large_and_
             inode,
             write_offset,
             part1_write_len,
-            mtime_ns_start
+            time_ns_start
         },
         buff.share(0, part1_write_len)
     };
@@ -612,7 +612,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_large_and_
             inode,
             write_offset + part1_write_len + default_cluster_size,
             part3_write_len,
-            mtime_ns_start
+            time_ns_start
         },
         buff.share(part1_write_len + default_cluster_size, part3_write_len)
     };
