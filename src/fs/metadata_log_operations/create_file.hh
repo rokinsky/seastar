@@ -27,9 +27,15 @@
 
 namespace seastar::fs {
 
+enum class create_semantics {
+    CREATE_FILE,
+    CREATE_AND_OPEN_FILE,
+    CREATE_DIR,
+};
+
 class create_file_operation {
     metadata_log& _metadata_log;
-    bool _is_directory;
+    create_semantics _create_semantics;
     std::string _entry_name;
     file_permissions _perms;
     inode_t _dir_inode;
@@ -37,9 +43,13 @@ class create_file_operation {
 
     create_file_operation(metadata_log& metadata_log) : _metadata_log(metadata_log) {}
 
-    future<inode_t> create_file(std::string path, file_permissions perms, bool is_directory) {
-        _is_directory = is_directory;
-        if (is_directory) {
+    future<inode_t> create_file(std::string path, file_permissions perms, create_semantics create_semantics) {
+        _create_semantics = create_semantics;
+        switch (create_semantics) {
+        case create_semantics::CREATE_FILE:
+        case create_semantics::CREATE_AND_OPEN_FILE:
+            break;
+        case create_semantics::CREATE_DIR:
             while (not path.empty() and path.back() == '/') {
                 path.pop_back();
             }
@@ -101,10 +111,23 @@ class create_file_operation {
             now_ns
         };
 
+        bool creating_dir = [this] {
+            switch (_create_semantics) {
+            case create_semantics::CREATE_FILE:
+            case create_semantics::CREATE_AND_OPEN_FILE:
+                return false;
+            case create_semantics::CREATE_DIR:
+                return true;
+            }
+            __builtin_unreachable();
+        }();
+
+        inode_t new_inode = _metadata_log._inode_allocator.alloc();
+
         ondisk_entry = {
             {
-                _metadata_log._inode_allocator.alloc(),
-                _is_directory,
+                new_inode,
+                creating_dir,
                 metadata_to_ondisk_metadata(unx_mtdt)
             },
             _dir_inode,
@@ -118,19 +141,31 @@ class create_file_operation {
         case metadata_log::append_result::NO_SPACE:
             return make_exception_future<inode_t>(no_more_space_exception());
         case metadata_log::append_result::APPENDED:
-            _metadata_log.memory_only_create_inode(ondisk_entry.entry_inode.inode, _is_directory, unx_mtdt);
-            _metadata_log.memory_only_add_dir_entry(*_dir_info, ondisk_entry.entry_inode.inode, std::move(_entry_name));
-            return make_ready_future<inode_t>((inode_t)ondisk_entry.entry_inode.inode);
+            inode_info& new_inode_info = _metadata_log.memory_only_create_inode(new_inode,
+                creating_dir, unx_mtdt);
+            _metadata_log.memory_only_add_dir_entry(*_dir_info, new_inode, std::move(_entry_name));
+
+            switch (_create_semantics) {
+            case create_semantics::CREATE_FILE:
+            case create_semantics::CREATE_DIR:
+                break;
+            case create_semantics::CREATE_AND_OPEN_FILE:
+                // We don't have to lock, as there was no context switch since the allocation of the inode
+                ++new_inode_info.opened_files_count;
+                break;
+            }
+
+            return make_ready_future<inode_t>(new_inode);
         }
         __builtin_unreachable();
     }
 
 public:
     static future<inode_t> perform(metadata_log& metadata_log, std::string path, file_permissions perms,
-            bool is_directory) {
+            create_semantics create_semantics) {
         return do_with(create_file_operation(metadata_log),
-                [path = std::move(path), perms = std::move(perms), is_directory](auto& cfo) {
-            return cfo.create_file(std::move(path), std::move(perms), is_directory);
+                [path = std::move(path), perms = std::move(perms), create_semantics](auto& cfo) {
+            return cfo.create_file(std::move(path), std::move(perms), create_semantics);
         });
     }
 };
