@@ -38,6 +38,7 @@
 #include "seastar/core/shared_ptr.hh"
 #include "seastar/core/temporary_buffer.hh"
 #include "seastar/fs/exceptions.hh"
+#include "seastar/fs/stat.hh"
 
 #include <chrono>
 #include <cstddef>
@@ -310,8 +311,9 @@ public:
         });
     }
 
-    // TODO: add ? stat(inode_t inode);
-    // TODO: add ? stat(std::string path);
+    stat_data stat(inode_t inode) const;
+
+    stat_data stat(const std::string& path) const;
 
     // Returns size of the file or throws exception iff @p inode is invalid
     file_offset_t file_size(inode_t inode) const;
