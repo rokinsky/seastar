@@ -159,6 +159,7 @@ class metadata_log {
     friend class metadata_log_bootstrap;
 
     friend class close_file_operation;
+    friend class create_and_open_unlinked_file_operation;
     friend class create_file_operation;
     friend class link_file_operation;
     friend class read_operation;
@@ -319,7 +320,7 @@ public:
 
     future<inode_t> create_and_open_file(std::string path, file_permissions perms);
 
-    // TODO: add future<inode_t> create_and_open_unlinked_file(file_permissions perms);
+    future<inode_t> create_and_open_unlinked_file(file_permissions perms);
 
     future<> create_directory(std::string path, file_permissions perms);
 
