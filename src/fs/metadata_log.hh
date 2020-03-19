@@ -16,7 +16,7 @@
  * under the License.
  */
 /*
- * Copyright (C) 2019 ScyllaDB
+ * Copyright (C) 2020 ScyllaDB
  */
 
 #pragma once
@@ -37,6 +37,7 @@
 #include "seastar/core/shared_future.hh"
 #include "seastar/core/shared_ptr.hh"
 #include "seastar/core/temporary_buffer.hh"
+#include "seastar/fs/exceptions.hh"
 
 #include <chrono>
 #include <cstddef>
@@ -46,66 +47,6 @@
 #include <variant>
 
 namespace seastar::fs {
-
-struct fs_exception : public std::exception {
-    const char* what() const noexcept override = 0;
-};
-
-struct cluster_size_too_small_to_perform_operation_exception : public std::exception {
-    const char* what() const noexcept override { return "Cluster size is too small to perform operation"; }
-};
-
-struct invalid_inode_exception : public fs_exception {
-    const char* what() const noexcept override { return "Invalid inode"; }
-};
-
-struct invalid_argument_exception : public fs_exception {
-    const char* what() const noexcept override { return "Invalid argument"; }
-};
-
-struct operation_became_invalid_exception : public fs_exception {
-    const char* what() const noexcept override { return "Operation became invalid"; }
-};
-
-struct no_more_space_exception : public fs_exception {
-    const char* what() const noexcept override { return "No more space on device"; }
-};
-
-struct file_already_exists_exception : public fs_exception {
-    const char* what() const noexcept override { return "File already exists"; }
-};
-
-struct filename_too_long_exception : public fs_exception {
-    const char* what() const noexcept override { return "Filename too long"; }
-};
-
-struct is_directory_exception : public fs_exception {
-    const char* what() const noexcept override { return "Is a directory"; }
-};
-
-struct directory_not_empty_exception : public fs_exception {
-    const char* what() const noexcept override { return "Directory is not empty"; }
-};
-
-struct path_lookup_exception : public fs_exception {
-    const char* what() const noexcept override = 0;
-};
-
-struct path_is_not_absolute_exception : public path_lookup_exception {
-    const char* what() const noexcept override { return "Path is not absolute"; }
-};
-
-struct invalid_path_exception : public path_lookup_exception {
-    const char* what() const noexcept override { return "Path is invalid"; }
-};
-
-struct no_such_file_or_directory_exception : public path_lookup_exception {
-    const char* what() const noexcept override { return "No such file or directory"; }
-};
-
-struct path_component_not_directory_exception : public path_lookup_exception {
-    const char* what() const noexcept override { return "A component used as a directory is not a directory"; }
-};
 
 class metadata_log {
     block_device _device;
