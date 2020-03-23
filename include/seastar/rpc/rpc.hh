@@ -38,6 +38,7 @@
 #include <seastar/core/weak_ptr.hh>
 #include <seastar/core/scheduling.hh>
 #include <seastar/util/backtrace.hh>
+#include <seastar/util/log.hh>
 
 namespace seastar {
 
@@ -159,10 +160,25 @@ struct signature;
 
 class logger {
     std::function<void(const sstring&)> _logger;
+    std::function<void(log_level, std::string_view)> _logger_with_level;
 
     void log(const sstring& str) const {
         if (_logger) {
             _logger(str);
+        // default level for log messages is `info`
+        } else if (_logger_with_level) {
+            _logger_with_level(log_level::info, std::string_view(str.data(), str.size()));
+        }
+    }
+
+    void log(log_level level, std::string_view str) const {
+        if (_logger_with_level) {
+            _logger_with_level(level, str);
+        // If the log level is at least `info`, fall back to legacy logging without explicit level.
+        // Ignore less severe levels in order not to spam user's log with messages during transition,
+        // i.e. when the user still only defines a level-less logger.
+        } else if (level <= info) {
+            _logger(sstring(str.data(), str.size()));
         }
     }
 
@@ -171,11 +187,18 @@ public:
         _logger = std::move(l);
     }
 
+    void set(std::function<void(log_level level, std::string_view str)> l) {
+        _logger_with_level = std::move(l);
+    }
+
     void operator()(const client_info& info, id_type msg_id, const sstring& str) const;
+    void operator()(const client_info& info, id_type msg_id, log_level level, std::string_view str) const;
 
     void operator()(const client_info& info, const sstring& str) const;
+    void operator()(const client_info& info, log_level level, std::string_view str) const;
 
     void operator()(const socket_address& addr, const sstring& str) const;
+    void operator()(const socket_address& addr, log_level level, std::string_view str) const;
 };
 
 class connection {
