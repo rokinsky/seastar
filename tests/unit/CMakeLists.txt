@@ -383,6 +383,12 @@ if (Seastar_EXPERIMENTAL_FS)
   seastar_add_test (fs_path
     KIND BOOST
     SOURCES fs_path_test.cc)
+  seastar_add_test (fs_truncate
+    SOURCES
+      fs_truncate_test.cc
+      fs_mock_metadata_to_disk_buffer.hh
+      fs_mock_block_device.hh
+      fs_metadata_common.hh)
   seastar_add_test (fs_write
     SOURCES
       fs_write_test.cc
