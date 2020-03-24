@@ -43,13 +43,13 @@ public:
 
     future<> init(std::string device_path);
 
-    future<file> open_file_dma(sstring name, open_flags flags);
+    future<file> open_file_dma(std::string name, open_flags flags);
 
     future<> stop();
 
 private:
-    future<inode_t> create_file(sstring name);
-    future<inode_t> prepare_file(sstring name, open_flags flags);
+    future<inode_t> create_file(std::string name);
+    future<inode_t> prepare_file(std::string name, open_flags flags);
 };
 
 future<sharded<filesystem>> bootfs(std::string device_path);

@@ -32,7 +32,7 @@
 #include "seastar/fs/temporary_file.hh"
 #include "seastar/testing/thread_test_case.hh"
 
-#include "mock_block_device.hh"
+#include "fs_mock_block_device.hh"
 
 using namespace seastar;
 using namespace fs;

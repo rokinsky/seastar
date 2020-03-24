@@ -56,17 +56,17 @@ future<> filesystem::stop() {
     }
 }
 
-future<file> filesystem::open_file_dma(sstring name, open_flags flags) {
+future<file> filesystem::open_file_dma(std::string name, open_flags flags) {
     return prepare_file(std::move(name), flags).then([=](inode_t inode) {
         return file(make_shared<seastarfs_file_impl>(_metadata_log, inode, flags));
     });
 }
 
-future<inode_t> filesystem::create_file(sstring name) {
-    return _metadata_log->create_file(std::move(name), file_permissions::default_file_permissions);
+future<inode_t> filesystem::create_file(std::string name) {
+    return _metadata_log->create_and_open_file(std::move(name), file_permissions::default_file_permissions);
 }
 
-future<inode_t> filesystem::prepare_file(sstring name, open_flags flags) {
+future<inode_t> filesystem::prepare_file(std::string name, open_flags flags) {
     if ((flags & open_flags::create) == open_flags::create) {
         return create_file(std::move(name));
     }
