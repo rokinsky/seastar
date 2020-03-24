@@ -657,6 +657,7 @@ if (Seastar_EXPERIMENTAL_PARQUET)
     include/seastar/parquet/io.hh
     include/seastar/parquet/overloaded.hh
     include/seastar/parquet/parquet_types.h
+    include/seastar/parquet/record_reader.hh
     include/seastar/parquet/rle_encoding.hh
     include/seastar/parquet/schema.hh
     include/seastar/parquet/untyped_schema.hh
@@ -666,6 +667,7 @@ if (Seastar_EXPERIMENTAL_PARQUET)
     src/parquet/file_reader.cc
     src/parquet/io.cc
     src/parquet/parquet_types.cpp
+    src/parquet/record_reader.cc
     src/parquet/schema.cc
     src/parquet/untyped_schema.cc
   )
