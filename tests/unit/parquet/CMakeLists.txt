@@ -23,3 +23,9 @@
 seastar_add_test (rle_encoding
   KIND BOOST
   SOURCES rle_encoding_test.cc)
+
+seastar_add_test (cql_reader
+  SOURCES cql_reader_test.cc)
+
+seastar_add_test (cql_reader_alltypes
+  SOURCES cql_reader_alltypes_test.cc)
