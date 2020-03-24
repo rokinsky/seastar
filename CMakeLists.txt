@@ -651,17 +651,19 @@ if (Seastar_EXPERIMENTAL_PARQUET)
     # Parquet source files
     include/seastar/parquet/bit_stream_utils.hh
     include/seastar/parquet/bpacking.hh
-    include/seastar/parquet/exception.hh
     include/seastar/parquet/column_chunk_reader.hh
+    include/seastar/parquet/exception.hh
+    include/seastar/parquet/file_reader.hh
     include/seastar/parquet/io.hh
     include/seastar/parquet/overloaded.hh
     include/seastar/parquet/parquet_types.h
     include/seastar/parquet/rle_encoding.hh
     include/seastar/parquet/schema.hh
     include/seastar/parquet/untyped_schema.hh
+    src/parquet/column_chunk_reader.cc
     src/parquet/compression.cc
     src/parquet/compression.hh
-    src/parquet/column_chunk_reader.cc
+    src/parquet/file_reader.cc
     src/parquet/io.cc
     src/parquet/parquet_types.cpp
     src/parquet/schema.cc
