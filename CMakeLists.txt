@@ -651,9 +651,13 @@ if (Seastar_EXPERIMENTAL_PARQUET)
     # Parquet source files
     include/seastar/parquet/bit_stream_utils.hh
     include/seastar/parquet/bpacking.hh
+    include/seastar/parquet/exception.hh
+    include/seastar/parquet/overloaded.hh
     include/seastar/parquet/parquet_types.h
     include/seastar/parquet/rle_encoding.hh
+    include/seastar/parquet/untyped_schema.hh
     src/parquet/parquet_types.cpp
+    src/parquet/untyped_schema.cc
   )
 endif()
 
