@@ -66,6 +66,27 @@ uint32_t deserialize_thrift_msg(
     return serialized_len - bytes_left;
 }
 
+class thrift_serializer {
+    using thrift_buffer = apache::thrift::transport::TMemoryBuffer;
+    using thrift_protocol = apache::thrift::protocol::TProtocol;
+    std::shared_ptr<thrift_buffer> _transport;
+    std::shared_ptr<thrift_protocol> _protocol;
+public:
+    thrift_serializer(size_t starting_size = 1024)
+        : _transport{std::make_shared<thrift_buffer>(starting_size)}
+        , _protocol{apache::thrift::protocol::TCompactProtocolFactoryT<thrift_buffer>{}.getProtocol(_transport)} {}
+
+    template <typename DeserializedType>
+    std::basic_string_view<uint8_t> serialize(const DeserializedType& msg) {
+        _transport->resetBuffer();
+        msg.write(_protocol.get());
+        uint8_t* data;
+        uint32_t size;
+        _transport->getBuffer(&data, &size);
+        return {data, static_cast<size_t>(size)};
+    }
+};
+
 // Deserialize (and consume from the stream) a single thrift structure.
 // Return false if the stream is empty.
 template <typename DeserializedType>
