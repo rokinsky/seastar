@@ -265,7 +265,6 @@ metadata_log::flush_result metadata_log::schedule_flush_of_curr_cluster_and_chan
     return flush_result::DONE;
 }
 
-
 void metadata_log::schedule_attempt_to_delete_inode(inode_t inode) {
     return schedule_background_task([this, inode] {
         auto it = _inodes.find(inode);

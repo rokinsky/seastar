@@ -159,7 +159,6 @@ class metadata_log {
 
     friend class metadata_log_bootstrap;
 
-    friend class close_file_operation;
     friend class create_and_open_unlinked_file_operation;
     friend class create_file_operation;
     friend class link_file_operation;

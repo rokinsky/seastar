@@ -26,7 +26,6 @@
 #include "fs_mock_metadata_to_disk_buffer.hh"
 #include "fs_mock_block_device.hh"
 
-#include <bits/stdint-uintn.h>
 #include <seastar/core/print.hh>
 #include <seastar/core/temporary_buffer.hh>
 #include <seastar/core/units.hh>

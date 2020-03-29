@@ -561,7 +561,7 @@ class metadata_log_bootstrap {
 
     future<> bootstrap_rename_dir_entry() {
         // TODO: implement it
-        assert(false && "Not implemented");
+        assert(false and "Not implemented");
         return now();
     }
 
