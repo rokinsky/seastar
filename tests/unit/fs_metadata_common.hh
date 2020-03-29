@@ -252,14 +252,6 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode_and_
     return os << "}";
 }
 
-inline std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry_header& entry) {
-    os << "{" << "dir_inode=" << entry.dir_inode;
-    os << ", new_dir_inode=" << entry.new_dir_inode;
-    os << ", entry_old_name_length=" << entry.entry_old_name_length;
-    os << ", entry_new_name_length=" << entry.entry_new_name_length;
-    return os << "}";
-}
-
 inline std::ostream& operator<<(std::ostream& os, const ondisk_small_write& entry) {
     os << "(header=" << entry.header;
     os << ", data=" << entry.data;
@@ -287,13 +279,6 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_dir_entry&
 inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode_and_dir_entry& entry) {
     os << "(header=" << entry.header;
     os << ", entry_name=" << entry.entry_name;
-    return os << ")";
-}
-
-inline std::ostream& operator<<(std::ostream& os, const ondisk_rename_dir_entry& entry) {
-    os << "(header=" << entry.header;
-    os << ", old_name=" << entry.old_name;
-    os << ", new_name=" << entry.new_name;
     return os << ")";
 }
 
@@ -337,9 +322,6 @@ inline std::ostream& operator<<(std::ostream& os, const mock_metadata_to_disk_bu
                 },
                 [&os](const ondisk_delete_inode_and_dir_entry& entry) {
                     os << "delete_inode_and_dir_entry=" << entry;
-                },
-                [&os](const ondisk_rename_dir_entry& entry) {
-                    os << "rename_dir_entry=" << entry;
                 }
             }, append.entry);
             os << "]";
@@ -479,20 +461,6 @@ inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::act
     BOOST_CHECK_EQUAL(copy_value(given_entry.header.inode_to_delete), copy_value(expected_entry.header.inode_to_delete));
     BOOST_CHECK_EQUAL(copy_value(given_entry.header.dir_inode), copy_value(expected_entry.header.dir_inode));
     BOOST_CHECK_EQUAL(copy_value(given_entry.header.entry_name_length), copy_value(expected_entry.header.entry_name_length));
-}
-
-inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::action& given_action,
-        const ondisk_rename_dir_entry& expected_entry) {
-    BOOST_REQUIRE(mock_metadata_to_disk_buffer::is_append_type<ondisk_rename_dir_entry>(given_action));
-    auto& given_entry = mock_metadata_to_disk_buffer::get_by_append_type<ondisk_rename_dir_entry>(given_action);
-    BOOST_CHECK_EQUAL(given_entry.old_name, expected_entry.old_name);
-    BOOST_CHECK_EQUAL(given_entry.new_name, expected_entry.new_name);
-    BOOST_CHECK_EQUAL(copy_value(given_entry.header.dir_inode), copy_value(expected_entry.header.dir_inode));
-    BOOST_CHECK_EQUAL(copy_value(given_entry.header.new_dir_inode), copy_value(expected_entry.header.new_dir_inode));
-    BOOST_CHECK_EQUAL(copy_value(given_entry.header.entry_old_name_length),
-            copy_value(expected_entry.header.entry_old_name_length));
-    BOOST_CHECK_EQUAL(copy_value(given_entry.header.entry_new_name_length),
-            copy_value(expected_entry.header.entry_new_name_length));
 }
 
 } // seastar::fs

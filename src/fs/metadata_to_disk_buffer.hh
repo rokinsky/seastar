@@ -214,20 +214,6 @@ public:
         return APPENDED;
     }
 
-    [[nodiscard]] virtual append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name,
-            const void* new_name) noexcept {
-        ondisk_type type = RENAME_DIR_ENTRY;
-        if (not fits_for_append(ondisk_entry_size(rename_dir_entry))) {
-            return TOO_BIG;
-        }
-
-        append_bytes(&type, sizeof(type));
-        append_bytes(&rename_dir_entry, sizeof(rename_dir_entry));
-        append_bytes(old_name, rename_dir_entry.entry_old_name_length);
-        append_bytes(new_name, rename_dir_entry.entry_new_name_length);
-        return APPENDED;
-    }
-
     [[nodiscard]] virtual append_result append(const ondisk_delete_dir_entry_header& delete_dir_entry, const void* entry_name) noexcept {
         ondisk_type type = DELETE_DIR_ENTRY;
         if (not fits_for_append(ondisk_entry_size(delete_dir_entry))) {

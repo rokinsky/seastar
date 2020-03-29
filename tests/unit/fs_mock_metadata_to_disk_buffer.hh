@@ -57,12 +57,6 @@ struct ondisk_delete_inode_and_dir_entry {
     temporary_buffer<uint8_t> entry_name;
 };
 
-struct ondisk_rename_dir_entry {
-    ondisk_rename_dir_entry_header header;
-    temporary_buffer<uint8_t> old_name;
-    temporary_buffer<uint8_t> new_name;
-};
-
 class mock_metadata_to_disk_buffer : public metadata_to_disk_buffer {
 public:
     mock_metadata_to_disk_buffer() = default;
@@ -90,8 +84,7 @@ public:
                     ondisk_add_dir_entry,
                     ondisk_create_inode_as_dir_entry,
                     ondisk_delete_dir_entry,
-                    ondisk_delete_inode_and_dir_entry,
-                    ondisk_rename_dir_entry>;
+                    ondisk_delete_inode_and_dir_entry>;
 
             entry_data entry;
         };
@@ -299,19 +292,6 @@ public:
             actions.emplace_back(action::append {ondisk_create_inode_as_dir_entry {
                     create_inode_as_dir_entry,
                     copy_data(entry_name, create_inode_as_dir_entry.entry_name_length)
-                }});
-        }
-        return ret;
-    }
-
-    append_result append(const ondisk_rename_dir_entry_header& rename_dir_entry, const void* old_name,
-            const void* new_name) noexcept override {
-        append_result ret = mock_append(ondisk_entry_size(rename_dir_entry));
-        if (ret == APPENDED) {
-            actions.emplace_back(action::append {ondisk_rename_dir_entry {
-                    rename_dir_entry,
-                    copy_data(old_name, rename_dir_entry.entry_old_name_length),
-                    copy_data(new_name, rename_dir_entry.entry_new_name_length)
                 }});
         }
         return ret;

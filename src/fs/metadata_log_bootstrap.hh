@@ -261,8 +261,6 @@ class metadata_log_bootstrap {
                     return bootstrap_add_dir_entry();
                 case CREATE_INODE_AS_DIR_ENTRY:
                     return bootstrap_create_inode_as_dir_entry();
-                case RENAME_DIR_ENTRY:
-                    return bootstrap_rename_dir_entry();
                 case DELETE_DIR_ENTRY:
                     return bootstrap_delete_dir_entry();
                 case DELETE_INODE_AND_DIR_ENTRY:
@@ -556,12 +554,6 @@ class metadata_log_bootstrap {
         }
 
         _metadata_log.memory_only_delete_inode(entry.inode_to_delete);
-        return now();
-    }
-
-    future<> bootstrap_rename_dir_entry() {
-        // TODO: implement it
-        assert(false and "Not implemented");
         return now();
     }
 

@@ -83,7 +83,6 @@ enum ondisk_type : uint8_t {
     CREATE_INODE_AS_DIR_ENTRY,
     DELETE_DIR_ENTRY,
     DELETE_INODE_AND_DIR_ENTRY,
-    RENAME_DIR_ENTRY,
 };
 
 struct ondisk_checkpoint {
@@ -179,14 +178,6 @@ struct ondisk_delete_inode_and_dir_entry_header {
     // After header comes entry name
 } __attribute__((packed));
 
-struct ondisk_rename_dir_entry_header {
-    inode_t dir_inode;
-    inode_t new_dir_inode;
-    uint16_t entry_old_name_length;
-    uint16_t entry_new_name_length;
-    // After header come: first old_name, then new_name
-} __attribute__((packed));
-
 template<typename T>
 constexpr size_t ondisk_entry_size(const T& entry) noexcept {
     static_assert(std::is_same_v<T, ondisk_next_metadata_cluster> or
@@ -212,9 +203,6 @@ constexpr size_t ondisk_entry_size(const ondisk_delete_dir_entry_header& entry) 
 }
 constexpr size_t ondisk_entry_size(const ondisk_delete_inode_and_dir_entry_header& entry) noexcept {
     return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
-}
-constexpr size_t ondisk_entry_size(const ondisk_rename_dir_entry_header& entry) noexcept {
-    return sizeof(ondisk_type) + sizeof(entry) + entry.entry_old_name_length + entry.entry_new_name_length;
 }
 
 } // namespace seastar::fs

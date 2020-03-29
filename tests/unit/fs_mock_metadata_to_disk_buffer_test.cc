@@ -355,31 +355,3 @@ SEASTAR_THREAD_TEST_CASE(delete_dir_entry_test) {
     BOOST_REQUIRE_EQUAL(mock_buf->actions.size(), 1);
     CHECK_CALL(check_metadata_entries_equal(mock_buf->actions[0], delete_entry_op));
 }
-
-SEASTAR_THREAD_TEST_CASE(rename_dir_entry_test) {
-    BOOST_TEST_MESSAGE("\nTest name: " << get_name());
-    auto mock_buf = create_metadata_buffer<mock_metadata_to_disk_buffer>();
-    auto buf = create_metadata_buffer<metadata_to_disk_buffer>();
-
-    temporary_buffer<uint8_t> old_name_str = tmp_buff_from_string("120345");
-    temporary_buffer<uint8_t> new_name_str = tmp_buff_from_string("54161231");
-    ondisk_rename_dir_entry rename_op {
-        {
-            42,
-            24,
-            static_cast<uint16_t>(old_name_str.size()),
-            static_cast<uint16_t>(new_name_str.size())
-        },
-        old_name_str.share(),
-        new_name_str.share()
-    };
-    BOOST_REQUIRE_EQUAL(buf->append(rename_op.header, rename_op.old_name.get(),
-            rename_op.new_name.get()), APPENDED);
-    BOOST_REQUIRE_EQUAL(mock_buf->append(rename_op.header, rename_op.old_name.get(),
-            rename_op.new_name.get()), APPENDED);
-
-    BOOST_REQUIRE_EQUAL(mock_buf->bytes_left(), buf->bytes_left());
-
-    BOOST_REQUIRE_EQUAL(mock_buf->actions.size(), 1);
-    CHECK_CALL(check_metadata_entries_equal(mock_buf->actions[0], rename_op));
-}
