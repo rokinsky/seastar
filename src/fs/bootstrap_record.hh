@@ -72,7 +72,7 @@ public:
 };
 
 inline bool operator==(const bootstrap_record::shard_info& lhs, const bootstrap_record::shard_info& rhs) noexcept {
-    return lhs.metadata_cluster == rhs.metadata_cluster && lhs.available_clusters == rhs.available_clusters;
+    return lhs.metadata_cluster == rhs.metadata_cluster and lhs.available_clusters == rhs.available_clusters;
 }
 
 inline bool operator!=(const bootstrap_record::shard_info& lhs, const bootstrap_record::shard_info& rhs) noexcept {

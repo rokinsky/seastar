@@ -198,8 +198,8 @@ future<> bootstrap_record::write_to_disk(block_device& device) const {
 }
 
 bool operator==(const bootstrap_record& lhs, const bootstrap_record& rhs) noexcept {
-    return lhs.version == rhs.version && lhs.alignment == rhs.alignment &&
-            lhs.cluster_size == rhs.cluster_size && lhs.root_directory == rhs.root_directory &&
+    return lhs.version == rhs.version and lhs.alignment == rhs.alignment and
+            lhs.cluster_size == rhs.cluster_size and lhs.root_directory == rhs.root_directory and
             lhs.shards_info == rhs.shards_info;
 }
 
