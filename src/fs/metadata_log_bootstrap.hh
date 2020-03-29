@@ -41,15 +41,16 @@
 
 namespace seastar::fs {
 
+// TODO: add a comment about what it is
 class data_reader {
-    const uint8_t* _data;
-    size_t _size;
-    size_t _pos;
+    const uint8_t* _data = nullptr;
+    size_t _size = 0;
+    size_t _pos = 0;
 
 public:
-    data_reader() : _data(nullptr), _size(0), _pos(0) {}
+    data_reader() = default;
 
-    data_reader(const uint8_t* data, size_t size) : _data(data), _size(size), _pos(0) {}
+    data_reader(const uint8_t* data, size_t size) : _data(data), _size(size) {}
 
     size_t curr_pos() const noexcept { return _pos; }
 
