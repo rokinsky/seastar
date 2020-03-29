@@ -245,8 +245,6 @@ class metadata_log_bootstrap {
                     return bootstrap_next_metadata_cluster();
                 case CREATE_INODE:
                     return bootstrap_create_inode();
-                case UPDATE_METADATA:
-                    return bootstrap_update_metadata();
                 case DELETE_INODE:
                     return bootstrap_delete_inode();
                 case SMALL_WRITE:
@@ -308,16 +306,6 @@ class metadata_log_bootstrap {
 
         _metadata_log.memory_only_create_inode(entry.inode, entry.is_directory,
                 ondisk_metadata_to_metadata(entry.metadata));
-        return now();
-    }
-
-    future<> bootstrap_update_metadata() {
-        ondisk_update_metadata entry;
-        if (not _curr_checkpoint.read_entry(entry) or not inode_exists(entry.inode)) {
-            return invalid_entry_exception();
-        }
-
-        _metadata_log.memory_only_update_metadata(entry.inode, ondisk_metadata_to_metadata(entry.metadata));
         return now();
     }
 

@@ -157,10 +157,6 @@ public:
         return append_simple(CREATE_INODE, create_inode);
     }
 
-    [[nodiscard]] virtual append_result append(const ondisk_update_metadata& update_metadata) noexcept {
-        return append_simple(UPDATE_METADATA, update_metadata);
-    }
-
     [[nodiscard]] virtual append_result append(const ondisk_delete_inode& delete_inode) noexcept {
         return append_simple(DELETE_INODE, delete_inode);
     }

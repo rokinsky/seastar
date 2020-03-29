@@ -88,7 +88,6 @@ SEASTAR_THREAD_TEST_CASE(actions_index_test) {
     BOOST_REQUIRE_EQUAL(mock_buf->append(ondisk_next_metadata_cluster {1}), APPENDED);
     mock_buf->flush_to_disk(dev).get();
     BOOST_REQUIRE_EQUAL(mock_buf->append(ondisk_create_inode {4, 1, {5, 2, 6, 8, 4}}), APPENDED);
-    BOOST_REQUIRE_EQUAL(mock_buf->append(ondisk_update_metadata {4, {5, 2, 6, 8, 4}}), APPENDED);
     BOOST_REQUIRE_EQUAL(mock_buf->append(ondisk_delete_inode {1}), APPENDED);
     BOOST_REQUIRE_EQUAL(mock_buf->append(ondisk_medium_write {1, 8, 4, 6, 9}), APPENDED);
     mock_buf->flush_to_disk(dev).get();
@@ -102,15 +101,14 @@ SEASTAR_THREAD_TEST_CASE(actions_index_test) {
     BOOST_REQUIRE(is_append_type<ondisk_next_metadata_cluster>(actions[0]));
     BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[1]));
     BOOST_REQUIRE(is_append_type<ondisk_create_inode>(actions[2]));
-    BOOST_REQUIRE(is_append_type<ondisk_update_metadata>(actions[3]));
-    BOOST_REQUIRE(is_append_type<ondisk_delete_inode>(actions[4]));
-    BOOST_REQUIRE(is_append_type<ondisk_medium_write>(actions[5]));
-    BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[6]));
-    BOOST_REQUIRE(is_append_type<ondisk_large_write>(actions[7]));
-    BOOST_REQUIRE(is_append_type<ondisk_large_write_without_mtime>(actions[8]));
-    BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[9]));
-    BOOST_REQUIRE(is_append_type<ondisk_truncate>(actions[10]));
-    BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[11]));
+    BOOST_REQUIRE(is_append_type<ondisk_delete_inode>(actions[3]));
+    BOOST_REQUIRE(is_append_type<ondisk_medium_write>(actions[4]));
+    BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[5]));
+    BOOST_REQUIRE(is_append_type<ondisk_large_write>(actions[6]));
+    BOOST_REQUIRE(is_append_type<ondisk_large_write_without_mtime>(actions[7]));
+    BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[8]));
+    BOOST_REQUIRE(is_append_type<ondisk_truncate>(actions[9]));
+    BOOST_REQUIRE(is_type<flush_to_disk_action>(actions[10]));
 }
 
 // The folowing test checks that constructed buffers are distinct and correctly added to
@@ -186,21 +184,6 @@ SEASTAR_THREAD_TEST_CASE(create_inode_test) {
 
     BOOST_REQUIRE_EQUAL(mock_buf->actions.size(), 1);
     CHECK_CALL(check_metadata_entries_equal(mock_buf->actions[0], create_inode_op));
-}
-
-SEASTAR_THREAD_TEST_CASE(update_metadata_test) {
-    BOOST_TEST_MESSAGE("\nTest name: " << get_name());
-    auto mock_buf = create_metadata_buffer<mock_metadata_to_disk_buffer>();
-    auto buf = create_metadata_buffer<metadata_to_disk_buffer>();
-
-    ondisk_update_metadata update_metadata_op {42, {5, 2, 6, 8, 4}};
-    BOOST_REQUIRE_EQUAL(buf->append(update_metadata_op), APPENDED);
-    BOOST_REQUIRE_EQUAL(mock_buf->append(update_metadata_op), APPENDED);
-
-    BOOST_REQUIRE_EQUAL(mock_buf->bytes_left(), buf->bytes_left());
-
-    BOOST_REQUIRE_EQUAL(mock_buf->actions.size(), 1);
-    CHECK_CALL(check_metadata_entries_equal(mock_buf->actions[0], update_metadata_op));
 }
 
 SEASTAR_THREAD_TEST_CASE(delete_inode_test) {

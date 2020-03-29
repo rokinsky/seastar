@@ -127,12 +127,6 @@ inode_info& metadata_log::memory_only_create_inode(inode_t inode, bool is_direct
     }).first->second;
 }
 
-void metadata_log::memory_only_update_metadata(inode_t inode, unix_metadata metadata) {
-    auto it = _inodes.find(inode);
-    assert(it != _inodes.end());
-    it->second.metadata = std::move(metadata);
-}
-
 void metadata_log::memory_only_delete_inode(inode_t inode) {
     auto it = _inodes.find(inode);
     assert(it != _inodes.end());

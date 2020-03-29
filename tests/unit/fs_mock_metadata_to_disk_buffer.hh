@@ -81,7 +81,6 @@ public:
             using entry_data = std::variant<
                     ondisk_next_metadata_cluster,
                     ondisk_create_inode,
-                    ondisk_update_metadata,
                     ondisk_delete_inode,
                     ondisk_small_write,
                     ondisk_medium_write,
@@ -221,14 +220,6 @@ public:
         append_result ret = mock_append(ondisk_entry_size(create_inode));
         if (ret == APPENDED) {
             actions.emplace_back(action::append {ondisk_create_inode {create_inode}});
-        }
-        return ret;
-    }
-
-    append_result append(const ondisk_update_metadata& update_metadata) noexcept override {
-        append_result ret = mock_append(ondisk_entry_size(update_metadata));
-        if (ret == APPENDED) {
-            actions.emplace_back(action::append {ondisk_update_metadata {update_metadata}});
         }
         return ret;
     }

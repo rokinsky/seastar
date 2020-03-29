@@ -193,7 +193,6 @@ private:
     void cut_out_data_range(inode_info::file& file, file_range range);
 
     inode_info& memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata);
-    void memory_only_update_metadata(inode_t inode, unix_metadata metadata);
     void memory_only_delete_inode(inode_t inode);
     void memory_only_small_write(inode_t inode, disk_offset_t offset, temporary_buffer<uint8_t> data);
     void memory_only_disk_write(inode_t inode, file_offset_t file_offset, disk_offset_t disk_offset, size_t write_len);

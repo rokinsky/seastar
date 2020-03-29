@@ -181,12 +181,6 @@ inline std::ostream& operator<<(std::ostream& os, const ondisk_create_inode& ent
     return os << "}";
 }
 
-inline std::ostream& operator<<(std::ostream& os, const ondisk_update_metadata& entry) {
-    os << "{" << "inode=" << entry.inode;
-    // os << ", metadata=" << entry.metadata;
-    return os << "}";
-}
-
 inline std::ostream& operator<<(std::ostream& os, const ondisk_delete_inode& entry) {
     os << "{" << "inode=" << entry.inode;
     return os << "}";
@@ -314,9 +308,6 @@ inline std::ostream& operator<<(std::ostream& os, const mock_metadata_to_disk_bu
                 [&os](const ondisk_create_inode& entry) {
                     os << "create_inode=" << entry;
                 },
-                [&os](const ondisk_update_metadata& entry) {
-                    os << "update_metadata=" << entry;
-                },
                 [&os](const ondisk_delete_inode& entry) {
                     os << "delete_inode=" << entry;
                 },
@@ -383,14 +374,6 @@ inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::act
     auto& given_entry = mock_metadata_to_disk_buffer::get_by_append_type<ondisk_create_inode>(given_action);
     BOOST_CHECK_EQUAL(copy_value(given_entry.inode), copy_value(expected_entry.inode));
     BOOST_CHECK_EQUAL(copy_value(given_entry.is_directory), copy_value(expected_entry.is_directory));
-    BOOST_CHECK_EQUAL(copy_value(given_entry.metadata), copy_value(expected_entry.metadata));
-}
-
-inline void check_metadata_entries_equal(const mock_metadata_to_disk_buffer::action& given_action,
-        const ondisk_update_metadata& expected_entry) {
-    BOOST_REQUIRE(mock_metadata_to_disk_buffer::is_append_type<ondisk_update_metadata>(given_action));
-    auto& given_entry = mock_metadata_to_disk_buffer::get_by_append_type<ondisk_update_metadata>(given_action);
-    BOOST_CHECK_EQUAL(copy_value(given_entry.inode), copy_value(expected_entry.inode));
     BOOST_CHECK_EQUAL(copy_value(given_entry.metadata), copy_value(expected_entry.metadata));
 }
 

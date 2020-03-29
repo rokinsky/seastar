@@ -73,7 +73,6 @@ enum ondisk_type : uint8_t {
     CHECKPOINT,
     NEXT_METADATA_CLUSTER,
     CREATE_INODE,
-    UPDATE_METADATA,
     DELETE_INODE,
     SMALL_WRITE,
     MEDIUM_WRITE,
@@ -111,11 +110,6 @@ struct ondisk_next_metadata_cluster {
 struct ondisk_create_inode {
     inode_t inode;
     uint8_t is_directory;
-    ondisk_unix_metadata metadata;
-} __attribute__((packed));
-
-struct ondisk_update_metadata {
-    inode_t inode;
     ondisk_unix_metadata metadata;
 } __attribute__((packed));
 
@@ -197,7 +191,6 @@ template<typename T>
 constexpr size_t ondisk_entry_size(const T& entry) noexcept {
     static_assert(std::is_same_v<T, ondisk_next_metadata_cluster> or
             std::is_same_v<T, ondisk_create_inode> or
-            std::is_same_v<T, ondisk_update_metadata> or
             std::is_same_v<T, ondisk_delete_inode> or
             std::is_same_v<T, ondisk_medium_write> or
             std::is_same_v<T, ondisk_large_write> or
