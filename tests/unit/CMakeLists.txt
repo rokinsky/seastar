@@ -363,45 +363,25 @@ if (Seastar_EXPERIMENTAL_FS)
     SOURCES fs_block_device_test.cc
     LIBRARIES seastar_testing)
   seastar_add_test (fs_bootstrap_record
-    SOURCES
-      fs_bootstrap_record_test.cc
-      fs_mock_block_device.hh)
+    SOURCES fs_bootstrap_record_test.cc)
   seastar_add_test (fs_cluster_allocator
     KIND BOOST
     SOURCES fs_cluster_allocator_test.cc)
   seastar_add_test (fs_metadata_log
-    SOURCES
-      fs_metadata_log_test.cc
-      fs_mock_metadata_to_disk_buffer.hh
-      fs_mock_block_device.hh
-      fs_mock_cluster_writer.hh
-      fs_metadata_common.hh)
+    SOURCES fs_metadata_log_test.cc)
   seastar_add_test (fs_mock_metadata_to_disk_buffer
-    SOURCES
-      fs_mock_metadata_to_disk_buffer_test.cc
-      fs_mock_metadata_to_disk_buffer.hh)
+    SOURCES fs_mock_metadata_to_disk_buffer_test.cc)
   seastar_add_test (fs_path
     KIND BOOST
     SOURCES fs_path_test.cc)
   seastar_add_test (fs_truncate
-    SOURCES
-      fs_truncate_test.cc
-      fs_mock_metadata_to_disk_buffer.hh
-      fs_mock_block_device.hh
-      fs_metadata_common.hh)
+    SOURCES fs_truncate_test.cc)
   seastar_add_test (fs_write
-    SOURCES
-      fs_write_test.cc
-      fs_mock_metadata_to_disk_buffer.hh
-      fs_mock_cluster_writer.hh
-      fs_mock_block_device.hh
-      fs_metadata_common.hh)
+    SOURCES fs_write_test.cc)
   seastar_add_test (fs_seastarfs
     SOURCES fs_seastarfs_test.cc)
   seastar_add_test (fs_to_disk_buffer
-    SOURCES
-      fs_to_disk_buffer_test.cc
-      fs_mock_block_device.hh)
+    SOURCES fs_to_disk_buffer_test.cc)
 endif()
 
 seastar_add_test (semaphore
