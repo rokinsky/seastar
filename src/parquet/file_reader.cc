@@ -121,9 +121,13 @@ file_reader::open_column_chunk_reader_internal(uint32_t row_group, uint32_t colu
             size_t file_offset = column_metadata->__isset.dictionary_page_offset
                                  ? column_metadata->dictionary_page_offset
                                  : column_metadata->data_page_offset;
-            page_reader page_reader{
-                    seastar::make_file_input_stream(f, file_offset, column_metadata->total_compressed_size)};
-            return column_chunk_reader<T>(leaf, std::move(page_reader), column_metadata->codec);
+
+            return column_chunk_reader<T>{
+                    page_reader{seastar::make_file_input_stream(f, file_offset, column_metadata->total_compressed_size)},
+                    column_metadata->codec,
+                    leaf.def_level,
+                    leaf.rep_level,
+                    (leaf.info.__isset.type_length ? std::optional<uint32_t>(leaf.info.type_length) : std::optional<uint32_t>{})};
         });
     });
 }

@@ -417,7 +417,7 @@ void column_chunk_reader<T>::load_dictionary_page(page p) {
     _dict = std::vector<output_type>(header.num_values);
     std::basic_string_view<uint8_t> decompressed_values =
             _decompressor(p.contents, static_cast<size_t>(p.header->uncompressed_page_size));
-    value_decoder<T> vd{_schema_node.info.type_length};
+    value_decoder<T> vd{_type_length};
     vd.reset(decompressed_values, format::Encoding::PLAIN);
     size_t n_read = vd.read_batch(_dict->size(), _dict->data());
     if (n_read < _dict->size()) {

@@ -67,7 +67,7 @@ set_property (CACHE Seastar_API_LEVEL
 #
 
 set (CMAKE_CXX_FLAGS_DEV
-  "-O1"
+  "-O1 -fdiagnostics-color=always"
   CACHE
   STRING
   "Flags used by the C++ compiler during dev builds."
@@ -662,6 +662,8 @@ if (Seastar_EXPERIMENTAL_PARQUET)
     include/seastar/parquet/rle_encoding.hh
     include/seastar/parquet/schema.hh
     include/seastar/parquet/untyped_schema.hh
+    include/seastar/parquet/column_chunk_writer.hh
+    include/seastar/parquet/write_schema.hh
     src/parquet/column_chunk_reader.cc
     src/parquet/compression.cc
     src/parquet/compression.hh
@@ -672,6 +674,7 @@ if (Seastar_EXPERIMENTAL_PARQUET)
     src/parquet/record_reader.cc
     src/parquet/schema.cc
     src/parquet/untyped_schema.cc
+    src/parquet/column_chunk_writer.cc
   )
 endif()
 

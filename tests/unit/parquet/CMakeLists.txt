@@ -24,6 +24,10 @@ seastar_add_test (rle_encoding
   KIND BOOST
   SOURCES rle_encoding_test.cc)
 
+seastar_add_test (column_chunk_writer
+  KIND BOOST
+  SOURCES column_chunk_writer_test.cc)
+
 seastar_add_test (io_test
   KIND BOOST
   SOURCES io_test.cc)
@@ -33,3 +37,9 @@ seastar_add_test (cql_reader
 
 seastar_add_test (cql_reader_alltypes
   SOURCES cql_reader_alltypes_test.cc)
+
+seastar_add_test (column_roundtrip
+  SOURCES column_roundtrip_test.cc)
+
+seastar_add_test (full_roundtrip
+  SOURCES full_roundtrip_test.cc)

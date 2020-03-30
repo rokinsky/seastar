@@ -236,7 +236,7 @@ class RleEncoder {
   static const int MAX_VALUES_PER_LITERAL_RUN = (1 << 6) * 8;
 
   /// Number of bits needed to encode the value. Must be between 0 and 64.
-  const int bit_width_;
+  int bit_width_;
 
   /// Underlying buffer.
   BitUtil::BitWriter bit_writer_;

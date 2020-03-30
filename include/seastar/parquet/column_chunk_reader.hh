@@ -166,6 +166,7 @@ struct value_decoder_traits;
 
 template<> struct value_decoder_traits<format::Type::INT32> {
     using output_type = int32_t;
+    using input_type = int32_t;
     using decoder_type = std::variant<
         plain_decoder_trivial<output_type>,
         dict_decoder<output_type>,
@@ -175,6 +176,7 @@ template<> struct value_decoder_traits<format::Type::INT32> {
 
 template<> struct value_decoder_traits<format::Type::INT64> {
     using output_type = int64_t;
+    using input_type = int64_t;
     using decoder_type = std::variant<
         plain_decoder_trivial<output_type>,
         dict_decoder<output_type>,
@@ -193,6 +195,7 @@ template<> struct value_decoder_traits<format::Type::INT96> {
 
 template<> struct value_decoder_traits<format::Type::FLOAT> {
     using output_type = float;
+    using input_type = float;
     using decoder_type = std::variant<
         plain_decoder_trivial<output_type>,
         dict_decoder<output_type>
@@ -202,6 +205,7 @@ template<> struct value_decoder_traits<format::Type::FLOAT> {
 
 template<> struct value_decoder_traits<format::Type::DOUBLE> {
     using output_type = double;
+    using input_type = double;
     using decoder_type = std::variant<
         plain_decoder_trivial<output_type>,
         dict_decoder<output_type>
@@ -211,6 +215,7 @@ template<> struct value_decoder_traits<format::Type::DOUBLE> {
 
 template<> struct value_decoder_traits<format::Type::BOOLEAN> {
     using output_type = uint8_t;
+    using input_type = uint8_t;
     using decoder_type = std::variant<
         plain_decoder_boolean,
         rle_decoder_boolean,
@@ -220,6 +225,7 @@ template<> struct value_decoder_traits<format::Type::BOOLEAN> {
 
 template<> struct value_decoder_traits<format::Type::BYTE_ARRAY> {
     using output_type = seastar::temporary_buffer<uint8_t>;
+    using input_type = std::basic_string_view<uint8_t>;
     using decoder_type = std::variant<
         plain_decoder_byte_array,
         dict_decoder<output_type>
@@ -230,6 +236,7 @@ template<> struct value_decoder_traits<format::Type::BYTE_ARRAY> {
 
 template<> struct value_decoder_traits<format::Type::FIXED_LEN_BYTE_ARRAY> {
     using output_type = seastar::temporary_buffer<uint8_t>;
+    using input_type = std::basic_string_view<uint8_t>;
     using decoder_type = std::variant<
         plain_decoder_fixed_len_byte_array,
         dict_decoder<output_type>
@@ -271,7 +278,6 @@ template<format::Type::type T>
 class column_chunk_reader {
 public:
     using output_type = typename value_decoder_traits<T>::output_type;
-    const schema::raw_node& _schema_node;
 private:
     page_reader _source;
     decompressor _decompressor;
@@ -283,6 +289,10 @@ private:
     bool _eof = false;
     int64_t _page_ordinal = -1; // Only used for error reporting.
 private:
+    uint32_t _def_level;
+    uint32_t _rep_level;
+    std::optional<uint32_t> _type_length;
+private:
     seastar::future<> load_next_page();
     void load_dictionary_page(page p);
     void load_data_page(page p);
@@ -292,18 +302,19 @@ private:
     seastar::future<size_t> read_batch_internal(size_t n, LevelT def[], LevelT rep[], output_type val[]);
 public:
     explicit column_chunk_reader(
-            const schema::raw_node& schema_node,
             page_reader&& source,
-            format::CompressionCodec::type codec)
-        : _schema_node{schema_node}
-        , _source{std::move(source)}
+            format::CompressionCodec::type codec,
+            uint32_t def_level,
+            uint32_t rep_level,
+            std::optional<uint32_t> type_length)
+        : _source{std::move(source)}
         , _decompressor{codec}
-        , _rep_decoder{schema_node.rep_level}
-        , _def_decoder{schema_node.def_level}
-        , _val_decoder{
-            _schema_node.info.__isset.type_length
-            ? std::optional<uint32_t>{static_cast<uint32_t>(_schema_node.info.type_length)}
-            : std::optional<uint32_t>{}}
+        , _rep_decoder{rep_level}
+        , _def_decoder{def_level}
+        , _val_decoder{type_length}
+        , _def_level{def_level}
+        , _rep_level{rep_level}
+        , _type_length{type_length}
         {};
     // Read a batch of n (rep, def, value) triplets. The last batch may be smaller than n.
     // Return the number of triplets read. Note that null values are not read into the output array.
@@ -336,18 +347,18 @@ column_chunk_reader<T>::read_batch_internal(size_t n, LevelT def[], LevelT rep[]
         return read_batch_internal(n, def, rep, val);
     }
     for (size_t i = 0; i < def_levels_read; ++i) {
-        if (def[i] < 0 || def[i] > static_cast<LevelT>(_schema_node.def_level)) {
+        if (def[i] < 0 || def[i] > static_cast<LevelT>(_def_level)) {
             throw parquet_exception::corrupted_file(seastar::format(
-                    "Definition level ({}) out of range (0 to {})", def[i], _schema_node.def_level));
+                    "Definition level ({}) out of range (0 to {})", def[i], _def_level));
         }
-        if (rep[i] < 0 || rep[i] > static_cast<LevelT>(_schema_node.rep_level)) {
+        if (rep[i] < 0 || rep[i] > static_cast<LevelT>(_rep_level)) {
             throw parquet_exception::corrupted_file(seastar::format(
-                    "Repetition level ({}) out of range (0 to {})", rep[i], _schema_node.rep_level));
+                    "Repetition level ({}) out of range (0 to {})", rep[i], _rep_level));
         }
     }
     size_t values_to_read = 0;
     for (size_t i = 0; i < def_levels_read; ++i) {
-        if (def[i] == static_cast<LevelT>(_schema_node.def_level)) {
+        if (def[i] == static_cast<LevelT>(_def_level)) {
             ++values_to_read;
         }
     }
@@ -370,8 +381,7 @@ inline column_chunk_reader<T>::read_batch(size_t n, LevelT def[], LevelT rep[], 
             std::rethrow_exception(eptr);
         } catch (const std::exception& e) {
             return seastar::make_exception_future<size_t>(parquet_exception(seastar::format(
-                    "Error while reading page number {} (in parquet column {} (path = {})): {}",
-                    _page_ordinal, _schema_node.column_index, _schema_node.path, e.what())));
+                    "Error while reading page number {}: {}", _page_ordinal, e.what())));
         }
     });
 }
