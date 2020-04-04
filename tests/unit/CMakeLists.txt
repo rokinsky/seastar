@@ -369,6 +369,8 @@ if (Seastar_EXPERIMENTAL_FS)
     SOURCES fs_cluster_allocator_test.cc)
   seastar_add_test (fs_metadata_log
     SOURCES fs_metadata_log_test.cc)
+  seastar_add_test (fs_metadata_to_disk_buffer
+    SOURCES fs_metadata_to_disk_buffer_test.cc)
   seastar_add_test (fs_mock_metadata_to_disk_buffer
     SOURCES fs_mock_metadata_to_disk_buffer_test.cc)
   seastar_add_test (fs_path
