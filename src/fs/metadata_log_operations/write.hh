@@ -82,10 +82,10 @@ private:
                 if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
                     expected_write_len = remaining_write_len;
                 } else {
-                    if (size_t buffer_alignment = mod_by_power_of_2(reinterpret_cast<size_t>(buffer) + completed_write_len,
+                    if (size_t buffer_alignment = mod_by_power_of_2(reinterpret_cast<intptr_t>(buffer) + completed_write_len,
                             _metadata_log._alignment); buffer_alignment != 0) {
                         // When buffer is not aligned then align it using one small write
-                        expected_write_len = std::min(_metadata_log._alignment - buffer_alignment, write_len - completed_write_len);
+                        expected_write_len = _metadata_log._alignment - buffer_alignment;
                     } else {
                         if (remaining_write_len >= _metadata_log._cluster_size) {
                             expected_write_len = _metadata_log._cluster_size;
@@ -97,17 +97,16 @@ private:
                     }
                 }
 
-                auto new_buffer = buffer + completed_write_len;
-                auto new_file_offset = file_offset + completed_write_len;
+                auto shifted_buffer = buffer + completed_write_len;
+                auto shifted_file_offset = file_offset + completed_write_len;
                 auto write_future = make_ready_future<size_t>(0);
                 if (expected_write_len <= SMALL_WRITE_THRESHOLD) {
-                    write_future = do_small_write(new_buffer, expected_write_len, new_file_offset);
+                    write_future = do_small_write(shifted_buffer, expected_write_len, shifted_file_offset);
                 } else if (expected_write_len < _metadata_log._cluster_size) {
-                    write_future = medium_write(new_buffer, expected_write_len, new_file_offset);
+                    write_future = medium_write(shifted_buffer, expected_write_len, shifted_file_offset);
                 } else {
-                    // TODO: maybe we could get rid of that updating mtime switch?
-                    // Update mtime only for the first large write
-                    write_future = do_large_write(new_buffer, new_file_offset, completed_write_len == 0);
+                    // Update mtime only when it is the first write
+                    write_future = do_large_write(shifted_buffer, shifted_file_offset, completed_write_len == 0);
                 }
 
                 return write_future.then([&completed_write_len, expected_write_len](size_t write_len) {
@@ -123,7 +122,7 @@ private:
         });
     }
 
-    decltype(unix_metadata::mtime_ns) get_current_time_ns() {
+    static decltype(unix_metadata::mtime_ns) get_current_time_ns() {
         using namespace std::chrono;
         return duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
     }
@@ -152,7 +151,7 @@ private:
     }
 
     future<size_t> medium_write(const uint8_t* aligned_buffer, size_t expected_write_len, file_offset_t file_offset) {
-        assert(reinterpret_cast<size_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        assert(reinterpret_cast<intptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
         // TODO: medium write can be divided into bigger number of smaller writes. Maybe we should add checks
         // for that and allow only limited number of medium writes? Or we could add to to_disk_buffer option for
         // space 'reservation' to make sure that after division our write will fit into the buffer?
@@ -165,13 +164,13 @@ private:
 
                 size_t remaining_write_len = expected_write_len - completed_write_len;
                 size_t curr_expected_write_len;
-                auto new_buffer = aligned_buffer + completed_write_len;
-                auto new_file_offset = file_offset + completed_write_len;
+                auto shifted_buffer = aligned_buffer + completed_write_len;
+                auto shifted_file_offset = file_offset + completed_write_len;
                 auto write_future = make_ready_future<size_t>(0);
                 if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
                     // We can use small write for the remaining data
                     curr_expected_write_len = remaining_write_len;
-                    write_future = do_small_write(new_buffer, curr_expected_write_len, new_file_offset);
+                    write_future = do_small_write(shifted_buffer, curr_expected_write_len, shifted_file_offset);
                 } else {
                     size_t rounded_remaining_write_len =
                             round_down_to_multiple_of_power_of_2(remaining_write_len, _metadata_log._alignment);
@@ -201,7 +200,7 @@ private:
                                 rounded_remaining_write_len : buff_bytes_left;
                     }
 
-                    write_future = do_medium_write(new_buffer, curr_expected_write_len, new_file_offset,
+                    write_future = do_medium_write(shifted_buffer, curr_expected_write_len, shifted_file_offset,
                             _metadata_log._curr_data_writer);
                 }
 
@@ -220,7 +219,7 @@ private:
 
     future<size_t> do_medium_write(const uint8_t* aligned_buffer, size_t aligned_expected_write_len, file_offset_t file_offset,
             shared_ptr<cluster_writer> disk_buffer) {
-        assert(reinterpret_cast<size_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        assert(reinterpret_cast<intptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
         assert(aligned_expected_write_len % _metadata_log._alignment == 0);
         assert(disk_buffer->bytes_left() >= aligned_expected_write_len);
 
@@ -255,7 +254,7 @@ private:
     }
 
     future<size_t> do_large_write(const uint8_t* aligned_buffer, file_offset_t file_offset, bool update_mtime) {
-        assert(reinterpret_cast<size_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        assert(reinterpret_cast<intptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
         // aligned_expected_write_len = _metadata_log._cluster_size
         std::optional<cluster_id_t> cluster_opt = _metadata_log._cluster_allocator.alloc();
         if (not cluster_opt) {
