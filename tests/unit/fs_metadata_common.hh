@@ -34,6 +34,7 @@
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/temporary_buffer.hh>
 #include <seastar/testing/test_case.hh>
+#include <seastar/testing/test_runner.hh>
 
 #include <assert.h>
 #include <cctype>
@@ -124,7 +125,7 @@ inline inode_t create_and_open_file(metadata_log& log, std::string name = "tmp")
 }
 
 inline temporary_buffer<uint8_t> gen_buffer(size_t len, bool aligned, unit_size_t alignment) {
-    static std::default_random_engine random_engine(0);
+    std::default_random_engine random_engine(testing::local_random_engine());
     temporary_buffer<uint8_t> buff;
     if (not aligned) {
         // Make buff unaligned
