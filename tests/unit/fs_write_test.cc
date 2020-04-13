@@ -468,7 +468,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_two_small_writes
     auto meta_buff = get_current_metadata_buffer();
     BOOST_TEST_MESSAGE("meta_buff->actions: " << meta_buff->actions);
 
-    size_t misalignment = reinterpret_cast<size_t>(buff.get()) % default_alignment;
+    size_t misalignment = reinterpret_cast<intptr_t>(buff.get()) % default_alignment;
     small_write_len_t part1_write_len = default_alignment - misalignment;
     small_write_len_t part2_write_len = write_len - part1_write_len;
 
@@ -516,7 +516,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_medium_and
         auto meta_buff = get_current_metadata_buffer();
         BOOST_TEST_MESSAGE("meta_buff->actions: " << meta_buff->actions);
 
-        size_t misalignment = reinterpret_cast<size_t>(buff.get()) % default_alignment;
+        size_t misalignment = reinterpret_cast<intptr_t>(buff.get()) % default_alignment;
         small_write_len_t part1_write_len = default_alignment - misalignment;
         medium_write_len_t part2_write_len = round_down_to_multiple_of_power_of_2(write_len - part1_write_len, default_alignment);
         small_write_len_t part3_write_len = write_len - part1_write_len - part2_write_len;
@@ -578,7 +578,7 @@ SEASTAR_THREAD_TEST_CASE(ondisk_data_unaligned_write_split_into_small_large_and_
     auto meta_buff = get_current_metadata_buffer();
     BOOST_TEST_MESSAGE("meta_buff->actions: " << meta_buff->actions);
 
-    size_t misalignment = reinterpret_cast<size_t>(buff.get()) % default_alignment;
+    size_t misalignment = reinterpret_cast<intptr_t>(buff.get()) % default_alignment;
     small_write_len_t part1_write_len = default_alignment - misalignment;
     small_write_len_t part3_write_len = write_len - part1_write_len - default_cluster_size;
 
