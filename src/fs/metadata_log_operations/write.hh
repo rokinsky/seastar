@@ -82,7 +82,7 @@ private:
                 if (remaining_write_len <= SMALL_WRITE_THRESHOLD) {
                     expected_write_len = remaining_write_len;
                 } else {
-                    if (size_t buffer_alignment = mod_by_power_of_2(reinterpret_cast<intptr_t>(buffer) + completed_write_len,
+                    if (auto buffer_alignment = mod_by_power_of_2(reinterpret_cast<uintptr_t>(buffer) + completed_write_len,
                             _metadata_log._alignment); buffer_alignment != 0) {
                         // When buffer is not aligned then align it using one small write
                         expected_write_len = _metadata_log._alignment - buffer_alignment;
