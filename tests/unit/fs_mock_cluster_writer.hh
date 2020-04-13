@@ -58,7 +58,7 @@ public:
     using cluster_writer::current_disk_offset;
 
     future<size_t> write(const void* aligned_buffer, size_t aligned_len, block_device device) override {
-        assert(reinterpret_cast<size_t>(aligned_buffer) % _alignment == 0);
+        assert(reinterpret_cast<intptr_t>(aligned_buffer) % _alignment == 0);
         assert(aligned_len % _alignment == 0);
         assert(aligned_len <= bytes_left());
 
