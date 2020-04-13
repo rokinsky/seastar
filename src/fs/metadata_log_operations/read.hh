@@ -117,14 +117,17 @@ class read_operation {
             },
             [&](inode_data_vec::on_disk_data& disk_data) {
                 // TODO: we can optimize the case when disk_data.device_offset is aligned
+
                 // Copies data from source_buffer corresponding to the intersection of dest_disk_range
                 // and source_buffer.disk_range into buffer. dest_disk_range.beg corresponds to first byte of buffer
                 // Works when dest_disk_range.beg <= source_buffer._disk_range.beg
                 auto copy_left_intersecting_data =
                         [](uint8_t* buffer, disk_range dest_disk_range, const disk_temp_buffer& source_buffer) -> size_t {
-                    assert(dest_disk_range.beg > source_buffer._disk_range.beg and
-                            "Beggining of source buffer on disk should be before beggining of destination buffer on disk");
                     disk_range intersect = intersection(dest_disk_range, source_buffer._disk_range);
+
+                    assert((intersect.is_empty() or dest_disk_range.beg >= source_buffer._disk_range.beg) and
+                            "Beggining of source buffer on disk should be before beggining of destination buffer on disk");
+
                     if (not intersect.is_empty()) {
                         // We can copy _data from disk_temp_buffer
                         disk_offset_t common_data_len = intersect.size();
