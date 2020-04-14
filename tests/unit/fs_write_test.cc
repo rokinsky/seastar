@@ -802,7 +802,7 @@ SEASTAR_THREAD_TEST_CASE(random_writes_and_reads_test) {
 SEASTAR_THREAD_TEST_CASE(aligned_writes_and_reads_test) {
     BOOST_TEST_MESSAGE("\nTest name: " << get_name());
     constexpr size_t writes_nb = 300;
-    constexpr size_t random_read_checks_nb_every_write = 300;
+    constexpr size_t random_read_checks_nb_every_write = 30;
     constexpr unit_size_t cluster_size = 128 * KB;
     constexpr uint64_t max_file_size = cluster_size * 3;
     static_assert(max_file_size % default_alignment == 0);
