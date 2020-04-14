@@ -22,8 +22,10 @@
 #include "fs/metadata_log.hh"
 #include "fs/units.hh"
 
+#include "seastar/core/thread.hh"
 #include "seastar/fs/file.hh"
 #include "seastar/fs/seastarfs.hh"
+#include "seastar/util/defer.hh"
 
 namespace seastar::fs {
 
@@ -120,32 +122,24 @@ future<bootstrap_record> make_bootstrap_record(uint64_t version, unit_size_t ali
 }
 
 future<sharded<filesystem>> bootfs(std::string device_path) {
-    return do_with(sharded<filesystem>(), std::move(device_path), [](sharded<filesystem>& fs, std::string& dev_path) {
-        return fs.start().then([=, &fs, &dev_path]() {
-            return fs.invoke_on_all(&filesystem::init, std::move(dev_path));
-        }).then([&fs] {
-            return std::move(fs);
-        });
-    });
-}
-
-future<> mkfs(block_device device, uint64_t version, unit_size_t cluster_size, unit_size_t alignment,
-        inode_t root_directory, uint32_t shards_nb) {
-    return do_with(std::move(device), [=](block_device& device) {
-        return device.size().then([=](disk_offset_t device_size) {
-            return make_bootstrap_record(version, alignment, cluster_size, root_directory, shards_nb, device_size);
-        }).then([&device](bootstrap_record record) {
-            return record.write_to_disk(device);
-        });
+    return async([device_path = std::move(device_path)] () mutable {
+        assert(thread::running_in_thread());
+        sharded<filesystem> fs;
+        fs.start().wait();
+        fs.invoke_on_all(&filesystem::init, std::move(device_path)).wait();
+        return fs;
     });
 }
 
 future<> mkfs(std::string device_path, uint64_t version, unit_size_t cluster_size, unit_size_t alignment,
         inode_t root_directory, uint32_t shards_nb) {
-    return do_with_device(std::move(device_path), [=](block_device& device) {
-        return mkfs(device, version, cluster_size, alignment, root_directory, shards_nb).finally([&device]() {
-            return device.close();
-        });
+    return async([device_path = std::move(device_path), version, cluster_size, alignment, root_directory, shards_nb] {
+        assert(thread::running_in_thread());
+        auto device = open_block_device(device_path).get0();
+        auto close_dev = defer([device] () mutable { device.close().wait(); });
+        size_t device_size = device.size().get0();
+        auto record = make_bootstrap_record(version, alignment, cluster_size, root_directory, shards_nb, device_size).get0();
+        record.write_to_disk(device).wait();
     });
 }
 
