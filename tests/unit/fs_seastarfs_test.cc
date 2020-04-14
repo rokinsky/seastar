@@ -140,12 +140,12 @@ SEASTAR_THREAD_TEST_CASE(valid_basic_open_test) {
 
     fs::mkfs(tf.path(), version, cluster_size, alignment, root_directory, write_record.shards_nb()).wait();
 
-    auto fs = filesystem();
-    fs.init(tf.path()).get0();
+    //auto fs = filesystem();
+    //fs.init(tf.path()).get0();
 
     // TODO: doesn't work
     // auto file = fs.open_file_dma("test", open_flags::create).get0();
     // file.close().wait();
 
-    fs.stop().wait();
+    //fs.stop().wait();
 }
