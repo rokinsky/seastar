@@ -22,6 +22,7 @@
 #include "fs/metadata_log.hh"
 #include "fs/units.hh"
 
+#include "seastar/core/shared_mutex.hh"
 #include "seastar/core/thread.hh"
 #include "seastar/fs/file.hh"
 #include "seastar/fs/seastarfs.hh"
@@ -30,6 +31,43 @@
 namespace seastar::fs {
 
 using shard_info_vec = std::vector<bootstrap_record::shard_info>;
+
+future<> filesystem::init(std::string device_path, foreign_shared_lw_ptr<shared_root> shared_root) {
+    return async([this, device_path = std::move(device_path), root = std::move(shared_root)] () mutable {
+        _shared_root.emplace(std::move(root));
+
+        auto device = open_block_device(device_path).get0();
+        auto record =  bootstrap_record::read_from_disk(device).get0();
+
+        const auto shard_id = this_shard_id();
+
+        seastar_logger.info("init shard {}, _shared_root {}", shard_id, _shared_root->get_owner_shard());
+
+        if (shard_id > record.shards_nb() - 1) {
+            seastar_logger.warn("unable to boot filesystem on shard {}; performance may suffer", shard_id);
+            device.close().wait(); // TODO: Some shards cannot be launched, so implement reshard the whole dataset
+            return;
+        }
+
+        const auto shard_info = record.shards_info[shard_id];
+
+        _metadata_log = make_lw_shared<metadata_log>(std::move(device), record.cluster_size, record.alignment);
+        _metadata_log->bootstrap(record.root_directory, shard_info.metadata_cluster,
+                shard_info.available_clusters, record.shards_nb(), shard_id).wait();
+
+        /* TODO: read entries from _metadata_log iterate directory */
+        shared_root_map local_root = {
+            {std::string("aaa") + std::to_string(shard_id), shard_id},
+            {std::string("bbb") + std::to_string(shard_id), shard_id}
+        };
+
+        _cache_root.insert(local_root.begin(), local_root.end());
+
+        smp::submit_to(_shared_root->get_owner_shard(),[this] {
+            return _shared_root->get()->push_entries(_cache_root);
+        }).wait();
+    });
+}
 
 future<> filesystem::init(std::string device_path) {
     return do_with_device(std::move(device_path), [=](block_device &device) {
@@ -126,12 +164,21 @@ future<bootstrap_record> make_bootstrap_record(uint64_t version, unit_size_t ali
     });
 }
 
+future<> initfs(sharded<filesystem>& fs, std::string path, lw_shared_ptr<shared_root> root) {
+    return parallel_for_each(smp::all_cpus(), [&fs, path, root] (shard_id id) {
+        return fs.invoke_on(id, [path = std::move(path), root = make_foreign(std::move(root))](auto& fs) mutable {
+            return fs.init(std::move(path), std::move(root));
+        });
+    });
+}
+
 future<sharded<filesystem>> bootfs(std::string device_path) {
     return async([device_path = std::move(device_path)] () mutable {
         assert(thread::running_in_thread());
+        auto root = make_lw_shared<shared_root>();
         sharded<filesystem> fs;
         fs.start().wait();
-        fs.invoke_on_all(&filesystem::init, std::move(device_path)).wait();
+        initfs(fs, std::move(device_path), std::move(root)).wait();
         return fs;
     });
 }
