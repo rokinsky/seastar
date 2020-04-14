@@ -151,7 +151,7 @@ private:
     }
 
     future<size_t> medium_write(const uint8_t* aligned_buffer, size_t expected_write_len, file_offset_t file_offset) {
-        assert(reinterpret_cast<intptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        assert(reinterpret_cast<uintptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
         // TODO: medium write can be divided into bigger number of smaller writes. Maybe we should add checks
         // for that and allow only limited number of medium writes? Or we could add to to_disk_buffer option for
         // space 'reservation' to make sure that after division our write will fit into the buffer?
@@ -219,7 +219,7 @@ private:
 
     future<size_t> do_medium_write(const uint8_t* aligned_buffer, size_t aligned_expected_write_len, file_offset_t file_offset,
             shared_ptr<cluster_writer> disk_buffer) {
-        assert(reinterpret_cast<intptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        assert(reinterpret_cast<uintptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
         assert(aligned_expected_write_len % _metadata_log._alignment == 0);
         assert(disk_buffer->bytes_left() >= aligned_expected_write_len);
 
@@ -254,7 +254,7 @@ private:
     }
 
     future<size_t> do_large_write(const uint8_t* aligned_buffer, file_offset_t file_offset, bool update_mtime) {
-        assert(reinterpret_cast<intptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
+        assert(reinterpret_cast<uintptr_t>(aligned_buffer) % _metadata_log._alignment == 0);
         // aligned_expected_write_len = _metadata_log._cluster_size
         std::optional<cluster_id_t> cluster_opt = _metadata_log._cluster_allocator.alloc();
         if (not cluster_opt) {

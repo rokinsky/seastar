@@ -62,7 +62,7 @@ public:
     // Writes @p aligned_buffer to @p device just after previous write (or at @p cluster_beg_offset passed to init()
     // if it is the first write).
     virtual future<size_t> write(const void* aligned_buffer, size_t aligned_len, block_device device) {
-        assert(reinterpret_cast<intptr_t>(aligned_buffer) % _alignment == 0);
+        assert(reinterpret_cast<uintptr_t>(aligned_buffer) % _alignment == 0);
         assert(aligned_len % _alignment == 0);
         assert(aligned_len <= bytes_left());
 
