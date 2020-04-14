@@ -94,24 +94,6 @@ SEASTAR_THREAD_TEST_CASE(valid_path_mkfs_test) {
     BOOST_REQUIRE_EQUAL(write_record, read_record);
 }
 
-SEASTAR_THREAD_TEST_CASE(valid_dev_mkfs_test) {
-    const auto tf = temporary_file(device_path);
-    tf.truncate(device_size);
-
-    const std::vector<bootstrap_record::shard_info> shards_info({{1,  {1,  device_size / MB}}});
-
-    const bootstrap_record write_record(version, alignment, cluster_size, root_directory, shards_info);
-
-    auto dev = open_block_device(tf.path()).get0();
-
-    fs::mkfs(dev, version, cluster_size, alignment, root_directory, write_record.shards_nb()).wait();
-
-    const auto read_record = bootstrap_record::read_from_disk(dev).get0();
-    dev.close().wait();
-
-    BOOST_REQUIRE_EQUAL(write_record, read_record);
-}
-
 SEASTAR_THREAD_TEST_CASE(valid_cluster_distribution_mkfs_test) {
     const auto tf = temporary_file(device_path);
     tf.truncate(device_size);
