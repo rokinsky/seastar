@@ -87,8 +87,13 @@ future<inode_t> filesystem::prepare_file(std::string name, open_flags flags) {
 cluster_range which_cluster_bucket(cluster_range available_clusters, uint32_t shards_nb, uint32_t shard_id) {
     const cluster_id_t clusters_nb = available_clusters.end - available_clusters.beg;
 
-    assert(available_clusters.end >= available_clusters.beg); /* TODO: invalid range, so throw some exception */
-    assert(clusters_nb >= shards_nb); /* TODO: shard should have at least 1 cluster, so throw some exception */
+    if (available_clusters.end < available_clusters.beg) {
+        throw std::runtime_error("invalid range");
+    }
+
+    if (clusters_nb < shards_nb) {
+        throw std::runtime_error("shard should have at least 1 cluster");
+    }
 
     const uint32_t lower_bucket_size = clusters_nb / shards_nb;
     const uint32_t with_upper_bucket = clusters_nb % shards_nb;
