@@ -65,6 +65,10 @@ class metadata_log {
     inode_t _root_dir;
     shard_inode_allocator _inode_allocator;
 
+    // Estimations of metadata log size used in compaction
+    size_t _ondisk_log_size = 0;
+    size_t _rewrite_log_size = 0;
+
     // Locks are used to ensure metadata consistency while allowing concurrent usage.
     //
     // Whenever one wants to create or delete inode or directory entry, one has to acquire appropriate unique lock for
@@ -199,7 +203,9 @@ private:
     void memory_only_update_mtime(inode_t inode, decltype(unix_metadata::mtime_ns) mtime_ns);
     void memory_only_truncate(inode_t inode, disk_offset_t size);
     void memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, std::string entry_name);
+    inode_info& memory_only_create_inode_as_dir_entry(inode_t entry_inode, bool is_directory, unix_metadata metadata, inode_info::directory& dir, std::string entry_name);
     void memory_only_delete_dir_entry(inode_info::directory& dir, std::string entry_name);
+    void memory_only_delete_inode_after_dir_entry(inode_t entry_inode);
 
     template<class Func>
     void schedule_background_task(Func&& task) {

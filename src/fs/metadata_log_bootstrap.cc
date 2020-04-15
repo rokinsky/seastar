@@ -457,9 +457,8 @@ future<> metadata_log_bootstrap::bootstrap_create_inode_as_dir_entry() {
         return invalid_entry_exception();
     }
 
-    _metadata_log.memory_only_create_inode(entry.entry_inode.inode, entry.entry_inode.is_directory,
-            ondisk_metadata_to_metadata(entry.entry_inode.metadata));
-    _metadata_log.memory_only_add_dir_entry(dir, entry.entry_inode.inode, std::move(dir_entry_name));
+    _metadata_log.memory_only_create_inode_as_dir_entry(entry.entry_inode.inode, entry.entry_inode.is_directory,
+            ondisk_metadata_to_metadata(entry.entry_inode.metadata), dir, std::move(dir_entry_name));
     // TODO: Maybe mtime_ns for modifying directory?
     return now();
 }
@@ -526,7 +525,7 @@ future<> metadata_log_bootstrap::bootstrap_delete_inode_and_dir_entry() {
         return invalid_entry_exception(); // Only empty directories may be deleted
     }
 
-    _metadata_log.memory_only_delete_inode(entry.inode_to_delete);
+    _metadata_log.memory_only_delete_inode_after_dir_entry(entry.inode_to_delete);
     return now();
 }
 

@@ -150,7 +150,7 @@ class unlink_or_remove_file_operation {
                 return make_exception_future(no_more_space_exception());
             case metadata_log::append_result::APPENDED:
                 _metadata_log.memory_only_delete_dir_entry(*_dir_info, _entry_name);
-                _metadata_log.memory_only_delete_inode(_entry_inode);
+                _metadata_log.memory_only_delete_inode_after_dir_entry(_entry_inode);
                 return now();
             }
             __builtin_unreachable();

@@ -142,9 +142,8 @@ class create_file_operation {
         case metadata_log::append_result::NO_SPACE:
             return make_exception_future<inode_t>(no_more_space_exception());
         case metadata_log::append_result::APPENDED:
-            inode_info& new_inode_info = _metadata_log.memory_only_create_inode(new_inode,
-                creating_dir, unx_mtdt);
-            _metadata_log.memory_only_add_dir_entry(*_dir_info, new_inode, std::move(_entry_name));
+            inode_info& new_inode_info = _metadata_log.memory_only_create_inode_as_dir_entry(new_inode,
+                creating_dir, unx_mtdt, *_dir_info, std::move(_entry_name));
 
             switch (_create_semantics) {
             case create_semantics::CREATE_FILE:

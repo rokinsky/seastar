@@ -84,12 +84,20 @@ struct inode_info {
             return (data.empty() ? 0 : data.rbegin()->second.data_range.end);
         }
 
+        // Represents which data vectors are reconstructed after removing intersection
+        enum class cut_result {
+            NONE,
+            LEFT,
+            RIGHT,
+            BOTH
+        };
+
         // Deletes data vectors that are subset of @p data_range and cuts overlapping data vectors to make them
         // not overlap. @p cut_data_vec_processor is called on each inode_data_vec (including parts of overlapped
         // data vectors) that will be deleted
         template<class Func>
         void cut_out_data_range(file_range range, Func&& cut_data_vec_processor) {
-            static_assert(std::is_invocable_v<Func, inode_data_vec>);
+            static_assert(std::is_invocable_v<Func, inode_data_vec, cut_result>); 
             // Cut all vectors intersecting with range
             auto it = data.lower_bound(range.beg);
             if (it != data.begin() and are_intersecting(range, prev(it)->second.data_range)) {
@@ -101,7 +109,7 @@ struct inode_info {
                 const auto cap = intersection(range, data_vec.data_range);
                 if (cap == data_vec.data_range) {
                     // Fully intersects => remove it
-                    cut_data_vec_processor(std::move(data_vec));
+                    cut_data_vec_processor(std::move(data_vec), cut_result::NONE);
                     continue;
                 }
 
@@ -138,16 +146,21 @@ struct inode_info {
                     },
                 }, data_vec.data_location);
 
-                // Save new data vectors
+                // Save new data vectors and find the cut result(knowing that we're readding at least one data_vec)
+                auto cr = cut_result::BOTH;
                 if (not left.data_range.is_empty()) {
                     data.emplace(left.data_range.beg, std::move(left));
+                } else {
+                    cr = cut_result::LEFT;
                 }
                 if (not right.data_range.is_empty()) {
                     data.emplace(right.data_range.beg, std::move(right));
+                } else {
+                    cr = cut_result::RIGHT;
                 }
 
                 // Process deleted vector
-                cut_data_vec_processor(std::move(mid));
+                cut_data_vec_processor(std::move(mid), cr);
             }
         }
 
