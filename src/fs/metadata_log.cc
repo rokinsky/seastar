@@ -21,6 +21,7 @@
 
 #include "fs/cluster.hh"
 #include "fs/cluster_allocator.hh"
+#include "fs/cluster_info.hh"
 #include "fs/inode.hh"
 #include "fs/inode_info.hh"
 #include "fs/metadata_disk_entries.hh"
@@ -128,8 +129,9 @@ void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) 
                     ondisk_entry_size(ondisk_large_write{}) :
                     ondisk_entry_size(ondisk_medium_write{});
                 _rewrite_log_size -= log_decrease;
-                // Remaining data is smaller than original so it's less than cluster size
+                // Remaining data is smaller than original so it's less than large write
                 _rewrite_log_size += new_writes_cnt * ondisk_entry_size(ondisk_medium_write{});
+                _clusters[offset_to_cluster_id(disk_data.device_offset, _cluster_size)].remove_data(disk_data.device_offset, data_vec.data_range);
             },
             [&](inode_data_vec::hole_data&) {
             },
@@ -213,6 +215,7 @@ void metadata_log::memory_only_disk_write(inode_t inode, file_offset_t file_offs
     write_update(it->second.get_file(), std::move(data_vec));
     _ondisk_log_size += log_increase;
     _rewrite_log_size += log_increase;
+    _clusters[offset_to_cluster_id(disk_offset, _cluster_size)].add_data(disk_offset, inode, {file_offset, file_offset + write_len});
 }
 
 void metadata_log::memory_only_update_mtime(inode_t inode, decltype(unix_metadata::mtime_ns) mtime_ns) {
@@ -308,6 +311,10 @@ void metadata_log::memory_only_delete_inode_after_dir_entry(inode_t entry_inode)
         ondisk_entry_size(ondisk_delete_inode{}) - ondisk_entry_size(ondisk_delete_dir_entry_header{0, 0});
     memory_only_delete_inode(entry_inode);
     _ondisk_log_size += log_adjust;
+}
+
+void metadata_log::next_data_cluster() {
+    _clusters[offset_to_cluster_id(_curr_data_writer->current_disk_offset(), _cluster_size)].finished_writing();
 }
 
 void metadata_log::schedule_flush_of_curr_cluster() {

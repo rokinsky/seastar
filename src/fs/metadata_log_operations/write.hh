@@ -180,6 +180,7 @@ private:
                     if (buff_bytes_left <= SMALL_WRITE_THRESHOLD) {
                         // TODO: add wasted buff_bytes_left bytes for compaction
                         // No space left in the current to_disk_buffer for medium write - allocate a new buffer
+                        _metadata_log.next_data_cluster();
                         std::optional<cluster_id_t> cluster_opt = _metadata_log._cluster_allocator.alloc();
                         if (not cluster_opt) {
                             // TODO: maybe we should return partial write instead of exception?

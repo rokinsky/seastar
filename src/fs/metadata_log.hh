@@ -23,6 +23,7 @@
 
 #include "fs/cluster.hh"
 #include "fs/cluster_allocator.hh"
+#include "fs/cluster_info.hh"
 #include "fs/cluster_writer.hh"
 #include "fs/inode.hh"
 #include "fs/inode_info.hh"
@@ -68,6 +69,7 @@ class metadata_log {
     // Estimations of metadata log size used in compaction
     size_t _ondisk_log_size = 0;
     size_t _rewrite_log_size = 0;
+    std::map<cluster_id_t, cluster_info> _clusters;
 
     // Locks are used to ensure metadata consistency while allowing concurrent usage.
     //
@@ -206,6 +208,8 @@ private:
     inode_info& memory_only_create_inode_as_dir_entry(inode_t entry_inode, bool is_directory, unix_metadata metadata, inode_info::directory& dir, std::string entry_name);
     void memory_only_delete_dir_entry(inode_info::directory& dir, std::string entry_name);
     void memory_only_delete_inode_after_dir_entry(inode_t entry_inode);
+
+    void next_data_cluster();
 
     template<class Func>
     void schedule_background_task(Func&& task) {
