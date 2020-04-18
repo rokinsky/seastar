@@ -217,7 +217,7 @@ public:
     ///
     /// \param o buffer to compare with
     /// \return true if and only if contents are the same
-    bool operator==(const temporary_buffer<char>& o) const {
+    bool operator==(const temporary_buffer<CharType>& o) const {
         return size() == o.size() && std::equal(begin(), end(), o.begin());
     }
 
@@ -225,7 +225,7 @@ public:
     ///
     /// \param o buffer to compare with
     /// \return true if and only if contents are not the same
-    bool operator!=(const temporary_buffer<char>& o) const {
+    bool operator!=(const temporary_buffer<CharType>& o) const {
         return !(*this == o);
     }
 };
