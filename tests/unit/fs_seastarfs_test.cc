@@ -74,6 +74,63 @@ constexpr inode_t root_directory = 0;
 
 BOOST_TEST_DONT_PRINT_LOG_VALUE(bootstrap_record)
 
+
+
+class B {
+    bool _value;
+public:
+    B() : _value(false) { }
+    bool value() { return _value; }
+};
+
+class A {
+    std::optional<foreign_ptr<lw_shared_ptr<B>>> shared_b;
+public:
+    A() = default;
+
+    future<> stop() { return make_ready_future(); }
+    friend future<> init(foreign_ptr<lw_shared_ptr<B>> foreign_b);
+};
+
+future<> init(foreign_ptr<lw_shared_ptr<B>> foreign_b) {
+    //seastar_logger.info("address {}", &foreign_b.release());
+
+    return smp::submit_to(foreign_b.get_owner_shard(), [p=foreign_b.get()] {//[foreign_b=std::move(foreign_b)] {
+//        seastar_logger.info("address {}", &*p);
+//        seastar_logger.info("value {}", p->value());
+        return make_ready_future<>();
+    });
+}
+
+SEASTAR_THREAD_TEST_CASE(tteesdts) {
+    sharded<A> a;
+    lw_shared_ptr<B> shared_b = make_lw_shared<B>();
+
+    a.start().wait();
+
+//    a.invoke_on_all([foreign_b = make_foreign(shared_b)] (auto& a) mutable {
+//        seastar_logger.info("hej: {}", true);
+//        return make_ready_future();
+//    }).wait();
+
+//    seastar_logger.info("address {}", &*shared_b);
+
+    parallel_for_each(smp::all_cpus(), [shared_b] (shard_id id) {
+        return smp::submit_to(id, [foreign_b = make_foreign(std::move(shared_b))] () mutable {
+            return init(std::move(foreign_b));
+        });
+    }).wait();
+
+//    parallel_for_each(smp::all_cpus(), [&a, shared_b] (shard_id id) {
+//
+//        return a.invoke_on(id, [foreign_b = make_foreign(std::move(shared_b))] (auto& a) mutable {
+//            return a.init(std::move(foreign_b));
+//        });
+//    }).wait();
+
+    a.stop().wait();
+}
+
 SEASTAR_THREAD_TEST_CASE(valid_path_mkfs_test) {
     const auto tf = temporary_file(device_path);
     tf.truncate(device_size);
@@ -126,6 +183,26 @@ SEASTAR_THREAD_TEST_CASE(valid_basic_bootfs_test) {
     fs::mkfs(tf.path(), version, cluster_size, alignment, root_directory, smp::count).wait();
 
     auto fs = fs::bootfs(tf.path()).get0();
+
+    fs.local().create_directory("/test1").wait();
+    fs.local().create_directory("/test2").wait();
+    fs.local().create_directory("/test3").wait();
+
+    shared_root_map entries = fs.local().get_own_root_entries().get0();
+
+    for (const auto& [entry, shard_id] : entries) {
+        seastar_logger.info("TEST: {} {}", entry, shard_id);
+    }
+
+    fs.stop().wait();
+
+    fs = fs::bootfs(tf.path()).get0();
+
+    entries = fs.local().get_own_root_entries().get0();
+
+    for (const auto& [entry, shard_id] : entries) {
+        seastar_logger.info("TEST: {} {}", entry, shard_id);
+    }
 
     fs.stop().wait();
 }
