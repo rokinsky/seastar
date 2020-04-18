@@ -89,6 +89,7 @@ class filesystem {
     lw_shared_ptr<metadata_log> _metadata_log;
     std::optional<foreign_ptr<lw_shared_ptr<shared_root>>> _shared_root;
     shared_root_map _cache_root;
+    shared_root_map _local_root;
 public:
     filesystem() = default;
 
@@ -105,6 +106,16 @@ public:
         });
     }
 
+    future<shared_root_map> get_own_root_entries() {
+        _local_root.clear();
+        return _metadata_log->iterate_directory("/", [this] (const std::string& path) -> future<stop_iteration> {
+            _local_root[path] = this_shard_id();
+            return make_ready_future<stop_iteration>(stop_iteration::no);
+        }).then([this] {
+            return _local_root;
+        });
+    }
+
     future<> update_cache() {
         return async([this] {
             const auto root = get_root_entries().get0();
@@ -114,6 +125,10 @@ public:
     }
 
     future<file> open_file_dma(std::string name, open_flags flags);
+
+    future<> create_directory(std::string name) {
+        return _metadata_log->create_directory(std::move(name), file_permissions::default_file_permissions);
+    }
 
     future<> stop();
 
