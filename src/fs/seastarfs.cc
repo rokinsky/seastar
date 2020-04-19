@@ -73,7 +73,7 @@ future<> filesystem::init(std::string device_path) {
     return do_with_device(std::move(device_path), [=](block_device &device) {
         return bootstrap_record::read_from_disk(device).then([this, &device]
                 (bootstrap_record record) {
-            const auto shard_id = engine().cpu_id();
+            const auto shard_id = this_shard_id();
 
             if (shard_id > record.shards_nb() - 1) {
                 return device.close(); // TODO: or throw exception ? some shards cannot be launched.
@@ -172,14 +172,12 @@ future<> initfs(sharded<filesystem>& fs, std::string path, lw_shared_ptr<shared_
     });
 }
 
-future<sharded<filesystem>> bootfs(std::string device_path) {
-    return async([device_path = std::move(device_path)] () mutable {
+future<> bootfs(sharded<filesystem>& fs, std::string device_path) {
+    return async([&fs, device_path = std::move(device_path)] () mutable {
         assert(thread::running_in_thread());
         auto root = make_lw_shared<shared_root>();
-        sharded<filesystem> fs;
         fs.start().wait();
         initfs(fs, std::move(device_path), std::move(root)).wait();
-        return fs;
     });
 }
 

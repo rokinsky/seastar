@@ -75,8 +75,8 @@ public:
         return make_ready_future<bool>(can_rename);
     }
 
-    future<shared_root_map> pull_entries() {
-        return make_ready_future<shared_root_map>(root);
+    shared_root_map pull_entries() {
+        return root;
     }
 
     future<> push_entries(shared_root_map root_shard) {
@@ -137,7 +137,7 @@ private:
     future<inode_t> prepare_file(std::string name, open_flags flags);
 };
 
-future<sharded<filesystem>> bootfs(std::string device_path);
+future<> bootfs(sharded<filesystem>& fs, std::string device_path);
 
 future<> mkfs(std::string device_path, uint64_t version, unit_size_t cluster_size, unit_size_t alignment,
         inode_t root_directory, uint32_t shards_nb);

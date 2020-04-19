@@ -182,29 +182,35 @@ SEASTAR_THREAD_TEST_CASE(valid_basic_bootfs_test) {
 
     fs::mkfs(tf.path(), version, cluster_size, alignment, root_directory, smp::count).wait();
 
-    auto fs = fs::bootfs(tf.path()).get0();
+    {
+        sharded<filesystem> fs;
+        fs::bootfs(fs, tf.path()).wait();
 
-    fs.local().create_directory("/test1").wait();
-    fs.local().create_directory("/test2").wait();
-    fs.local().create_directory("/test3").wait();
+        fs.local().create_directory("/test1").wait();
+        fs.local().create_directory("/test2").wait();
+        fs.local().create_directory("/test3").wait();
 
-    shared_root_map entries = fs.local().get_own_root_entries().get0();
+        shared_root_map entries = fs.local().get_own_root_entries().get0();
 
-    for (const auto& [entry, shard_id] : entries) {
-        seastar_logger.info("TEST: {} {}", entry, shard_id);
+        for (const auto&[entry, shard_id] : entries) {
+            seastar_logger.info("TEST: {} {}", entry, shard_id);
+        }
+
+        fs.stop().wait();
     }
 
-    fs.stop().wait();
+    {
+        sharded<filesystem> fs;
+        fs::bootfs(fs, tf.path()).wait();
 
-    fs = fs::bootfs(tf.path()).get0();
+        const auto entries = fs.local().get_own_root_entries().get0();
 
-    entries = fs.local().get_own_root_entries().get0();
+        for (const auto&[entry, shard_id] : entries) {
+            seastar_logger.info("TEST: {} {}", entry, shard_id);
+        }
 
-    for (const auto& [entry, shard_id] : entries) {
-        seastar_logger.info("TEST: {} {}", entry, shard_id);
+        fs.stop().wait();
     }
-
-    fs.stop().wait();
 }
 
 SEASTAR_THREAD_TEST_CASE(valid_basic_open_test) {
