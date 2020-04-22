@@ -69,7 +69,7 @@ class metadata_log {
     // Estimations of metadata log size used in compaction
     size_t _ondisk_log_size = 0;
     size_t _rewrite_log_size = 0;
-    std::map<cluster_id_t, cluster_info> _clusters;
+    std::unordered_map<cluster_id_t, cluster_info> _clusters;
 
     // Locks are used to ensure metadata consistency while allowing concurrent usage.
     //

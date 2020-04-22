@@ -29,41 +29,47 @@
 
 namespace seastar::fs {
 
-// Each cluster_data_vec corresponds to an inode_data_vec
-struct cluster_data_vec {
-    inode_t data_owner;
-    file_range data_range;
-};
+class cluster_info {
 
-struct cluster_info {
+    // Each cluster_data_vec corresponds to an inode_data_vec
+    struct cluster_data_vec {
+        inode_t data_owner;
+        file_range data_range;
+    };
     size_t valid_data_size = 0;
     bool read_only = false;
     std::map<disk_offset_t, cluster_data_vec> data;
 
+public:
+
     bool is_empty() const noexcept {
         return valid_data_size == 0;
     }
+
     void finished_writing() noexcept {
         read_only = true;
     }
+
+    bool can_compact() const noexcept {
+        return read_only;
+    }
+
     void add_data(disk_offset_t disk_offset, inode_t inode, file_range data_range) noexcept {
         data.emplace(disk_offset, cluster_data_vec {inode, data_range});
         valid_data_size += data_range.size();
     }
+
     void remove_data(disk_offset_t disk_offset, file_range remove_range) {
         auto data_vec = std::move(data.extract(--data.upper_bound(disk_offset)).mapped());
         auto inode = data_vec.data_owner;
-        auto left = data_vec.data_range.beg;
-        auto right = data_vec.data_range.end;
-
+        auto [left, right] = data_vec.data_range;
         if (left < remove_range.beg) {
-            data.emplace(disk_offset + (left - remove_range.beg), cluster_data_vec {inode, {left, remove_range.beg}});
+            data.emplace(disk_offset + left - remove_range.beg, cluster_data_vec {inode, {left, remove_range.beg}});
         }
         if (remove_range.end < right) {
-            data.emplace(disk_offset + (remove_range.end - remove_range.beg), cluster_data_vec {inode, {remove_range.end, right}});
+            data.emplace(disk_offset + remove_range.size(), cluster_data_vec {inode, {remove_range.end, right}});
         }
         valid_data_size -= remove_range.size();
-
     }
 };
 
