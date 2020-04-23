@@ -22,45 +22,47 @@
 #pragma once
 
 #include "fs/cluster.hh"
+#include "seastar/core/circular_buffer.hh"
 #include "seastar/core/future.hh"
 #include "seastar/core/semaphore.hh"
 
-#include <deque>
 #include <optional>
 #include <unordered_set>
-#include <vector>
 
 namespace seastar::fs {
 
 class cluster_allocator {
     std::unordered_set<cluster_id_t> _allocated_clusters;
-    std::deque<cluster_id_t> _free_clusters;
+    circular_buffer<cluster_id_t> _free_clusters;
     semaphore _cluster_sem;
 
-    cluster_id_t do_alloc();
-    cluster_id_t do_free(cluster_id_t cluster_id);
+    cluster_id_t do_alloc() noexcept;
+    void do_free(cluster_id_t cluster_id) noexcept;
 
 public:
-    cluster_allocator();
+    cluster_allocator(std::unordered_set<cluster_id_t> allocated_clusters = {},
+            circular_buffer<cluster_id_t> free_clusters = {});
 
     cluster_allocator(const cluster_allocator&) = delete;
     cluster_allocator& operator=(const cluster_allocator&) = delete;
     cluster_allocator(cluster_allocator&&) = default;
     cluster_allocator& operator=(cluster_allocator&&) = delete;
 
-    void init(std::unordered_set<cluster_id_t> allocated_clusters, std::deque<cluster_id_t> free_clusters);
+    // Changes cluster_allocator's set of free and allocated clusters. Assumes that there are no allocated clusters
+    // before call.
+    void reset(std::unordered_set<cluster_id_t> allocated_clusters, circular_buffer<cluster_id_t> free_clusters);
 
     // Tries to allocate a cluster
-    std::optional<cluster_id_t> alloc();
+    std::optional<cluster_id_t> alloc() noexcept;
 
-    // Waits for free @p count clusters and allocates
+    // Waits until @p count free clusters are available and allocates them
     future<std::vector<cluster_id_t>> alloc_wait(size_t count = 1);
 
-    // @p cluster_id has to be allocated using alloc()
-    void free(cluster_id_t cluster_id);
+    // @p cluster_id has to be allocated using alloc() or alloc_wait()
+    void free(cluster_id_t cluster_id) noexcept;
 
-    // @p cluster_id has to be allocated using alloc()
-    void free(const std::vector<cluster_id_t>& cluster_ids);
+    // @p cluster_id has to be allocated using alloc() or alloc_wait()
+    void free(const std::vector<cluster_id_t>& cluster_ids) noexcept;
 };
 
 } // namespace seastar::fs
