@@ -107,30 +107,28 @@ void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_
 void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) {
     using CR = inode_info::file::cut_result;
     file.cut_out_data_range(range, [&](inode_data_vec data_vec, CR cr) {
-        int new_writes_cnt = 0;
-        switch (cr) {
-        case CR::BOTH:
-            new_writes_cnt++;
-        case CR::LEFT:
-        case CR::RIGHT:
-            new_writes_cnt++;
-        case CR::NONE:
-            break;
+        int new_writes_cnt;
+        if (cr == CR::BOTH) {
+            new_writes_cnt = 2;
+        } else if (cr == CR::LEFT || cr == CR::RIGHT) {
+            new_writes_cnt = 1;
+        } else {
+            new_writes_cnt = 0;
         }
         std::visit(overloaded {
             [&](inode_data_vec::in_mem_data& mem) {
-                size_t log_decrease = ondisk_entry_size(ondisk_small_write_header{0,0,static_cast<uint16_t>(data_vec.data_range.size()),0});
+                size_t log_decrease = ondisk_entry_size<ondisk_small_write_header>(data_vec.data_range.size());
                 _rewrite_log_size -= log_decrease;
-                _rewrite_log_size += new_writes_cnt * ondisk_entry_size(ondisk_small_write_header{});
+                _rewrite_log_size += new_writes_cnt * ondisk_entry_size<ondisk_small_write_header>(0);
             },
             [&](inode_data_vec::on_disk_data& disk_data) {
-                // TODO: Diffrenciate between large write and large write without mtime
+                // TODO: Differentiate between large write and large write without mtime
                 size_t log_decrease = data_vec.data_range.size() == _cluster_size ?
-                    ondisk_entry_size(ondisk_large_write{}) :
-                    ondisk_entry_size(ondisk_medium_write{});
+                    ondisk_entry_size<ondisk_large_write>() :
+                    ondisk_entry_size<ondisk_medium_write>();
                 _rewrite_log_size -= log_decrease;
                 // Remaining data is smaller than original so it's less than large write
-                _rewrite_log_size += new_writes_cnt * ondisk_entry_size(ondisk_medium_write{});
+                _rewrite_log_size += new_writes_cnt * ondisk_entry_size<ondisk_medium_write>();
                 _clusters[offset_to_cluster_id(disk_data.device_offset, _cluster_size)].remove_data(disk_data.device_offset, data_vec.data_range);
             },
             [&](inode_data_vec::hole_data&) {
@@ -141,12 +139,12 @@ void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) 
 
 inode_info& metadata_log::memory_only_create_inode(inode_t inode, bool is_directory, unix_metadata metadata) {
     assert(_inodes.count(inode) == 0);
-    size_t log_increase = ondisk_entry_size(ondisk_create_inode{});
+    size_t log_increase = ondisk_entry_size<ondisk_create_inode>();
     _ondisk_log_size += log_increase;
     _rewrite_log_size += log_increase;
     // During rewrite we'll start with a truncate setting the file size to remember trailing holes
-    if (not is_directory)
-        _rewrite_log_size += ondisk_entry_size(ondisk_truncate{});
+    if (!is_directory)
+        _rewrite_log_size += ondisk_entry_size<ondisk_truncate>();
     return _inodes.emplace(inode, inode_info {
         0,
         0,
@@ -176,13 +174,13 @@ void metadata_log::memory_only_delete_inode(inode_t inode) {
                 0,
                 std::numeric_limits<decltype(file_range::end)>::max()
             });
-            ondisk_entry_size(ondisk_truncate{});
+            ondisk_entry_size<ondisk_truncate>();
         }
     }, it->second.contents);
 
     _inodes.erase(it);
-    _ondisk_log_size += ondisk_entry_size(ondisk_delete_inode{});
-    _rewrite_log_size -= ondisk_entry_size(ondisk_create_inode{});
+    _ondisk_log_size += ondisk_entry_size<ondisk_delete_inode>();
+    _rewrite_log_size -= ondisk_entry_size<ondisk_create_inode>();
 }
 
 void metadata_log::memory_only_small_write(inode_t inode, file_offset_t file_offset, temporary_buffer<uint8_t> data) {
@@ -190,7 +188,7 @@ void metadata_log::memory_only_small_write(inode_t inode, file_offset_t file_off
         {file_offset, file_offset + data.size()},
         inode_data_vec::in_mem_data {std::move(data)}
     };
-    size_t log_increase = ondisk_entry_size(ondisk_small_write_header{0,0,static_cast<uint16_t>(data.size()),0});
+    size_t log_increase = ondisk_entry_size<ondisk_small_write_header>(data.size());
     auto it = _inodes.find(inode);
     assert(it != _inodes.end());
     assert(it->second.is_file());
@@ -203,8 +201,8 @@ void metadata_log::memory_only_disk_write(inode_t inode, file_offset_t file_offs
         size_t write_len) {
     assert(write_len <= _cluster_size);
     size_t log_increase = write_len == _cluster_size ?
-        ondisk_entry_size(ondisk_large_write{}) :
-        ondisk_entry_size(ondisk_medium_write{});
+        ondisk_entry_size<ondisk_large_write>() :
+        ondisk_entry_size<ondisk_medium_write>();
     inode_data_vec data_vec = {
         {file_offset, file_offset + write_len},
         inode_data_vec::on_disk_data {disk_offset}
@@ -249,9 +247,9 @@ void metadata_log::memory_only_truncate(inode_t inode, file_offset_t size) {
 }
 
 void metadata_log::memory_only_add_dir_entry(inode_info::directory& dir, inode_t entry_inode, std::string entry_name) {
-    size_t log_increase = ondisk_entry_size(ondisk_add_dir_entry_header{0, 0, static_cast<uint16_t>(entry_name.size())});
-    size_t log_adjust = ondisk_entry_size(ondisk_create_inode_as_dir_entry_header{{}, 0, static_cast<uint16_t>(entry_name.size())}) -
-            ondisk_entry_size(ondisk_create_inode{});
+    size_t log_increase = ondisk_entry_size<ondisk_add_dir_entry_header>(entry_name.size());
+    size_t log_adjust = ondisk_entry_size<ondisk_create_inode_as_dir_entry_header>(entry_name.size()) -
+            ondisk_entry_size<ondisk_create_inode>();
     auto it = _inodes.find(entry_inode);
     assert(it != _inodes.end());
     // Directory may only be linked once (to avoid creating cycles)
@@ -273,10 +271,10 @@ void metadata_log::memory_only_add_dir_entry(inode_info::directory& dir, inode_t
 
 inode_info& metadata_log::memory_only_create_inode_as_dir_entry(inode_t entry_inode, bool is_directory, unix_metadata metadata,
         inode_info::directory& dir, std::string entry_name) {
-    size_t log_adjust = ondisk_entry_size(ondisk_create_inode_as_dir_entry_header{{}, 0, static_cast<uint16_t>(entry_name.size())}) -
-        ondisk_entry_size(ondisk_create_inode{}) -
-        ondisk_entry_size(ondisk_add_dir_entry_header{0, 0, static_cast<uint16_t>(entry_name.size())});
-    // We'll need to adjust ondisk log size because we'll chang it in following calls
+    size_t log_adjust = ondisk_entry_size<ondisk_create_inode_as_dir_entry_header>(entry_name.size()) -
+        ondisk_entry_size<ondisk_create_inode>() -
+        ondisk_entry_size<ondisk_add_dir_entry_header>(entry_name.size());
+    // We'll need to adjust ondisk log size because we'll change it in following calls
     inode_info& new_inode_info = memory_only_create_inode(entry_inode, is_directory, metadata);
     memory_only_add_dir_entry(dir, entry_inode, std::move(entry_name));
     _ondisk_log_size += log_adjust;
@@ -284,10 +282,10 @@ inode_info& metadata_log::memory_only_create_inode_as_dir_entry(inode_t entry_in
 }
 
 void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, std::string entry_name) {
-    size_t log_increase = ondisk_entry_size(ondisk_delete_dir_entry_header{0, static_cast<uint16_t>(entry_name.size())});
-    size_t log_decrease = ondisk_entry_size(ondisk_add_dir_entry_header{0, 0, static_cast<uint16_t>(entry_name.size())});
-    size_t log_adjust = ondisk_entry_size(ondisk_create_inode_as_dir_entry_header{{}, 0, static_cast<uint16_t>(entry_name.size())}) -
-            ondisk_entry_size(ondisk_create_inode{});
+    size_t log_increase = ondisk_entry_size<ondisk_delete_dir_entry_header>(entry_name.size());
+    size_t log_decrease = ondisk_entry_size<ondisk_add_dir_entry_header>(entry_name.size());
+    size_t log_adjust = ondisk_entry_size<ondisk_create_inode_as_dir_entry_header>(entry_name.size()) -
+            ondisk_entry_size<ondisk_create_inode>();
     auto it = dir.entries.find(entry_name);
     assert(it != dir.entries.end());
 
@@ -307,14 +305,14 @@ void metadata_log::memory_only_delete_dir_entry(inode_info::directory& dir, std:
 }
 
 void metadata_log::memory_only_delete_inode_after_dir_entry(inode_t entry_inode) {
-    size_t log_adjust = ondisk_entry_size(ondisk_delete_inode_and_dir_entry_header{0, 0, 0}) -
-        ondisk_entry_size(ondisk_delete_inode{}) - ondisk_entry_size(ondisk_delete_dir_entry_header{0, 0});
+    size_t log_adjust = ondisk_entry_size<ondisk_delete_inode_and_dir_entry_header>(0) -
+        ondisk_entry_size<ondisk_delete_inode>() - ondisk_entry_size<ondisk_delete_dir_entry_header>(0);
     memory_only_delete_inode(entry_inode);
     _ondisk_log_size += log_adjust;
 }
 
-void metadata_log::next_data_cluster() {
-    _clusters[offset_to_cluster_id(_curr_data_writer->current_disk_offset(), _cluster_size)].finished_writing();
+void metadata_log::finish_data_cluster(cluster_id_t cluster_id) {
+    _clusters[cluster_id].finished_writing();
 }
 
 void metadata_log::schedule_flush_of_curr_cluster() {

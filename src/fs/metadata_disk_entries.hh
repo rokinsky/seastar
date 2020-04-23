@@ -204,5 +204,43 @@ constexpr size_t ondisk_entry_size(const ondisk_delete_dir_entry_header& entry) 
 constexpr size_t ondisk_entry_size(const ondisk_delete_inode_and_dir_entry_header& entry) noexcept {
     return sizeof(ondisk_type) + sizeof(entry) + entry.entry_name_length;
 }
+template<typename T>
+constexpr size_t ondisk_entry_size() noexcept {
+    static_assert(std::is_same_v<T, ondisk_next_metadata_cluster> or
+            std::is_same_v<T, ondisk_create_inode> or
+            std::is_same_v<T, ondisk_delete_inode> or
+            std::is_same_v<T, ondisk_medium_write> or
+            std::is_same_v<T, ondisk_large_write> or
+            std::is_same_v<T, ondisk_large_write_without_mtime> or
+            std::is_same_v<T, ondisk_truncate>, "ondisk entry size not defined for given type");
+    return sizeof(ondisk_type) + sizeof(T);
+}
+template<typename T>
+constexpr size_t ondisk_entry_size(size_t data_size) noexcept;
+template<>
+constexpr size_t ondisk_entry_size<ondisk_small_write_header>(size_t data_size) noexcept {
+    return sizeof(ondisk_type) + sizeof(ondisk_small_write_header
+        {0, 0, static_cast<decltype(ondisk_small_write_header::length)>(data_size), 0});
+}
+template<>
+constexpr size_t ondisk_entry_size<ondisk_add_dir_entry_header>(size_t data_size) noexcept {
+    return sizeof(ondisk_type) + sizeof(ondisk_add_dir_entry_header
+        {0, 0, static_cast<decltype(ondisk_add_dir_entry_header::entry_name_length)>(data_size)});
+}
+template<>
+constexpr size_t ondisk_entry_size<ondisk_create_inode_as_dir_entry_header>(size_t data_size) noexcept {
+    return sizeof(ondisk_type) + sizeof(ondisk_create_inode_as_dir_entry_header
+        {0, 0, static_cast<decltype(ondisk_create_inode_as_dir_entry_header::entry_name_length)>(data_size), 0});
+}
+template<>
+constexpr size_t ondisk_entry_size<ondisk_delete_dir_entry_header>(size_t data_size) noexcept {
+    return sizeof(ondisk_type) + sizeof(ondisk_delete_dir_entry_header
+        {0, static_cast<decltype(ondisk_delete_dir_entry_header::entry_name_length)>(data_size)});
+}
+template<>
+constexpr size_t ondisk_entry_size<ondisk_delete_inode_and_dir_entry_header>(size_t data_size) noexcept {
+    return sizeof(ondisk_type) + sizeof(ondisk_delete_inode_and_dir_entry_header
+        {0, static_cast<decltype(ondisk_delete_inode_and_dir_entry_header::entry_name_length)>(data_size)});
+}
 
 } // namespace seastar::fs

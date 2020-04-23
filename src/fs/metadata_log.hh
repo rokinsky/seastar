@@ -209,7 +209,7 @@ private:
     void memory_only_delete_dir_entry(inode_info::directory& dir, std::string entry_name);
     void memory_only_delete_inode_after_dir_entry(inode_t entry_inode);
 
-    void next_data_cluster();
+    void finish_data_cluster(cluster_id_t cluster_id);
 
     template<class Func>
     void schedule_background_task(Func&& task) {

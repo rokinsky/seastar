@@ -180,12 +180,12 @@ private:
                     if (buff_bytes_left <= SMALL_WRITE_THRESHOLD) {
                         // TODO: add wasted buff_bytes_left bytes for compaction
                         // No space left in the current to_disk_buffer for medium write - allocate a new buffer
-                        _metadata_log.next_data_cluster();
                         std::optional<cluster_id_t> cluster_opt = _metadata_log._cluster_allocator.alloc();
                         if (not cluster_opt) {
                             // TODO: maybe we should return partial write instead of exception?
                             return make_exception_future<bool_class<stop_iteration_tag>>(no_more_space_exception());
                         }
+                        _metadata_log.finish_data_cluster(offset_to_cluster_id(_metadata_log._curr_data_writer->current_disk_offset(), _metadata_log._cluster_size));
 
                         auto cluster_id = cluster_opt.value();
                         disk_offset_t cluster_disk_offset = cluster_id_to_offset(cluster_id, _metadata_log._cluster_size);
@@ -301,6 +301,7 @@ private:
                 return make_exception_future<size_t>(no_more_space_exception());
             case metadata_log::append_result::APPENDED:
                 _metadata_log.memory_only_disk_write(_inode, file_offset, cluster_disk_offset, write_len);
+                _metadata_log.finish_data_cluster(cluster_id);
                 return make_ready_future<size_t>(write_len);
             }
             __builtin_unreachable();

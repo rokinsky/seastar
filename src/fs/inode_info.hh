@@ -97,7 +97,7 @@ struct inode_info {
         // data vectors) that will be deleted
         template<class Func>
         void cut_out_data_range(file_range range, Func&& cut_data_vec_processor) {
-            static_assert(std::is_invocable_v<Func, inode_data_vec, cut_result>); 
+            static_assert(std::is_invocable_v<Func, inode_data_vec, cut_result>);
             // Cut all vectors intersecting with range
             auto it = data.lower_bound(range.beg);
             if (it != data.begin() and are_intersecting(range, prev(it)->second.data_range)) {
