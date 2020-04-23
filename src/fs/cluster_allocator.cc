@@ -28,27 +28,39 @@
 
 namespace seastar::fs {
 
+namespace {
+
+std::unordered_map<cluster_id_t, bool> create_allocated_clusters(const std::unordered_set<cluster_id_t>& allocated_clusters,
+        const circular_buffer<cluster_id_t>& free_clusters) {
+    std::unordered_map<cluster_id_t, bool> allocated_clusters_tmp;
+    for (auto& i : allocated_clusters) {
+        allocated_clusters_tmp.emplace(i, true);
+    }
+    for (auto& i : free_clusters) {
+        allocated_clusters_tmp.emplace(i, false);
+    }
+    return allocated_clusters_tmp;
+}
+
+} // namespace
+
 cluster_allocator::cluster_allocator(std::unordered_set<cluster_id_t> allocated_clusters,
         circular_buffer<cluster_id_t> free_clusters)
-        : _allocated_clusters(std::move(allocated_clusters))
+        : _allocated_clusters(create_allocated_clusters(allocated_clusters, free_clusters))
         , _free_clusters(std::move(free_clusters))
         , _cluster_sem(_free_clusters.size()) {
-    size_t cluster_nb = _free_clusters.size() + _allocated_clusters.size();
-    _allocated_clusters.reserve(cluster_nb);
-    _free_clusters.reserve(cluster_nb);
+    _free_clusters.reserve(_free_clusters.size() + allocated_clusters.size());
 }
 
 void cluster_allocator::reset(std::unordered_set<cluster_id_t> allocated_clusters,
         circular_buffer<cluster_id_t> free_clusters) {
-    assert(_cluster_sem.available_units() == _free_clusters.size());
+    assert((size_t)_cluster_sem.available_units() == _free_clusters.size());
     assert(_cluster_sem.waiters() == 0);
 
-    size_t cluster_nb = free_clusters.size() + allocated_clusters.size();
-    allocated_clusters.reserve(cluster_nb);
-    free_clusters.reserve(cluster_nb);
-
-    _allocated_clusters = std::move(allocated_clusters);
+    free_clusters.reserve(free_clusters.size() + allocated_clusters.size());
+    _allocated_clusters = create_allocated_clusters(allocated_clusters, free_clusters);
     _free_clusters = std::move(free_clusters);
+
     _cluster_sem.consume(_cluster_sem.available_units());
     _cluster_sem.signal(_free_clusters.size());
 }
@@ -58,7 +70,7 @@ cluster_id_t cluster_allocator::do_alloc() noexcept {
 
     cluster_id_t cluster_id = _free_clusters.front();
     _free_clusters.pop_front();
-    _allocated_clusters.emplace(cluster_id);
+    _allocated_clusters[cluster_id] = true;
 
     return cluster_id;
 }
@@ -66,7 +78,7 @@ cluster_id_t cluster_allocator::do_alloc() noexcept {
 void cluster_allocator::do_free(cluster_id_t cluster_id) noexcept {
     assert(_allocated_clusters.count(cluster_id) == 1);
     _free_clusters.emplace_back(cluster_id);
-    _allocated_clusters.erase(cluster_id);
+    _allocated_clusters[cluster_id] = false;
 }
 
 std::optional<cluster_id_t> cluster_allocator::alloc() noexcept {

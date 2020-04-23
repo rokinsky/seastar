@@ -32,7 +32,7 @@
 namespace seastar::fs {
 
 class cluster_allocator {
-    std::unordered_set<cluster_id_t> _allocated_clusters;
+    std::unordered_map<cluster_id_t, bool> _allocated_clusters;
     circular_buffer<cluster_id_t> _free_clusters;
     semaphore _cluster_sem;
 
