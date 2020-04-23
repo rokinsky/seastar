@@ -19,11 +19,10 @@
  * Copyright (C) 2019 ScyllaDB
  */
 
-#include "fs/cluster.hh"
-#include "seastar/core/circular_buffer.hh"
 #define BOOST_TEST_MODULE fs
-
+#include "fs/cluster.hh"
 #include "fs/cluster_allocator.hh"
+#include "seastar/core/circular_buffer.hh"
 
 #include <random>
 #include <seastar/core/units.hh>

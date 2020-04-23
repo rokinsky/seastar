@@ -49,13 +49,15 @@ public:
     cluster_allocator& operator=(cluster_allocator&&) = delete;
 
     // Changes cluster_allocator's set of free and allocated clusters. Assumes that there are no allocated clusters
-    // before call.
+    // and nobody uses the cluster_allocator (e.g. waiting to alloc() a cluster).
+    // Strong exception guarantee is provided.
     void reset(std::unordered_set<cluster_id_t> allocated_clusters, circular_buffer<cluster_id_t> free_clusters);
 
     // Tries to allocate a cluster
     std::optional<cluster_id_t> alloc() noexcept;
 
-    // Waits until @p count free clusters are available and allocates them
+    // Waits until @p count free clusters are available and allocates them.
+    // Strong exception guarantee is provided.
     future<std::vector<cluster_id_t>> alloc_wait(size_t count = 1);
 
     // @p cluster_id has to be allocated using alloc() or alloc_wait()

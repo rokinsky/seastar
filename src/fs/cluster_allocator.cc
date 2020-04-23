@@ -54,7 +54,7 @@ void cluster_allocator::reset(std::unordered_set<cluster_id_t> allocated_cluster
 }
 
 cluster_id_t cluster_allocator::do_alloc() noexcept {
-    assert(not _free_clusters.empty());
+    assert(!_free_clusters.empty());
 
     cluster_id_t cluster_id = _free_clusters.front();
     _free_clusters.pop_front();
