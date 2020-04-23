@@ -119,7 +119,7 @@ future<> metadata_log_bootstrap::bootstrap(cluster_id_t first_metadata_cluster_i
                 cluster_id_to_offset(datalog_cluster_id, _metadata_log._cluster_size));
 
         mlogger.debug("free clusters: {}", free_clusters.size());
-        _metadata_log._cluster_allocator = cluster_allocator(std::move(_taken_clusters), std::move(free_clusters));
+        _metadata_log._cluster_allocator.init(std::move(_taken_clusters), std::move(free_clusters));
 
         // Reset _inode_allocator
         std::optional<inode_t> max_inode_no;

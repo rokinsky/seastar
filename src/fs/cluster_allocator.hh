@@ -22,29 +22,45 @@
 #pragma once
 
 #include "fs/cluster.hh"
+#include "seastar/core/future.hh"
+#include "seastar/core/semaphore.hh"
 
 #include <deque>
 #include <optional>
 #include <unordered_set>
+#include <vector>
 
-namespace seastar {
-
-namespace fs {
+namespace seastar::fs {
 
 class cluster_allocator {
     std::unordered_set<cluster_id_t> _allocated_clusters;
     std::deque<cluster_id_t> _free_clusters;
+    semaphore _cluster_sem;
+
+    cluster_id_t do_alloc();
+    cluster_id_t do_free(cluster_id_t cluster_id);
 
 public:
-    explicit cluster_allocator(std::unordered_set<cluster_id_t> allocated_clusters, std::deque<cluster_id_t> free_clusters);
+    cluster_allocator();
+
+    cluster_allocator(const cluster_allocator&) = delete;
+    cluster_allocator& operator=(const cluster_allocator&) = delete;
+    cluster_allocator(cluster_allocator&&) = default;
+    cluster_allocator& operator=(cluster_allocator&&) = delete;
+
+    void init(std::unordered_set<cluster_id_t> allocated_clusters, std::deque<cluster_id_t> free_clusters);
 
     // Tries to allocate a cluster
     std::optional<cluster_id_t> alloc();
 
+    // Waits for free @p count clusters and allocates
+    future<std::vector<cluster_id_t>> alloc_wait(size_t count = 1);
+
     // @p cluster_id has to be allocated using alloc()
     void free(cluster_id_t cluster_id);
+
+    // @p cluster_id has to be allocated using alloc()
+    void free(const std::vector<cluster_id_t>& cluster_ids);
 };
 
-}
-
-}
+} // namespace seastar::fs

@@ -31,7 +31,8 @@
 using namespace seastar;
 
 BOOST_AUTO_TEST_CASE(test_cluster_0) {
-    fs::cluster_allocator ca({}, {0});
+    fs::cluster_allocator ca;
+    ca.init({}, {0});
     BOOST_REQUIRE_EQUAL(ca.alloc().value(), 0);
     BOOST_REQUIRE(ca.alloc() == std::nullopt);
     BOOST_REQUIRE(ca.alloc() == std::nullopt);
@@ -42,13 +43,15 @@ BOOST_AUTO_TEST_CASE(test_cluster_0) {
 }
 
 BOOST_AUTO_TEST_CASE(test_empty) {
-    fs::cluster_allocator empty_ca{{}, {}};
+    fs::cluster_allocator empty_ca;
+    empty_ca.init({}, {});
     BOOST_REQUIRE(empty_ca.alloc() == std::nullopt);
 }
 
 BOOST_AUTO_TEST_CASE(test_small) {
     std::deque<fs::cluster_id_t> deq{1, 5, 3, 4, 2};
-    fs::cluster_allocator small_ca({}, deq);
+    fs::cluster_allocator small_ca;
+    small_ca.init({}, deq);
     BOOST_REQUIRE_EQUAL(small_ca.alloc().value(), deq[0]);
     BOOST_REQUIRE_EQUAL(small_ca.alloc().value(), deq[1]);
     BOOST_REQUIRE_EQUAL(small_ca.alloc().value(), deq[2]);
@@ -82,7 +85,8 @@ BOOST_AUTO_TEST_CASE(test_max) {
     for (fs::cluster_id_t i = 0; i < clusters_per_shard; i++) {
         deq.emplace_back(i);
     }
-    fs::cluster_allocator ordinary_ca({}, deq);
+    fs::cluster_allocator ordinary_ca;
+    ordinary_ca.init({}, deq);
     for (fs::cluster_id_t i = 0; i < clusters_per_shard; i++) {
         BOOST_REQUIRE_EQUAL(ordinary_ca.alloc().value(), i);
     }
@@ -105,7 +109,8 @@ BOOST_AUTO_TEST_CASE(test_pseudo_rand) {
         uset.insert(elem);
         elem = (elem * 19) % 1021;
     }
-    fs::cluster_allocator random_ca(uset, deq);
+    fs::cluster_allocator random_ca;
+    random_ca.init(uset, deq);
     elem = 215;
     while (elem != 1) {
         BOOST_REQUIRE_EQUAL(random_ca.alloc().value(), elem);
