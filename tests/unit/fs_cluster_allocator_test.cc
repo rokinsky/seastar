@@ -16,10 +16,11 @@
  * under the License.
  */
 /*
- * Copyright (C) 2019 ScyllaDB
+ * Copyright (C) 2020 ScyllaDB
  */
 
 #define BOOST_TEST_MODULE fs
+
 #include "fs/cluster.hh"
 #include "fs/cluster_allocator.hh"
 #include "seastar/core/circular_buffer.hh"

@@ -16,7 +16,7 @@
  * under the License.
  */
 /*
- * Copyright (C) 2019 ScyllaDB
+ * Copyright (C) 2020 ScyllaDB
  */
 
 #pragma once
@@ -26,8 +26,11 @@
 #include "seastar/core/future.hh"
 #include "seastar/core/semaphore.hh"
 
+#include <cstdint>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace seastar::fs {
 
@@ -40,8 +43,8 @@ class cluster_allocator {
     void do_free(cluster_id_t cluster_id) noexcept;
 
 public:
-    cluster_allocator(std::unordered_set<cluster_id_t> allocated_clusters = {},
-            circular_buffer<cluster_id_t> free_clusters = {});
+    cluster_allocator();
+    cluster_allocator(std::unordered_set<cluster_id_t> allocated_clusters, circular_buffer<cluster_id_t> free_clusters);
 
     cluster_allocator(const cluster_allocator&) = delete;
     cluster_allocator& operator=(const cluster_allocator&) = delete;
@@ -53,7 +56,7 @@ public:
     // Strong exception guarantee is provided.
     void reset(std::unordered_set<cluster_id_t> allocated_clusters, circular_buffer<cluster_id_t> free_clusters);
 
-    // Tries to allocate a cluster
+    // Tries to allocate a cluster.
     std::optional<cluster_id_t> alloc() noexcept;
 
     // Waits until @p count free clusters are available and allocates them.

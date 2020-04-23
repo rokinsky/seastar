@@ -16,40 +16,21 @@
  * under the License.
  */
 /*
- * Copyright (C) 2019 ScyllaDB
+ * Copyright (C) 2020 ScyllaDB
  */
 
-#include "fs/cluster.hh"
 #include "fs/cluster_allocator.hh"
-#include "seastar/core/future.hh"
 
 #include <cassert>
-#include <optional>
 
 namespace seastar::fs {
 
-namespace {
-
-std::unordered_map<cluster_id_t, bool> create_allocated_clusters(const std::unordered_set<cluster_id_t>& allocated_clusters,
-        const circular_buffer<cluster_id_t>& free_clusters) {
-    std::unordered_map<cluster_id_t, bool> allocated_clusters_tmp;
-    for (auto& i : allocated_clusters) {
-        allocated_clusters_tmp.emplace(i, true);
-    }
-    for (auto& i : free_clusters) {
-        allocated_clusters_tmp.emplace(i, false);
-    }
-    return allocated_clusters_tmp;
-}
-
-} // namespace
+cluster_allocator::cluster_allocator() : _cluster_sem(0) {}
 
 cluster_allocator::cluster_allocator(std::unordered_set<cluster_id_t> allocated_clusters,
         circular_buffer<cluster_id_t> free_clusters)
-        : _allocated_clusters(create_allocated_clusters(allocated_clusters, free_clusters))
-        , _free_clusters(std::move(free_clusters))
-        , _cluster_sem(_free_clusters.size()) {
-    _free_clusters.reserve(_free_clusters.size() + allocated_clusters.size());
+        : cluster_allocator() {
+    reset(std::move(allocated_clusters), std::move(free_clusters));
 }
 
 void cluster_allocator::reset(std::unordered_set<cluster_id_t> allocated_clusters,
@@ -58,7 +39,16 @@ void cluster_allocator::reset(std::unordered_set<cluster_id_t> allocated_cluster
     assert(_cluster_sem.waiters() == 0);
 
     free_clusters.reserve(free_clusters.size() + allocated_clusters.size());
-    _allocated_clusters = create_allocated_clusters(allocated_clusters, free_clusters);
+    _allocated_clusters = [&] {
+        std::unordered_map<cluster_id_t, bool> allocated_clusters_tmp;
+        for (auto& i : allocated_clusters) {
+            allocated_clusters_tmp.emplace(i, true);
+        }
+        for (auto& i : free_clusters) {
+            allocated_clusters_tmp.emplace(i, false);
+        }
+        return allocated_clusters_tmp;
+    }();
     _free_clusters = std::move(free_clusters);
 
     _cluster_sem.consume(_cluster_sem.available_units());
