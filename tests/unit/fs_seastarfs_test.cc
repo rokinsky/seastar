@@ -55,8 +55,8 @@ SEASTAR_THREAD_TEST_CASE(parallel_read_write_test) {
                         BOOST_REQUIRE(std::equal(rbuf.get(), rbuf.get() + alignment, wbuf.get()));
                     });
             });
-    }).wait();
+    }).get();
 
-    f.flush().wait();
-    f.close().wait();
+    f.flush().get();
+    f.close().get();
 }
