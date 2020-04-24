@@ -34,6 +34,7 @@ jobs:
         run: echo "::set-env name=SEASTAR_FS_TESTS::$(echo tests/unit/fs_*_test.cc | sed 's/\.cc//g')"
 
       - name: Configure
+        if: steps.cache.outputs.cache-hit != 'true'
         run: ./configure.py --mode=${{ matrix.mode }} --c++-dialect ${{ matrix.dialect }} --enable-experimental-fs
 
       - name: Build
