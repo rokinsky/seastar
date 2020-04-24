@@ -37,12 +37,13 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./configure.py --mode=${{ matrix.mode }} --c++-dialect ${{ matrix.dialect }} --enable-experimental-fs
 
-      - name: Change ninja mtime
+      - name: Change mtime
         if: steps.cache.outputs.cache-hit == 'true'
         run: | 
           find . -type f -printf "%.10T@\n" | sort | read OLDEST_MTIME
           export OLDEST_MTIME=$((OLDEST_MTIME-1))
-          find build/${{ matrix.mode }} -type f -exec touch -c -m -d “@$OLDEST_MTIME” {} \;
+          find $(ls -1 | grep -v '^build$') -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
+          find src tests | grep -P '/fs(/|_)|CMakeLists.txt' | xargs touch -c -m
 
       - name: Build
         run: ninja -C build/${{ matrix.mode }} ${{ env.SEASTAR_FS_TESTS }}
