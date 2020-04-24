@@ -28,7 +28,7 @@ jobs:
           key: ${{ runner.os }}-build-${{ matrix.mode }}-fs
 
       - name: List build directory
-        run: ls -la build/${{ matrix.mode }}
+        run: ls -la build/${{ matrix.mode }} 2> /dev/null
 
       - name: Set ENV variables
         run: echo "::set-env name=SEASTAR_FS_TESTS::$(echo tests/unit/fs_*_test.cc | sed 's/\.cc//g')"
