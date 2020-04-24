@@ -40,12 +40,13 @@ jobs:
 
       - name: Change mtime
         if: steps.cache.outputs.cache-hit == 'true'
-        run: | 
+        shell: bash
+        run: |
           find . -type f -printf "%.10T@\n" | sort | read OLDEST_MTIME
           export OLDEST_MTIME=$((OLDEST_MTIME-1))
           find build/${{ matrix.mode }} -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
           find src tests | grep -P '/fs(/|_)|CMakeLists.txt' | xargs touch -c -m
-        
+
           #find ${TRAVIS_BUILD_DIR} -type f -exec touch -c -m -d “@$OLDEST_MTIME” {} \;
 
       - name: Build
