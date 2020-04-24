@@ -2,7 +2,7 @@ name: "fs: labeler"
 
 on:
   pull_request:
-    branches: [ zpp_fs, fs-* ]
+    branches: [ zpp_fs, 'fs-*' ]
 
 jobs:
   triage:
