@@ -1,5 +1,8 @@
 #include <seastar/rpc/rpc.hh>
+#include <seastar/core/align.hh>
+#include <seastar/core/seastar.hh>
 #include <seastar/core/print.hh>
+#include <seastar/util/defer.hh>
 #include <boost/range/adaptor/map.hpp>
 
 namespace seastar {
@@ -10,12 +13,24 @@ namespace rpc {
         log(format("client {} msg_id {}:  {}", info.addr, msg_id, str));
     }
 
+    void logger::operator()(const client_info& info, id_type msg_id, log_level level, compat::string_view str) const {
+        log(level, "client {} msg_id {}:  {}", info.addr, msg_id, str);
+    }
+
     void logger::operator()(const client_info& info, const sstring& str) const {
         (*this)(info.addr, str);
     }
 
+    void logger::operator()(const client_info& info, log_level level, compat::string_view str) const {
+        (*this)(info.addr, level, str);
+    }
+
     void logger::operator()(const socket_address& addr, const sstring& str) const {
         log(format("client {}: {}", addr, str));
+    }
+
+    void logger::operator()(const socket_address& addr, log_level level, compat::string_view str) const {
+        log(level, "client {}: {}", addr, str);
     }
 
   no_wait_type no_wait;
@@ -49,7 +64,7 @@ namespace rpc {
   // a deleter of a new buffer takes care of deleting the original buffer
   template<typename T> // T is either snd_buf or rcv_buf
   T make_shard_local_buffer_copy(foreign_ptr<std::unique_ptr<T>> org) {
-      if (org.get_owner_shard() == engine().cpu_id()) {
+      if (org.get_owner_shard() == this_shard_id()) {
           return std::move(*org);
       }
       T buf(org->size);
@@ -369,7 +384,9 @@ namespace rpc {
                   if (one) {
                       p = net::packet(std::move(p), std::move(*one));
                   } else {
-                      for (auto&& b : compat::get<std::vector<temporary_buffer<char>>>(eb.bufs)) {
+                      auto&& bufs = compat::get<std::vector<temporary_buffer<char>>>(eb.bufs);
+                      p.reserve(bufs.size());
+                      for (auto&& b : bufs) {
                           p = net::packet(std::move(p), std::move(b));
                       }
                   }
@@ -484,7 +501,7 @@ namespace rpc {
       return it->second;
   }
 
-  static void log_exception(connection& c, const char* log, std::exception_ptr eptr) {
+  static void log_exception(connection& c, log_level level, const char* log, std::exception_ptr eptr) {
       const char* s;
       try {
           std::rethrow_exception(eptr);
@@ -493,7 +510,8 @@ namespace rpc {
       } catch (...) {
           s = "unknown exception";
       }
-      c.get_logger()(c.peer_address(), format("{}: {}", log, s));
+      auto formatted = format("{}: {}", log, s);
+      c.get_logger()(c.peer_address(), level, compat::string_view(formatted.data(), formatted.size()));
   }
 
 
@@ -597,9 +615,11 @@ namespace rpc {
   }
 
   future<> client::stop() {
-      if (!_error) {
-          _error = true;
+      _error = true;
+      try {
           _socket.shutdown();
+      } catch(...) {
+          log_exception(*this, log_level::error, "fail to shutdown connection while stopping", std::current_exception());
       }
       return _stopped.get_future();
   }
@@ -607,7 +627,7 @@ namespace rpc {
   void client::abort_all_streams() {
       while (!_streams.empty()) {
           auto&& s = _streams.begin();
-          assert(s->second->get_owner_shard() == engine().cpu_id()); // abort can be called only locally
+          assert(s->second->get_owner_shard() == this_shard_id()); // abort can be called only locally
           s->second->get()->abort();
           _streams.erase(s);
       }
@@ -676,12 +696,12 @@ namespace rpc {
                               get_logger()(peer_address(), format("unknown verb exception {:d} ignored", ex.type));
                           } catch(...) {
                               // We've got error response but handler is no longer waiting, could be timed out.
-                              log_exception(*this, "ignoring error response", std::current_exception());
+                              log_exception(*this, log_level::info, "ignoring error response", std::current_exception());
                           }
                       } else {
                           // we get a reply for a message id not in _outstanding
                           // this can happened if the message id is timed out already
-                          // FIXME: log it but with low level, currently log levels are not supported
+                          get_logger()(peer_address(), log_level::debug, "got a reply for an expired message id");
                       }
                   });
               });
@@ -691,9 +711,9 @@ namespace rpc {
           if (f.failed()) {
               ep = f.get_exception();
               if (is_stream()) {
-                  log_exception(*this, _connected ? "client stream connection dropped" : "stream fail to connect", ep);
+                  log_exception(*this, log_level::error, _connected ? "client stream connection dropped" : "stream fail to connect", ep);
               } else {
-                  log_exception(*this, _connected ? "client connection dropped" : "fail to connect", ep);
+                  log_exception(*this, log_level::error, _connected ? "client connection dropped" : "fail to connect", ep);
               }
           }
           _error = true;
@@ -716,11 +736,11 @@ namespace rpc {
   }
 
   client::client(const logger& l, void* s, const socket_address& addr, const socket_address& local)
-  : client(l, s, client_options{}, engine().net().socket(), addr, local)
+  : client(l, s, client_options{}, make_socket(), addr, local)
   {}
 
   client::client(const logger& l, void* s, client_options options, const socket_address& addr, const socket_address& local)
-  : client(l, s, options, engine().net().socket(), addr, local)
+  : client(l, s, options, make_socket(), addr, local)
   {}
 
   client::client(const logger& l, void* s, socket socket, const socket_address& addr, const socket_address& local)
@@ -758,12 +778,12 @@ namespace rpc {
                   f = smp::submit_to(_parent_id.shard(), [this, c = make_foreign(static_pointer_cast<rpc::connection>(shared_from_this()))] () mutable {
                       auto sit = _servers.find(*_server._options.streaming_domain);
                       if (sit == _servers.end()) {
-                          throw std::logic_error(format("Shard {:d} does not have server with streaming domain {:x}", engine().cpu_id(), *_server._options.streaming_domain).c_str());
+                          throw std::logic_error(format("Shard {:d} does not have server with streaming domain {:x}", this_shard_id(), *_server._options.streaming_domain).c_str());
                       }
                       auto s = sit->second;
                       auto it = s->_conns.find(_parent_id);
                       if (it == s->_conns.end()) {
-                          throw std::logic_error(format("Unknown parent connection {:d} on shard {:d}", _parent_id, engine().cpu_id()).c_str());
+                          throw std::logic_error(format("Unknown parent connection {:d} on shard {:d}", _parent_id, this_shard_id()).c_str());
                       }
                       auto id = c->get_connection_id();
                       it->second->register_stream(id, make_lw_shared(std::move(c)));
@@ -901,20 +921,18 @@ future<> server::connection::send_unknown_verb_reply(compat::optional<rpc_clock_
                           timeout = relative_timeout_to_absolute(std::chrono::milliseconds(*expire));
                       }
                       auto h = _server._proto->get_handler(type);
+                      if (!h) {
+                          return send_unknown_verb_reply(timeout, msg_id, type);
+                      }
+
                       // If the new method of per-connection scheduling group was used, honor it.
                       // Otherwise, use the old per-handler scheduling group.
-                      auto sg = _isolation_config ? _isolation_config->sched_group : h.first ? h.first->sg : scheduling_group();
-                      return with_scheduling_group(sg, [this, timeout, type, msg_id, h, data = std::move(data.value())] () mutable {
-                          // with_scheduling_group may defer and the callback might be unregistered already when the code runs
-                          // verify it by checking that handlers table version did not change, otherwise search for the handler again
-                          if (h.first && h.second != _server._proto->get_handlers_table_version()) {
-                              h = _server._proto->get_handler(type);
-                          }
-                          if (h.first) {
-                              return h.first->func(shared_from_this(), timeout, msg_id, std::move(data));
-                          } else {
-                              return send_unknown_verb_reply(timeout, msg_id, type);
-                          }
+                      auto sg = _isolation_config ? _isolation_config->sched_group : h->sg;
+                      return with_scheduling_group(sg, [this, timeout, msg_id, h, data = std::move(data.value())] () mutable {
+                          return h->func(shared_from_this(), timeout, msg_id, std::move(data)).finally([this, h] {
+                              // If anything between get_handler() and here throws, we leak put_handler
+                              _server._proto->put_handler(h);
+                          });
                       });
                   }
               });
@@ -922,7 +940,8 @@ future<> server::connection::send_unknown_verb_reply(compat::optional<rpc_clock_
         });
       }).then_wrapped([this] (future<> f) {
           if (f.failed()) {
-              log_exception(*this, format("server{} connection dropped", is_stream() ? " stream" : "").c_str(), f.get_exception());
+              log_exception(*this, log_level::error,
+                      format("server{} connection dropped", is_stream() ? " stream" : "").c_str(), f.get_exception());
           }
           _fd.shutdown_input();
           _error = true;
@@ -967,11 +986,11 @@ future<> server::connection::send_unknown_verb_reply(compat::optional<rpc_clock_
   thread_local std::unordered_map<streaming_domain_type, server*> server::_servers;
 
   server::server(protocol_base* proto, const socket_address& addr, resource_limits limits)
-      : server(proto, engine().listen(addr, listen_options{true}), limits, server_options{})
+      : server(proto, seastar::listen(addr, listen_options{true}), limits, server_options{})
   {}
 
   server::server(protocol_base* proto, server_options opts, const socket_address& addr, resource_limits limits)
-      : server(proto, engine().listen(addr, listen_options{true, opts.load_balancing_algorithm}), limits, opts)
+      : server(proto, seastar::listen(addr, listen_options{true, opts.load_balancing_algorithm}), limits, opts)
   {}
 
   server::server(protocol_base* proto, server_socket ss, resource_limits limits, server_options opts)
@@ -1000,7 +1019,7 @@ future<> server::connection::send_unknown_verb_reply(compat::optional<rpc_clock_
               auto addr = std::move(ar.remote_address);
               fd.set_nodelay(_options.tcp_nodelay);
               connection_id id = _options.streaming_domain ?
-                      connection_id::make_id(_next_client_id++, uint16_t(engine().cpu_id())) :
+                      connection_id::make_id(_next_client_id++, uint16_t(this_shard_id())) :
                       connection_id::make_invalid_id(_next_client_id++);
               auto conn = _proto->make_server_connection(*this, std::move(fd), std::move(addr), id);
               auto r = _conns.emplace(id, conn);

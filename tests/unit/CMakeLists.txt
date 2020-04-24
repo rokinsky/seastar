@@ -70,7 +70,7 @@ function (seastar_add_test name)
   cmake_parse_arguments (parsed_args
     ""
     "WORKING_DIRECTORY;KIND"
-    "RUN_ARGS;SOURCES;LIBRARIES"
+    "RUN_ARGS;SOURCES;LIBRARIES;DEPENDS"
     ${ARGN})
 
   if (NOT parsed_args_KIND)
@@ -127,6 +127,14 @@ function (seastar_add_test name)
     target_compile_definitions (${executable_target}
       PRIVATE SEASTAR_TESTING_MAIN)
 
+    if ((Seastar_STACK_GUARDS STREQUAL "ON") OR
+        ((Seastar_STACK_GUARDS STREQUAL "DEFAULT") AND
+         (CMAKE_BUILD_TYPE IN_LIST Seastar_STACK_GUARD_MODES)))
+      target_compile_definitions (${executable_target}
+        PRIVATE
+          SEASTAR_THREAD_STACK_GUARDS)
+    endif ()
+
     target_include_directories (${executable_target}
       PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -156,6 +164,10 @@ function (seastar_add_test name)
     list (APPEND forwarded_args WORKING_DIRECTORY ${parsed_args_WORKING_DIRECTORY})
   endif ()
 
+  if (parsed_args_DEPENDS)
+    add_dependencies(${executable_target} ${parsed_args_DEPENDS})
+  endif()
+
   add_custom_target (${target}
     ${forwarded_args}
     USES_TERMINAL)
@@ -166,7 +178,8 @@ function (seastar_add_test name)
 
   set_tests_properties (Seastar.unit.${name}
     PROPERTIES
-      TIMEOUT ${Seastar_TEST_TIMEOUT})
+      TIMEOUT ${Seastar_TEST_TIMEOUT}
+      ENVIRONMENT "${Seastar_TEST_ENVIRONMENT}")
 endfunction ()
 
 #
@@ -284,6 +297,9 @@ seastar_add_test (fair_queue
 seastar_add_test (file_io
   SOURCES file_io_test.cc)
 
+seastar_add_test (file_utils
+  SOURCES file_utils_test.cc)
+
 seastar_add_test (foreign_ptr
   SOURCES foreign_ptr_test.cc)
 
@@ -344,6 +360,48 @@ seastar_add_test (rpc
   SOURCES
     loopback_socket.hh
     rpc_test.cc)
+
+if (Seastar_EXPERIMENTAL_FS)
+  seastar_add_app_test (fs_block_device
+    SOURCES fs_block_device_test.cc
+    LIBRARIES seastar_testing)
+  seastar_add_test (fs_bootstrap_record
+    SOURCES
+      fs_bootstrap_record_test.cc
+      fs_mock_block_device.cc)
+  seastar_add_test (fs_cluster_allocator
+    KIND BOOST
+    SOURCES fs_cluster_allocator_test.cc)
+  seastar_add_test (fs_log_bootstrap
+    SOURCES
+      fs_log_bootstrap_test.cc
+      fs_mock_block_device.cc)
+  seastar_add_test (fs_metadata_to_disk_buffer
+    SOURCES
+      fs_metadata_to_disk_buffer_test.cc
+      fs_mock_block_device.cc)
+  seastar_add_test (fs_mock_metadata_to_disk_buffer
+    SOURCES
+      fs_mock_metadata_to_disk_buffer_test.cc
+      fs_mock_block_device.cc)
+  seastar_add_test (fs_path
+    KIND BOOST
+    SOURCES fs_path_test.cc)
+  seastar_add_test (fs_truncate
+    SOURCES
+      fs_truncate_test.cc
+      fs_mock_block_device.cc)
+  seastar_add_test (fs_write
+    SOURCES
+      fs_write_test.cc
+      fs_mock_block_device.cc)
+  seastar_add_test (fs_seastarfs
+    SOURCES fs_seastarfs_test.cc)
+  seastar_add_test (fs_to_disk_buffer
+    SOURCES
+      fs_to_disk_buffer_test.cc
+      fs_mock_block_device.cc)
+endif()
 
 seastar_add_test (semaphore
   SOURCES semaphore_test.cc)
@@ -417,17 +475,20 @@ add_custom_command (
   OUTPUT ${out_tls_certificate_files}
   COMMAND ${CMAKE_COMMAND} -E copy ${in_tls_certificate_files} ${CMAKE_CURRENT_BINARY_DIR})
 
-# TODO: Disabled for now. See GH-514.
-# seastar_add_test (tls
-#   DEPENDS ${out_tls_certificate_files}
-#   SOURCES tls_test.cc
-#   WORKING_DIRECTORY ${Seastar_BINARY_DIR})
+add_custom_target(tls_files
+  DEPENDS ${out_tls_certificate_files}
+)
+
+seastar_add_test (tls
+  DEPENDS tls_files
+  SOURCES tls_test.cc
+  WORKING_DIRECTORY ${Seastar_BINARY_DIR})
 
 seastar_add_test (tuple_utils
   KIND BOOST
   SOURCES tuple_utils_test.cc)
 
-seastar_add_test (unixdomain
+seastar_add_test (unix_domain
   SOURCES unix_domain_test.cc)
 
 seastar_add_test (unwind

@@ -46,10 +46,17 @@ namespace internal {
 
 unsigned smp_service_group_id(smp_service_group ssg);
 
+inline shard_id* this_shard_id_ptr() {
+    static thread_local shard_id g_this_shard_id;
+    return &g_this_shard_id;
+}
+
 }
 
 /// Returns shard_id of the of the current shard.
-shard_id this_shard_id();
+inline shard_id this_shard_id() {
+    return *internal::this_shard_id_ptr();
+}
 
 /// Configuration for smp_service_group objects.
 ///
@@ -121,9 +128,30 @@ smp_service_group default_smp_service_group() {
     return smp_service_group(0);
 }
 
-void init_default_smp_service_group();
+using smp_timeout_clock = lowres_clock;
+using smp_service_group_semaphore = basic_semaphore<named_semaphore_exception_factory, smp_timeout_clock>;
+using smp_service_group_semaphore_units = semaphore_units<named_semaphore_exception_factory, smp_timeout_clock>;
 
-semaphore& get_smp_service_groups_semaphore(unsigned ssg_id, shard_id t);
+static constexpr smp_timeout_clock::time_point smp_no_timeout = smp_timeout_clock::time_point::max();
+
+/// Options controlling the behaviour of \ref smp::submit_to().
+struct smp_submit_to_options {
+    /// Controls resource allocation.
+    smp_service_group service_group = default_smp_service_group();
+    /// The timeout is relevant only to the time the call spends waiting to be
+    /// processed by the remote shard, and *not* to the time it takes to be
+    /// executed there.
+    smp_timeout_clock::time_point timeout = smp_no_timeout;
+
+    smp_submit_to_options(smp_service_group service_group = default_smp_service_group(), smp_timeout_clock::time_point timeout = smp_no_timeout)
+        : service_group(service_group)
+        , timeout(timeout) {
+    }
+};
+
+void init_default_smp_service_group(shard_id cpu);
+
+smp_service_group_semaphore& get_smp_service_groups_semaphore(unsigned ssg_id, shard_id t);
 
 class smp_message_queue {
     static constexpr size_t queue_length = 128;
@@ -159,12 +187,12 @@ class smp_message_queue {
         size_t _received = 0;
         size_t _last_rcv_batch = 0;
     };
-    struct work_item {
-        explicit work_item(smp_service_group ssg) : ssg(ssg) {}
+    struct work_item : public task {
+        explicit work_item(smp_service_group ssg) : task(current_scheduling_group()), ssg(ssg) {}
         smp_service_group ssg;
-        scheduling_group sg = current_scheduling_group();
         virtual ~work_item() {}
-        virtual void process() = 0;
+        virtual void fail_with(std::exception_ptr) = 0;
+        void process();
         virtual void complete() = 0;
     };
     template <typename Func>
@@ -178,25 +206,22 @@ class smp_message_queue {
         std::exception_ptr _ex; // if !_result
         typename futurator::promise_type _promise; // used on local side
         async_work_item(smp_message_queue& queue, smp_service_group ssg, Func&& func) : work_item(ssg), _queue(queue), _func(std::move(func)) {}
-        virtual void process() override {
-            try {
-              // Run _func asynchronously and set either _result or _ex.
-              // Respond to _queue when done.
-              // Caller must get the future returned by get_future() to synchronize and retrieve the result.
-              (void)with_scheduling_group(this->sg, [this] {
-                return futurator::apply(this->_func).then_wrapped([this] (auto f) {
-                    if (f.failed()) {
-                        _ex = f.get_exception();
-                    } else {
-                        _result = f.get();
-                    }
-                    _queue.respond(this);
-                });
-              });
-            } catch (...) {
-                _ex = std::current_exception();
+        virtual void fail_with(std::exception_ptr ex) override {
+            _promise.set_exception(std::move(ex));
+        }
+        virtual void run_and_dispose() noexcept override {
+            // _queue.respond() below forwards the continuation chain back to the
+            // calling shard.
+            (void)futurator::invoke(this->_func).then_wrapped([this] (auto f) {
+                if (f.failed()) {
+                    _ex = f.get_exception();
+                } else {
+                    _result = f.get();
+                }
                 _queue.respond(this);
-            }
+            });
+            // We don't delete the task here as the creator of the work item will
+            // delete it on the origin shard.
         }
         virtual void complete() override {
             if (_result) {
@@ -221,10 +246,11 @@ public:
     smp_message_queue(reactor* from, reactor* to);
     ~smp_message_queue();
     template <typename Func>
-    futurize_t<std::result_of_t<Func()>> submit(shard_id t, smp_service_group ssg, Func&& func) {
-        auto wi = std::make_unique<async_work_item<Func>>(*this, ssg, std::forward<Func>(func));
+    futurize_t<std::result_of_t<Func()>> submit(shard_id t, smp_submit_to_options options, Func&& func) noexcept {
+        memory::disable_failure_guard dfg;
+        auto wi = std::make_unique<async_work_item<Func>>(*this, options.service_group, std::forward<Func>(func));
         auto fut = wi->get_future();
-        submit_item(t, std::move(wi));
+        submit_item(t, options.timeout, std::move(wi));
         return fut;
     }
     void start(unsigned cpuid);
@@ -235,7 +261,7 @@ public:
     void stop();
 private:
     void work();
-    void submit_item(shard_id t, std::unique_ptr<work_item> wi);
+    void submit_item(shard_id t, smp_timeout_clock::time_point timeout, std::unique_ptr<work_item> wi);
     void respond(work_item* wi);
     void move_pending();
     void flush_request_batch();
@@ -277,7 +303,7 @@ public:
     ///
     /// \param t designates the core to run the function on (may be a remote
     ///          core or the local core).
-    /// \param ssg an smp_service_group that controls resource allocation for this call.
+    /// \param options an \ref smp_submit_to_options that contains options for this call.
     /// \param func a callable to run on core \c t.
     ///          If \c func is a temporary object, its lifetime will be
     ///          extended by moving. This movement and the eventual
@@ -287,20 +313,20 @@ public:
     /// \return whatever \c func returns, as a future<> (if \c func does not return a future,
     ///         submit_to() will wrap it in a future<>).
     template <typename Func>
-    static futurize_t<std::result_of_t<Func()>> submit_to(unsigned t, smp_service_group ssg, Func&& func) {
+    static futurize_t<std::result_of_t<Func()>> submit_to(unsigned t, smp_submit_to_options options, Func&& func) {
         using ret_type = std::result_of_t<Func()>;
         if (t == this_shard_id()) {
             try {
                 if (!is_future<ret_type>::value) {
                     // Non-deferring function, so don't worry about func lifetime
-                    return futurize<ret_type>::apply(std::forward<Func>(func));
+                    return futurize<ret_type>::invoke(std::forward<Func>(func));
                 } else if (std::is_lvalue_reference<Func>::value) {
                     // func is an lvalue, so caller worries about its lifetime
-                    return futurize<ret_type>::apply(func);
+                    return futurize<ret_type>::invoke(func);
                 } else {
                     // Deferring call on rvalue function, make sure to preserve it across call
                     auto w = std::make_unique<std::decay_t<Func>>(std::move(func));
-                    auto ret = futurize<ret_type>::apply(*w);
+                    auto ret = futurize<ret_type>::invoke(*w);
                     return ret.finally([w = std::move(w)] {});
                 }
             } catch (...) {
@@ -308,7 +334,7 @@ public:
                 return futurize<std::result_of_t<Func()>>::make_exception_future(std::current_exception());
             }
         } else {
-            return _qs[t][this_shard_id()].submit(t, ssg, std::forward<Func>(func));
+            return _qs[t][this_shard_id()].submit(t, options, std::forward<Func>(func));
         }
     }
     /// Runs a function on a remote core.
@@ -334,27 +360,63 @@ public:
     static boost::integer_range<unsigned> all_cpus() {
         return boost::irange(0u, count);
     }
-    // Invokes func on all shards.
-    // The returned future resolves when all async invocations finish.
-    // The func may return void or future<>.
-    // Each async invocation will work with a separate copy of func.
+    /// Invokes func on all shards.
+    ///
+    /// \param options the options to forward to the \ref smp::submit_to()
+    ///         called behind the scenes.
+    /// \param func the function to be invoked on each shard. May return void or
+    ///         future<>. Each async invocation will work with a separate copy
+    ///         of \c func.
+    /// \returns a future that resolves when all async invocations finish.
     template<typename Func>
-    static future<> invoke_on_all(Func&& func) {
+    static future<> invoke_on_all(smp_submit_to_options options, Func&& func) {
         static_assert(std::is_same<future<>, typename futurize<std::result_of_t<Func()>>::type>::value, "bad Func signature");
-        return parallel_for_each(all_cpus(), [&func] (unsigned id) {
-            return smp::submit_to(id, Func(func));
+        return parallel_for_each(all_cpus(), [options, &func] (unsigned id) {
+            return smp::submit_to(id, options, Func(func));
         });
     }
-    // Invokes func on all other shards.
-    // The returned future resolves when all async invocations finish.
-    // The func may return void or future<>.
-    // Each async invocation will work with a separate copy of func.
+    /// Invokes func on all shards.
+    ///
+    /// \param func the function to be invoked on each shard. May return void or
+    ///         future<>. Each async invocation will work with a separate copy
+    ///         of \c func.
+    /// \returns a future that resolves when all async invocations finish.
+    ///
+    /// Passes the default \ref smp_submit_to_options to the
+    /// \ref smp::submit_to() called behind the scenes.
+    template<typename Func>
+    static future<> invoke_on_all(Func&& func) {
+        return invoke_on_all(smp_submit_to_options{}, std::forward<Func>(func));
+    }
+    /// Invokes func on all other shards.
+    ///
+    /// \param cpu_id the cpu on which **not** to run the function.
+    /// \param options the options to forward to the \ref smp::submit_to()
+    ///         called behind the scenes.
+    /// \param func the function to be invoked on each shard. May return void or
+    ///         future<>. Each async invocation will work with a separate copy
+    ///         of \c func.
+    /// \returns a future that resolves when all async invocations finish.
+    template<typename Func>
+    static future<> invoke_on_others(unsigned cpu_id, smp_submit_to_options options, Func func) {
+        static_assert(std::is_same<future<>, typename futurize<std::result_of_t<Func()>>::type>::value, "bad Func signature");
+        return parallel_for_each(all_cpus(), [cpu_id, options, func = std::move(func)] (unsigned id) {
+            return id != cpu_id ? smp::submit_to(id, options, func) : make_ready_future<>();
+        });
+    }
+    /// Invokes func on all other shards.
+    ///
+    /// \param cpu_id the cpu on which **not** to run the function.
+    /// \param func the function to be invoked on each shard. May return void or
+    ///         future<>. Each async invocation will work with a separate copy
+    ///         of \c func.
+    /// \returns a future that resolves when all async invocations finish.
+    ///
+    /// Passes the default \ref smp_submit_to_options to the
+    /// \ref smp::submit_to() called behind the scenes.
     template<typename Func>
     static future<> invoke_on_others(unsigned cpu_id, Func func) {
-        static_assert(std::is_same<future<>, typename futurize<std::result_of_t<Func()>>::type>::value, "bad Func signature");
-        return parallel_for_each(all_cpus(), [cpu_id, func = std::move(func)] (unsigned id) {
-            return id != cpu_id ? smp::submit_to(id, func) : make_ready_future<>();
-        });
+        return invoke_on_others(cpu_id, smp_submit_to_options{}, std::move(func));
     }
 private:
     static void start_all_queues();

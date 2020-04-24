@@ -96,6 +96,11 @@ public:
         _fd = -1;
     }
     int get() const { return _fd; }
+
+    static file_desc from_fd(int fd) {
+        return file_desc(fd);
+    }
+
     static file_desc open(sstring name, int flags, mode_t mode = 0) {
         int fd = ::open(name.c_str(), flags, mode);
         throw_system_error_on(fd == -1, "open");
@@ -127,20 +132,18 @@ public:
         throw_system_error_on(fd == -1, "dup");
         return file_desc(fd);
     }
-    file_desc accept(socket_address& sa, socklen_t& sl, int flags = 0) {
-        auto ret = ::accept4(_fd, &sa.as_posix_sockaddr(), &sl, flags);
+    file_desc accept(socket_address& sa, int flags = 0) {
+        auto ret = ::accept4(_fd, &sa.as_posix_sockaddr(), &sa.addr_length, flags);
         throw_system_error_on(ret == -1, "accept4");
-        sa.addr_length = sl;
         return file_desc(ret);
     }
     // return nullopt if no connection is availbale to be accepted
-    compat::optional<file_desc> try_accept(socket_address& sa, socklen_t& sl, int flags = 0) {
-        auto ret = ::accept4(_fd, &sa.as_posix_sockaddr(), &sl, flags);
+    compat::optional<file_desc> try_accept(socket_address& sa, int flags = 0) {
+        auto ret = ::accept4(_fd, &sa.as_posix_sockaddr(), &sa.addr_length, flags);
         if (ret == -1 && errno == EAGAIN) {
             return {};
         }
         throw_system_error_on(ret == -1, "accept4");
-        sa.addr_length = sl;
         return file_desc(ret);
     }
     void shutdown(int how) {

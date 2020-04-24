@@ -148,13 +148,24 @@ inline void jmp_buf_link::final_switch_out()
 
 #endif
 
+// Both asan and optimizations can increase the stack used by a
+// function. When both are used, we need more than 128 KiB.
+#if defined(__OPTIMIZE__) && defined(SEASTAR_ASAN_ENABLED)
+static constexpr size_t base_stack_size = 256 * 1024;
+#else
+static constexpr size_t base_stack_size = 128 * 1024;
+#endif
+
 thread_context::thread_context(thread_attributes attr, noncopyable_function<void ()> func)
         : task(attr.sched_group.value_or(current_scheduling_group()))
-#ifdef SEASTAR_THREAD_STACK_GUARDS
-        , _stack_size(base_stack_size + getpagesize())
-#endif
         , _func(std::move(func)) {
-    setup();
+#if defined(__OPTIMIZE__) && defined(SEASTAR_ASAN_ENABLED)
+    size_t stack_size = std::max(base_stack_size, attr.stack_size);
+#else
+    size_t stack_size = attr.stack_size ? attr.stack_size : base_stack_size;
+#endif
+    _stack = make_stack(stack_size);
+    setup(stack_size);
     _all_threads.push_front(*this);
 }
 
@@ -167,33 +178,37 @@ thread_context::~thread_context() {
 }
 
 thread_context::stack_holder
-thread_context::make_stack() {
+thread_context::make_stack(size_t stack_size) {
 #ifdef SEASTAR_THREAD_STACK_GUARDS
-    void* mem = ::aligned_alloc(getpagesize(), _stack_size);
+    size_t page_size = getpagesize();
+    size_t alignment = page_size;
+#else
+    size_t alignment = 16; // ABI requirement on x86_64
+#endif
+    void* mem = ::aligned_alloc(alignment, stack_size);
     if (mem == nullptr) {
         throw std::bad_alloc();
     }
-    auto stack = stack_holder(new (mem) char[_stack_size]);
-#else
-    auto stack = stack_holder(new char[_stack_size]);
-#endif
+    auto stack = stack_holder(new (mem) char[stack_size]);
 #ifdef SEASTAR_ASAN_ENABLED
     // Avoid ASAN false positive due to garbage on stack
-    std::fill_n(stack.get(), _stack_size, 0);
+    std::fill_n(stack.get(), stack_size, 0);
 #endif
+
+#ifdef SEASTAR_THREAD_STACK_GUARDS
+    auto mp_status = mprotect(stack.get(), page_size, PROT_READ);
+    throw_system_error_on(mp_status != 0, "mprotect");
+#endif
+
     return stack;
 }
 
 void thread_context::stack_deleter::operator()(char* ptr) const noexcept {
-#ifdef SEASTAR_THREAD_STACK_GUARDS
     free(ptr);
-#else
-    delete[] ptr;
-#endif
 }
 
 void
-thread_context::setup() {
+thread_context::setup(size_t stack_size) {
     // use setcontext() for the initial jump, as it allows us
     // to set up a stack, but continue with longjmp() as it's
     // much faster.
@@ -202,18 +217,12 @@ thread_context::setup() {
     auto main = reinterpret_cast<void (*)()>(&thread_context::s_main);
     auto r = getcontext(&initial_context);
     throw_system_error_on(r == -1);
-#ifdef SEASTAR_THREAD_STACK_GUARDS
-    size_t page_size = getpagesize();
-    assert(align_up(_stack.get(), page_size) == _stack.get());
-    auto mp_status = mprotect(_stack.get(), page_size, PROT_READ);
-    throw_system_error_on(mp_status != 0, "mprotect");
-#endif
     initial_context.uc_stack.ss_sp = _stack.get();
-    initial_context.uc_stack.ss_size = _stack_size;
+    initial_context.uc_stack.ss_size = stack_size;
     initial_context.uc_link = nullptr;
     makecontext(&initial_context, main, 2, int(q), int(q >> 32));
     _context.thread = this;
-    _context.initial_switch_in(&initial_context, _stack.get(), _stack_size);
+    _context.initial_switch_in(&initial_context, _stack.get(), stack_size);
 }
 
 void
@@ -240,13 +249,13 @@ thread_context::run_and_dispose() noexcept {
 
 void
 thread_context::yield() {
-    schedule(std::unique_ptr<task>(this));
+    schedule(this);
     switch_out();
 }
 
 void
 thread_context::reschedule() {
-    schedule(std::unique_ptr<task>(this));
+    schedule(this);
 }
 
 void

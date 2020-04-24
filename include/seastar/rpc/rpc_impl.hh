@@ -175,8 +175,8 @@ maybe_add_time_point(do_want_time_point, opt_time_point& otp, std::tuple<In...>&
 }
 
 inline sstring serialize_connection_id(const connection_id& id) {
-    sstring p(sstring::initialized_later(), sizeof(id));
-    auto c = p.begin();
+    sstring p = uninitialized_string(sizeof(id));
+    auto c = p.data();
     write_le(c, id.id);
     return p;
 }
@@ -301,8 +301,8 @@ struct unmarshal_one {
         }
     };
     static connection_id get_connection_id(Input& in) {
-        sstring id(sstring::initialized_later(), sizeof(connection_id));
-        in.read(id.begin(), sizeof(connection_id));
+        sstring id = uninitialized_string(sizeof(connection_id));
+        in.read(id.data(), sizeof(connection_id));
         return deserialize_connection_id(id);
     }
     template<typename... T> struct helper<sink<T...>> {
@@ -672,18 +672,47 @@ auto protocol<Serializer, MsgType>::register_handler(MsgType t, scheduling_group
 template<typename Serializer, typename MsgType>
 template<typename Func>
 auto protocol<Serializer, MsgType>::register_handler(MsgType t, Func&& func) {
-    _handlers_version++;
     return register_handler(t, scheduling_group(), std::forward<Func>(func));
 }
 
 template<typename Serializer, typename MsgType>
-std::pair<rpc_handler*, uint32_t> protocol<Serializer, MsgType>::get_handler(uint64_t msg_id) {
+future<> protocol<Serializer, MsgType>::unregister_handler(MsgType t) {
+    auto it = _handlers.find(t);
+    if (it != _handlers.end()) {
+        return it->second.use_gate.close().finally([this, t] {
+            _handlers.erase(t);
+        });
+    }
+    return make_ready_future<>();
+}
+
+template<typename Serializer, typename MsgType>
+bool protocol<Serializer, MsgType>::has_handler(uint64_t msg_id) {
+    auto it = _handlers.find(MsgType(msg_id));
+    if (it == _handlers.end()) {
+        return false;
+    }
+    return !it->second.use_gate.is_closed();
+}
+
+template<typename Serializer, typename MsgType>
+rpc_handler* protocol<Serializer, MsgType>::get_handler(uint64_t msg_id) {
     rpc_handler* h = nullptr;
     auto it = _handlers.find(MsgType(msg_id));
     if (it != _handlers.end()) {
-        h = &it->second;
+        try {
+            it->second.use_gate.enter();
+            h = &it->second;
+        } catch (gate_closed_exception&) {
+            // unregistered, just ignore
+        }
     }
-    return std::make_pair(h, _handlers_version);
+    return h;
+}
+
+template<typename Serializer, typename MsgType>
+void protocol<Serializer, MsgType>::put_handler(rpc_handler* h) {
+    h->use_gate.leave();
 }
 
 template<typename T> T make_shard_local_buffer_copy(foreign_ptr<std::unique_ptr<T>> org);

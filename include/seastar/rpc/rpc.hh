@@ -25,8 +25,8 @@
 #include <unordered_set>
 #include <list>
 #include <seastar/core/future.hh>
+#include <seastar/core/seastar.hh>
 #include <seastar/net/api.hh>
-#include <seastar/core/reactor.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/condition-variable.hh>
@@ -37,6 +37,8 @@
 #include <seastar/core/queue.hh>
 #include <seastar/core/weak_ptr.hh>
 #include <seastar/core/scheduling.hh>
+#include <seastar/util/backtrace.hh>
+#include <seastar/util/log.hh>
 
 namespace seastar {
 
@@ -158,10 +160,28 @@ struct signature;
 
 class logger {
     std::function<void(const sstring&)> _logger;
+    ::seastar::logger* _seastar_logger = nullptr;
 
+    // _seastar_logger will always be used first if it's available
     void log(const sstring& str) const {
-        if (_logger) {
+        if (_seastar_logger) {
+            // default level for log messages is `info`
+            _seastar_logger->info("{}", str);
+        } else if (_logger) {
             _logger(str);
+        }
+    }
+
+    // _seastar_logger will always be used first if it's available
+    template <typename... Args>
+    void log(log_level level, const char* fmt, Args&&... args) const {
+        if (_seastar_logger) {
+            _seastar_logger->log(level, fmt, std::forward<Args>(args)...);
+        // If the log level is at least `info`, fall back to legacy logging without explicit level.
+        // Ignore less severe levels in order not to spam user's log with messages during transition,
+        // i.e. when the user still only defines a level-less logger.
+        } else if (_logger && level <= log_level::info) {
+            _logger(format(fmt, std::forward<Args>(args)...));
         }
     }
 
@@ -170,11 +190,18 @@ public:
         _logger = std::move(l);
     }
 
+    void set(::seastar::logger* logger) {
+        _seastar_logger = logger;
+    }
+
     void operator()(const client_info& info, id_type msg_id, const sstring& str) const;
+    void operator()(const client_info& info, id_type msg_id, log_level level, compat::string_view str) const;
 
     void operator()(const client_info& info, const sstring& str) const;
+    void operator()(const client_info& info, log_level level, compat::string_view str) const;
 
     void operator()(const socket_address& addr, const sstring& str) const;
+    void operator()(const socket_address& addr, log_level level, compat::string_view str) const;
 };
 
 class connection {
@@ -447,7 +474,7 @@ public:
     }
     template<typename Serializer, typename... Out>
     future<sink<Out...>> make_stream_sink() {
-        return make_stream_sink<Serializer, Out...>(engine().net().socket());
+        return make_stream_sink<Serializer, Out...>(make_socket());
     }
 };
 
@@ -550,15 +577,18 @@ using rpc_handler_func = std::function<future<> (shared_ptr<server::connection>,
 struct rpc_handler {
     scheduling_group sg;
     rpc_handler_func func;
+    gate use_gate;
 };
 
 class protocol_base {
 public:
     virtual ~protocol_base() {};
     virtual shared_ptr<server::connection> make_server_connection(rpc::server& server, connected_socket fd, socket_address addr, connection_id id) = 0;
-    // returns a pointer to rpc handler function and a version of handler's table
-    virtual std::pair<rpc_handler*, uint32_t> get_handler(uint64_t msg_id) = 0;
-    virtual uint32_t get_handlers_table_version() const = 0;
+protected:
+    friend class server;
+
+    virtual rpc_handler* get_handler(uint64_t msg_id) = 0;
+    virtual void put_handler(rpc_handler*) = 0;
 };
 
 // MsgType is a type that holds type of a message. The type should be hashable
@@ -608,7 +638,6 @@ public:
     friend server;
 private:
     std::unordered_map<MsgType, rpc_handler> _handlers;
-    uint32_t  _handlers_version = 0;
     Serializer _serializer;
     logger _logger;
 
@@ -629,13 +658,15 @@ public:
     template <typename Func>
     auto register_handler(MsgType t, scheduling_group sg, Func&& func);
 
-    void unregister_handler(MsgType t) {
-        _handlers_version++;
-        _handlers.erase(t);
-    }
+    future<> unregister_handler(MsgType t);
 
+    [[deprecated("Use set_logger(::seastar::logger*) instead")]]
     void set_logger(std::function<void(const sstring&)> logger) {
         _logger.set(std::move(logger));
+    }
+
+    void set_logger(::seastar::logger* logger) {
+        _logger.set(logger);
     }
 
     const logger& get_logger() const {
@@ -646,17 +677,20 @@ public:
         return make_shared<rpc::server::connection>(server, std::move(fd), std::move(addr), _logger, &_serializer, id);
     }
 
-    std::pair<rpc_handler*, uint32_t> get_handler(uint64_t msg_id) override;
+    bool has_handler(uint64_t msg_id);
 
-    uint32_t get_handlers_table_version() const override {
-        return _handlers_version;
-    }
 private:
+    rpc_handler* get_handler(uint64_t msg_id) override;
+    void put_handler(rpc_handler*) override;
+
     template<typename Ret, typename... In>
     auto make_client(signature<Ret(In...)> sig, MsgType t);
 
     void register_receiver(MsgType t, rpc_handler&& handler) {
-        _handlers.emplace(t, std::move(handler));
+        auto r = _handlers.emplace(t, std::move(handler));
+        if (!r.second) {
+            throw_with_backtrace<std::runtime_error>("registered handler already exists");
+        }
     }
 };
 }

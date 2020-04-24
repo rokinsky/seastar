@@ -45,6 +45,7 @@
 #include <seastar/core/future.hh>
 #include <seastar/core/file-types.hh>
 #include <seastar/util/bool_class.hh>
+#include <seastar/util/std-compat.hh>
 #include "./internal/api-level.hh"
 
 namespace seastar {
@@ -62,6 +63,7 @@ SEASTAR_INCLUDE_API_V1 namespace api_v1 { class server_socket; }
 
 #endif
 
+class socket;
 class connected_socket;
 class socket_address;
 struct listen_options;
@@ -71,6 +73,12 @@ enum class transport;
 class file;
 struct file_open_options;
 struct stat_data;
+
+namespace net {
+
+class udp_channel;
+
+}
 
 // Networking API
 
@@ -132,6 +140,28 @@ future<connected_socket> connect(socket_address sa);
 /// \return a \ref connected_socket object, or an exception
 future<connected_socket> connect(socket_address sa, socket_address local, transport proto);
 
+
+/// Creates a socket object suitable for establishing stream-oriented connections
+///
+/// \return a \ref net::socket object that can be used for establishing connections
+socket make_socket();
+
+/// Creates a udp_channel object suitable for sending UDP packets
+///
+/// The channel is not bound to a local address, and thus can only be used
+/// for sending.
+///
+/// \return a \ref net::udp_channel object that can be used for UDP transfers.
+net::udp_channel make_udp_channel();
+
+
+/// Creates a udp_channel object suitable for sending and receiving UDP packets
+///
+/// \param local local address to bind to
+///
+/// \return a \ref net::udp_channel object that can be used for UDP transfers.
+net::udp_channel make_udp_channel(const socket_address& local);
+
 /// @}
 
 /// \defgroup fileio-module File Input/Output
@@ -162,7 +192,7 @@ future<connected_socket> connect(socket_address sa, socket_address local, transp
 /// containing directory is sync'ed.
 ///
 /// \relates file
-future<file> open_file_dma(sstring name, open_flags flags);
+future<file> open_file_dma(sstring name, open_flags flags) noexcept;
 
 /// Opens or creates a file.  The "dma" in the name refers to the fact
 /// that data transfers are unbuffered and uncached.
@@ -177,7 +207,7 @@ future<file> open_file_dma(sstring name, open_flags flags);
 /// containing directory is sync'ed.
 ///
 /// \relates file
-future<file> open_file_dma(sstring name, open_flags flags, file_open_options options);
+future<file> open_file_dma(sstring name, open_flags flags, file_open_options options) noexcept;
 
 /// Checks if a given directory supports direct io
 ///
@@ -204,7 +234,7 @@ future<> check_direct_io_support(sstring path);
 ///    \ref file::fsync(), and \ref file::close().
 ///
 /// \relates file
-future<file> open_directory(sstring name);
+future<file> open_directory(sstring name) noexcept;
 
 /// Creates a new directory.
 ///
@@ -214,7 +244,7 @@ future<file> open_directory(sstring name);
 /// \note
 /// The directory is not guaranteed to be stable on disk, unless the
 /// containing directory is sync'ed.
-future<> make_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions);
+future<> make_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions) noexcept;
 
 /// Ensures a directory exists
 ///
@@ -228,7 +258,7 @@ future<> make_directory(sstring name, file_permissions permissions = file_permis
 /// The directory is not guaranteed to be stable on disk, unless the
 /// containing directory is sync'ed.
 /// If the directory exists, the provided permissions are not applied.
-future<> touch_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions);
+future<> touch_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions) noexcept;
 
 /// Recursively ensures a directory exists
 ///
@@ -242,7 +272,7 @@ future<> touch_directory(sstring name, file_permissions permissions = file_permi
 /// The provided permissions are applied only on the last component in the path, if it needs to be created,
 /// if intermediate directories do not exist, they are created with the default_dir_permissions.
 /// If any directory exists, the provided permissions are not applied.
-future<> recursive_touch_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions);
+future<> recursive_touch_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions) noexcept;
 
 /// Synchronizes a directory to disk
 ///
@@ -251,7 +281,7 @@ future<> recursive_touch_directory(sstring name, file_permissions permissions = 
 /// directory.
 ///
 /// \param name name of the directory to potentially create
-future<> sync_directory(sstring name);
+future<> sync_directory(sstring name) noexcept;
 
 
 /// Removes (unlinks) a file or an empty directory
@@ -261,7 +291,7 @@ future<> sync_directory(sstring name);
 /// \note
 /// The removal is not guaranteed to be stable on disk, unless the
 /// containing directory is sync'ed.
-future<> remove_file(sstring name);
+future<> remove_file(sstring name) noexcept;
 
 /// Renames (moves) a file.
 ///
@@ -271,7 +301,7 @@ future<> remove_file(sstring name);
 /// \note
 /// The rename is not guaranteed to be stable on disk, unless the
 /// both containing directories are sync'ed.
-future<> rename_file(sstring old_name, sstring new_name);
+future<> rename_file(sstring old_name, sstring new_name) noexcept;
 
 struct follow_symlink_tag { };
 using follow_symlink = bool_class<follow_symlink_tag>;
@@ -284,7 +314,7 @@ using follow_symlink = bool_class<follow_symlink_tag>;
 /// \return stat_data of the file identified by name.
 /// If name identifies a symbolic link then stat_data is returned either for the target of the link,
 /// with follow_symlink::yes, or for the link itself, with follow_symlink::no.
-future<stat_data> file_stat(sstring name, follow_symlink fs = follow_symlink::yes);
+future<stat_data> file_stat(sstring name, follow_symlink fs = follow_symlink::yes) noexcept;
 
 /// Return the size of a file.
 ///
@@ -293,7 +323,7 @@ future<stat_data> file_stat(sstring name, follow_symlink fs = follow_symlink::ye
 /// Note that file_size of a symlink is NOT the size of the symlink -
 /// which is the length of the pathname it contains -
 /// but rather the size of the file to which it points.
-future<uint64_t> file_size(sstring name);
+future<uint64_t> file_size(sstring name) noexcept;
 
 /// Check file access.
 ///
@@ -309,41 +339,52 @@ future<uint64_t> file_size(sstring name);
 /// Throws a compat::filesystem::filesystem_error exception if any error other than EACCES is encountered.
 /// Note that if any path component leading to the file is not searchable, the file is considered inaccessible
 /// with the requested mode and false will be returned.
-future<bool> file_accessible(sstring name, access_flags flags);
+future<bool> file_accessible(sstring name, access_flags flags) noexcept;
 
 /// check if a file exists.
 ///
 /// \param name name of the file to check
-future<bool> file_exists(sstring name);
+future<bool> file_exists(sstring name) noexcept;
+
+/// Determine the type of a file (regular file, directory, etc.)
+///
+/// \param name name of the file for which type information is requested
+/// \param name follow_symlink whether a trailing symbolic link should be followed or not
+///
+/// \return a engaged optional with the file type if lookup was successful; a disengaged optional
+///      if the file (or one of its parent directories) does not exist; an exceptional future on
+///      other errors.
+future<compat::optional<directory_entry_type>> file_type(sstring name, follow_symlink = follow_symlink::yes) noexcept;
+
 
 /// Creates a hard link for a file
 ///
 /// \param oldpath existing file name
 /// \param newpath name of link
 ///
-future<> link_file(sstring oldpath, sstring newpath);
+future<> link_file(sstring oldpath, sstring newpath) noexcept;
 
 /// Changes the permissions mode of a file or directory
 ///
 /// \param name name of the file ot directory to change
 /// \param permissions permissions to set
 ///
-future<> chmod(sstring name, file_permissions permissions);
+future<> chmod(sstring name, file_permissions permissions) noexcept;
 
 /// Return information about the filesystem where a file is located.
 ///
 /// \param name name of the file to inspect
-future<fs_type> file_system_at(sstring name);
+future<fs_type> file_system_at(sstring name) noexcept;
 
 /// Return space available to unprivileged users in filesystem where a file is located, in bytes.
 ///
 /// \param name name of the file to inspect
-future<uint64_t> fs_avail(sstring name);
+future<uint64_t> fs_avail(sstring name) noexcept;
 
 /// Return free space in filesystem where a file is located, in bytes.
 ///
 /// \param name name of the file to inspect
-future<uint64_t> fs_free(sstring name);
+future<uint64_t> fs_free(sstring name) noexcept;
 /// @}
 
 }

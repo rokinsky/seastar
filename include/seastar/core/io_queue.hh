@@ -26,10 +26,13 @@
 #include <seastar/core/metrics_registration.hh>
 #include <seastar/core/shared_ptr.hh>
 #include <seastar/core/future.hh>
+#include <seastar/core/internal/io_request.hh>
 #include <mutex>
 #include <array>
 
 namespace seastar {
+
+class io_priority_class;
 
 /// Renames an io priority class
 ///
@@ -84,9 +87,8 @@ private:
 
     priority_class_data& find_or_create_class(const io_priority_class& pc, shard_id owner);
     friend class smp;
+    fair_queue_ticket _completed_accumulator = { 0, 0, 0 };
 public:
-    enum class request_type { read, write };
-
     // We want to represent the fact that write requests are (maybe) more expensive
     // than read requests. To avoid dealing with floating point math we will scale one
     // read request to be counted by this amount.
@@ -111,8 +113,8 @@ public:
     io_queue(config cfg);
     ~io_queue();
 
-    future<internal::linux_abi::io_event>
-    queue_request(const io_priority_class& pc, size_t len, request_type req_type, noncopyable_function<void (internal::linux_abi::iocb&)> do_io);
+    future<size_t>
+    queue_request(const io_priority_class& pc, size_t len, internal::io_request req) noexcept;
 
     size_t capacity() const {
         return _config.capacity;
@@ -127,10 +129,10 @@ public:
         return _fq.requests_currently_executing();
     }
 
+    void notify_requests_finished(fair_queue_ticket& desc);
+
     // Inform the underlying queue about the fact that some of our requests finished
-    void notify_requests_finished(fair_queue_request_descriptor& desc) {
-        _fq.notify_requests_finished(desc);
-    }
+    void process_completions();
 
     // Dispatch requests that are pending in the I/O queue
     void poll_io_queue() {

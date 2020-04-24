@@ -33,9 +33,16 @@ namespace seastar {
 /// \brief describes a request that passes through the fair queue
 ///
 /// \related fair_queue
-struct fair_queue_request_descriptor {
-    unsigned weight = 1; ///< the weight of this request for capacity purposes (IOPS).
-    unsigned size = 1;        ///< the effective size of this request
+struct fair_queue_ticket {
+    unsigned weight = 0; ///< the total weight of these requests for capacity purposes (IOPS).
+    unsigned size = 0;        ///< the total effective size of these requests
+    unsigned quantity = 0;  ///< the amount of requests represented in this descriptor
+    fair_queue_ticket& operator+=(const fair_queue_ticket& desc) {
+        weight += desc.weight;
+        size += desc.size;
+        quantity += desc.quantity;
+        return *this;
+    }
 };
 
 /// \addtogroup io-module
@@ -45,7 +52,7 @@ struct fair_queue_request_descriptor {
 class priority_class {
     struct request {
         noncopyable_function<void()> func;
-        fair_queue_request_descriptor desc;
+        fair_queue_ticket desc;
     };
     friend class fair_queue;
     uint32_t _shares = 0;
@@ -176,11 +183,11 @@ public:
     ///
     /// The user of this interface is supposed to call \ref notify_requests_finished when the
     /// request finishes executing - regardless of success or failure.
-    void queue(priority_class_ptr pc, fair_queue_request_descriptor desc, noncopyable_function<void()> func);
+    void queue(priority_class_ptr pc, fair_queue_ticket desc, noncopyable_function<void()> func);
 
     /// Notifies that ont request finished
-    /// \param desc an instance of \c fair_queue_request_descriptor structure describing the request that just finished.
-    void notify_requests_finished(fair_queue_request_descriptor& desc);
+    /// \param desc an instance of \c fair_queue_ticket structure describing the request that just finished.
+    void notify_requests_finished(fair_queue_ticket desc);
 
     /// Try to execute new requests if there is capacity left in the queue.
     void dispatch_requests();

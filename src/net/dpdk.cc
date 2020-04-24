@@ -23,8 +23,8 @@
 #include <cinttypes>
 #include <seastar/core/posix.hh>
 #include "core/vla.hh"
-#include <seastar/net/virtio-interface.hh>
 #include <seastar/core/reactor.hh>
+#include <seastar/net/virtio-interface.hh>
 #include <seastar/core/stream.hh>
 #include <seastar/core/circular_buffer.hh>
 #include <seastar/core/align.hh>
@@ -397,7 +397,7 @@ public:
                 bool enable_fc)
         : _port_idx(port_idx)
         , _num_queues(num_queues)
-        , _home_cpu(engine().cpu_id())
+        , _home_cpu(this_shard_id())
         , _use_lro(use_lro)
         , _enable_fc(enable_fc)
         , _stats_plugin_name("network")
@@ -2220,7 +2220,7 @@ void dpdk_device::set_rss_table()
 
     int reta_conf_size =
         std::max(1, _dev_info.reta_size / RTE_RETA_GROUP_SIZE);
-    rte_eth_rss_reta_entry64 reta_conf[reta_conf_size];
+    std::vector<rte_eth_rss_reta_entry64> reta_conf(reta_conf_size);
 
     // Configure the HW indirection table
     unsigned i = 0;
@@ -2231,7 +2231,7 @@ void dpdk_device::set_rss_table()
         }
     }
 
-    if (rte_eth_dev_rss_reta_update(_port_idx, reta_conf, _dev_info.reta_size)) {
+    if (rte_eth_dev_rss_reta_update(_port_idx, reta_conf.data(), _dev_info.reta_size)) {
         rte_exit(EXIT_FAILURE, "Port %d: Failed to update an RSS indirection table", _port_idx);
     }
 

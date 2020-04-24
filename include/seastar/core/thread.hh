@@ -27,7 +27,6 @@
 #include <seastar/core/do_with.hh>
 #include <seastar/core/future-util.hh>
 #include <seastar/core/timer.hh>
-#include <seastar/core/reactor.hh>
 #include <seastar/core/scheduling.hh>
 #include <memory>
 #include <setjmp.h>
@@ -80,6 +79,8 @@ class thread_attributes;
 class thread_attributes {
 public:
     compat::optional<seastar::scheduling_group> sched_group;
+    // For stack_size 0, a default value will be used (128KiB when writing this comment)
+    size_t stack_size = 0;
 };
 
 
@@ -89,26 +90,13 @@ extern thread_local jmp_buf_link g_unthreaded_context;
 // Internal class holding thread state.  We can't hold this in
 // \c thread itself because \c thread is movable, and we want pointers
 // to this state to be captured.
-class thread_context : private task {
+class thread_context final : private task {
     struct stack_deleter {
         void operator()(char *ptr) const noexcept;
     };
     using stack_holder = std::unique_ptr<char[], stack_deleter>;
 
-    // Both asan and optimizations can increase the stack used by a
-    // function. When both are used, we need more than 128 KiB.
-#if defined(__OPTIMIZE__) && defined(SEASTAR_ASAN_ENABLED)
-    static constexpr size_t base_stack_size = 256*1024;
-#else
-    static constexpr size_t base_stack_size = 128*1024;
-#endif
-
-#ifdef SEASTAR_THREAD_STACK_GUARDS
-    const size_t _stack_size;
-#else
-    static constexpr size_t _stack_size = base_stack_size;
-#endif
-    stack_holder _stack{make_stack()};
+    stack_holder _stack;
     noncopyable_function<void ()> _func;
     jmp_buf_link _context;
     promise<> _done;
@@ -123,9 +111,9 @@ class thread_context : private task {
     static thread_local all_thread_list _all_threads;
 private:
     static void s_main(int lo, int hi); // all parameters MUST be 'int' for makecontext
-    void setup();
+    void setup(size_t stack_size);
     void main();
-    stack_holder make_stack();
+    stack_holder make_stack(size_t stack_size);
     virtual void run_and_dispose() noexcept override; // from task class
 public:
     thread_context(thread_attributes attr, noncopyable_function<void ()> func);
@@ -239,7 +227,7 @@ thread::join() {
 /// \code
 ///    future<int> compute_sum(int a, int b) {
 ///        thread_attributes attr = {};
-///        attr.scheduling_group = some_scheduling_group_ptr;
+///        attr.sched_group = some_scheduling_group_ptr;
 ///        return seastar::async(attr, [a, b] {
 ///            // some blocking code:
 ///            sleep(1s).get();

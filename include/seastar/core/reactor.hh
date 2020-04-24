@@ -26,6 +26,7 @@
 #include <seastar/core/aligned_buffer.hh>
 #include <seastar/core/cacheline.hh>
 #include <seastar/core/circular_buffer_fixed_capacity.hh>
+#include <seastar/core/idle_cpu_handler.hh>
 #include <memory>
 #include <type_traits>
 #include <sys/epoll.h>
@@ -79,7 +80,9 @@
 #include <seastar/core/manual_clock.hh>
 #include <seastar/core/metrics_registration.hh>
 #include <seastar/core/scheduling.hh>
+#include <seastar/core/scheduling_specific.hh>
 #include <seastar/core/smp.hh>
+#include <seastar/core/internal/io_request.hh>
 #include "internal/pollable_fd.hh"
 #include "internal/poll.hh"
 
@@ -129,7 +132,7 @@ bool operator==(const ::sockaddr_in a, const ::sockaddr_in b);
 namespace seastar {
 
 void register_network_stack(sstring name, boost::program_options::options_description opts,
-    std::function<future<std::unique_ptr<network_stack>>(boost::program_options::variables_map opts)> create,
+    noncopyable_function<future<std::unique_ptr<network_stack>>(boost::program_options::variables_map opts)> create,
     bool make_default = false);
 
 class thread_pool;
@@ -143,10 +146,35 @@ namespace internal {
 
 class reactor_stall_sampler;
 class cpu_stall_detector;
+class buffer_allocator;
+
+template <typename Func> // signature: bool ()
+std::unique_ptr<pollfn> make_pollfn(Func&& func);
+
+class poller {
+    std::unique_ptr<pollfn> _pollfn;
+    class registration_task;
+    class deregistration_task;
+    registration_task* _registration_task = nullptr;
+public:
+    template <typename Func> // signature: bool ()
+    static poller simple(Func&& poll) {
+        return poller(make_pollfn(std::forward<Func>(poll)));
+    }
+    poller(std::unique_ptr<pollfn> fn)
+            : _pollfn(std::move(fn)) {
+        do_register();
+    }
+    ~poller();
+    poller(poller&& x);
+    poller& operator=(poller&& x);
+    void do_register() noexcept;
+    friend class reactor;
+};
 
 }
 
-class io_desc;
+class kernel_completion;
 class io_queue;
 class disk_config_params;
 
@@ -157,59 +185,44 @@ private:
     using task_queue_list = circular_buffer_fixed_capacity<task_queue*, max_scheduling_groups()>;
     using pollfn = seastar::pollfn;
 
-    class io_pollfn;
     class signal_pollfn;
-    class aio_batch_submit_pollfn;
     class batch_flush_pollfn;
     class smp_pollfn;
     class drain_cross_cpu_freelist_pollfn;
     class lowres_timer_pollfn;
     class manual_timer_pollfn;
     class epoll_pollfn;
+    class reap_kernel_completions_pollfn;
+    class kernel_submit_work_pollfn;
+    class io_queue_submission_pollfn;
     class syscall_pollfn;
     class execution_stage_pollfn;
-    friend io_pollfn;
     friend signal_pollfn;
-    friend aio_batch_submit_pollfn;
     friend batch_flush_pollfn;
     friend smp_pollfn;
     friend drain_cross_cpu_freelist_pollfn;
     friend lowres_timer_pollfn;
     friend class manual_clock;
     friend class epoll_pollfn;
+    friend class reap_kernel_completions_pollfn;
+    friend class kernel_submit_work_pollfn;
+    friend class io_queue_submission_pollfn;
     friend class syscall_pollfn;
     friend class execution_stage_pollfn;
     friend class file_data_source_impl; // for fstream statistics
     friend class internal::reactor_stall_sampler;
+    friend class preempt_io_context;
+    friend struct hrtimer_aio_completion;
+    friend struct task_quota_aio_completion;
     friend class reactor_backend_epoll;
     friend class reactor_backend_aio;
+    friend class reactor_backend_selector;
+    friend class aio_storage_context;
 public:
-    class poller {
-        std::unique_ptr<pollfn> _pollfn;
-        class registration_task;
-        class deregistration_task;
-        registration_task* _registration_task;
-    public:
-        template <typename Func> // signature: bool ()
-        static poller simple(Func&& poll) {
-            return poller(make_pollfn(std::forward<Func>(poll)));
-        }
-        poller(std::unique_ptr<pollfn> fn)
-                : _pollfn(std::move(fn)) {
-            do_register();
-        }
-        ~poller();
-        poller(poller&& x);
-        poller& operator=(poller&& x);
-        void do_register();
-        friend class reactor;
-    };
-    enum class idle_cpu_handler_result {
-        no_more_work,
-        interrupted_by_higher_priority_task
-    };
-    using work_waiting_on_reactor = const std::function<bool()>&;
-    using idle_cpu_handler = std::function<idle_cpu_handler_result(work_waiting_on_reactor)>;
+    using poller = internal::poller;
+    using idle_cpu_handler_result = seastar::idle_cpu_handler_result;
+    using work_waiting_on_reactor = seastar::work_waiting_on_reactor;
+    using idle_cpu_handler = seastar::idle_cpu_handler;
 
     struct io_stats {
         uint64_t aio_reads = 0;
@@ -245,6 +258,7 @@ private:
     static constexpr unsigned max_queues = 8;
     static constexpr unsigned max_aio = max_aio_per_queue * max_queues;
     friend disk_config_params;
+
     // Not all reactors have IO queues. If the number of IO queues is less than the number of shards,
     // some reactors will talk to foreign io_queues. If this reactor holds a valid IO queue, it will
     // be stored here.
@@ -252,13 +266,14 @@ private:
     std::unordered_map<dev_t, io_queue*> _io_queues;
     friend io_queue;
 
-    std::vector<std::function<future<> ()>> _exit_funcs;
+    std::vector<noncopyable_function<future<> ()>> _exit_funcs;
     unsigned _id = 0;
     bool _stopping = false;
     bool _stopped = false;
+    bool _finished_running_tasks = false;
     condition_variable _stop_requested;
     bool _handle_sigint = true;
-    promise<std::unique_ptr<network_stack>> _network_stack_ready_promise;
+    compat::optional<future<std::unique_ptr<network_stack>>> _network_stack_ready;
     int _return = 0;
     promise<> _start_promise;
     semaphore _cpu_started;
@@ -274,14 +289,10 @@ private:
     timer_set<timer<lowres_clock>, &timer<lowres_clock>::_link>::timer_list_t _expired_lowres_timers;
     timer_set<timer<manual_clock>, &timer<manual_clock>::_link> _manual_timers;
     timer_set<timer<manual_clock>, &timer<manual_clock>::_link>::timer_list_t _expired_manual_timers;
-    internal::linux_abi::aio_context_t _io_context;
-    alignas(cache_line_size) std::array<internal::linux_abi::iocb, max_aio> _iocb_pool;
-    std::stack<internal::linux_abi::iocb*, boost::container::static_vector<internal::linux_abi::iocb*, max_aio>> _free_iocbs;
-    boost::container::static_vector<internal::linux_abi::iocb*, max_aio> _pending_aio;
-    boost::container::static_vector<internal::linux_abi::iocb*, max_aio> _pending_aio_retry;
     io_stats _io_stats;
     uint64_t _fsyncs = 0;
     uint64_t _cxx_exceptions = 0;
+    uint64_t _abandoned_failed_futures = 0;
     struct task_queue {
         explicit task_queue(unsigned id, sstring name, float shares);
         int64_t _vruntime = 0;
@@ -292,14 +303,8 @@ private:
         uint8_t _id;
         sched_clock::duration _runtime = {};
         uint64_t _tasks_processed = 0;
-        circular_buffer<std::unique_ptr<task>> _q;
+        circular_buffer<task*> _q;
         sstring _name;
-        /**
-         * This array holds pointers to the scheduling group specific
-         * data. The pointer is not use as is but is cast to a reference
-         * to the appropriate type that is actually pointed to.
-         */
-        std::vector<void*> _scheduling_group_specific_vals;
         int64_t to_vruntime(sched_clock::duration runtime) const;
         void set_shares(float shares);
         struct indirect_compare;
@@ -309,8 +314,10 @@ private:
     private:
         void register_stats();
     };
+
+    circular_buffer<internal::io_request> _pending_io;
     boost::container::static_vector<std::unique_ptr<task_queue>, max_scheduling_groups()> _task_queues;
-    std::vector<scheduling_group_key_config> _scheduling_group_key_configs;
+    internal::scheduling_group_specific_thread_local_data _scheduling_group_specific_data;
     int64_t _last_vruntime = 0;
     task_queue_list _active_task_queues;
     task_queue_list _activating_task_queues;
@@ -352,6 +359,7 @@ private:
     void wakeup();
     size_t handle_aio_error(internal::linux_abi::iocb* iocb, int ec);
     bool flush_pending_aio();
+    bool reap_kernel_completions();
     bool flush_tcp_batches();
     bool do_expire_lowres_timers();
     bool do_check_lowres_timers() const;
@@ -370,12 +378,9 @@ private:
      */
     bool poll_once();
     bool pure_poll_once();
-    template <typename Func> // signature: bool ()
-    static std::unique_ptr<pollfn> make_pollfn(Func&& func);
-
 public:
     /// Register a user-defined signal handler
-    void handle_signal(int signo, std::function<void ()>&& handler);
+    void handle_signal(int signo, noncopyable_function<void ()>&& handler);
 
 private:
     class signals {
@@ -385,19 +390,19 @@ private:
 
         bool poll_signal();
         bool pure_poll_signal() const;
-        void handle_signal(int signo, std::function<void ()>&& handler);
-        void handle_signal_once(int signo, std::function<void ()>&& handler);
+        void handle_signal(int signo, noncopyable_function<void ()>&& handler);
+        void handle_signal_once(int signo, noncopyable_function<void ()>&& handler);
         static void action(int signo, siginfo_t* siginfo, void* ignore);
         static void failed_to_handle(int signo);
     private:
         struct signal_handler {
-            signal_handler(int signo, std::function<void ()>&& handler);
-            std::function<void ()> _handler;
+            signal_handler(int signo, noncopyable_function<void ()>&& handler);
+            noncopyable_function<void ()> _handler;
         };
         std::atomic<uint64_t> _pending_signals;
         std::unordered_map<int, signal_handler> _signal_handlers;
 
-        friend void reactor::handle_signal(int, std::function<void ()>&&);
+        friend void reactor::handle_signal(int, noncopyable_function<void ()>&&);
     };
 
     signals _signals;
@@ -420,22 +425,28 @@ private:
     future<> init_scheduling_group(scheduling_group sg, sstring name, float shares);
     future<> init_new_scheduling_group_key(scheduling_group_key key, scheduling_group_key_config cfg);
     future<> destroy_scheduling_group(scheduling_group sg);
-    [[noreturn]] void no_such_scheduling_group(scheduling_group sg);
-    void* get_scheduling_group_specific_value(scheduling_group sg, scheduling_group_key key) {
-        if (!_task_queues[sg._id]) {
-            no_such_scheduling_group(sg);
-        }
-        return _task_queues[sg._id]->_scheduling_group_specific_vals[key.id()];
-    }
-    void* get_scheduling_group_specific_value(scheduling_group_key key) {
-        return get_scheduling_group_specific_value(*internal::current_scheduling_group_ptr(), key);
-    }
     uint64_t tasks_processed() const;
     uint64_t min_vruntime() const;
     void request_preemption();
     void start_handling_signal();
     void reset_preemption_monitor();
     void service_highres_timer();
+
+    future<std::tuple<pollable_fd, socket_address>>
+    do_accept(pollable_fd_state& listen_fd);
+    future<> do_connect(pollable_fd_state& pfd, socket_address& sa);
+
+    future<size_t>
+    do_read_some(pollable_fd_state& fd, void* buffer, size_t size);
+    future<size_t>
+    do_read_some(pollable_fd_state& fd, const std::vector<iovec>& iov);
+    future<temporary_buffer<char>>
+    do_read_some(pollable_fd_state& fd, internal::buffer_allocator* ba);
+
+    future<size_t>
+    do_write_some(pollable_fd_state& fd, const void* buffer, size_t size);
+    future<size_t>
+    do_write_some(pollable_fd_state& fd, net::packet& p);
 public:
     static boost::program_options::options_description get_options_description(reactor_config cfg);
     explicit reactor(unsigned id, reactor_backend_selector rbs, reactor_config cfg);
@@ -480,53 +491,44 @@ public:
 
     bool posix_reuseport_available() const { return _reuseport; }
 
-    lw_shared_ptr<pollable_fd> make_pollable_fd(socket_address sa, int proto);
+    pollable_fd make_pollable_fd(socket_address sa, int proto);
 
-    future<> posix_connect(lw_shared_ptr<pollable_fd> pfd, socket_address sa, socket_address local);
-
-    future<std::tuple<pollable_fd, socket_address>> accept(pollable_fd_state& listen_fd);
-
-    future<size_t> read_some(pollable_fd_state& fd, void* buffer, size_t size);
-    future<size_t> read_some(pollable_fd_state& fd, const std::vector<iovec>& iov);
-
-    future<size_t> write_some(pollable_fd_state& fd, const void* buffer, size_t size);
+    future<> posix_connect(pollable_fd pfd, socket_address sa, socket_address local);
 
     future<> write_all(pollable_fd_state& fd, const void* buffer, size_t size);
 
-    future<file> open_file_dma(sstring name, open_flags flags, file_open_options options = {});
-    future<file> open_directory(sstring name);
-    future<> make_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions);
-    future<> touch_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions);
-    future<compat::optional<directory_entry_type>>  file_type(sstring name, follow_symlink = follow_symlink::yes);
-    future<stat_data> file_stat(sstring pathname, follow_symlink);
-    future<uint64_t> file_size(sstring pathname);
-    future<bool> file_accessible(sstring pathname, access_flags flags);
-    future<bool> file_exists(sstring pathname) {
+    future<file> open_file_dma(sstring name, open_flags flags, file_open_options options = {}) noexcept;
+    future<file> open_directory(sstring name) noexcept;
+    future<> make_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions) noexcept;
+    future<> touch_directory(sstring name, file_permissions permissions = file_permissions::default_dir_permissions) noexcept;
+    future<compat::optional<directory_entry_type>>  file_type(sstring name, follow_symlink = follow_symlink::yes) noexcept;
+    future<stat_data> file_stat(sstring pathname, follow_symlink) noexcept;
+    future<uint64_t> file_size(sstring pathname) noexcept;
+    future<bool> file_accessible(sstring pathname, access_flags flags) noexcept;
+    future<bool> file_exists(sstring pathname) noexcept {
         return file_accessible(pathname, access_flags::exists);
     }
-    future<fs_type> file_system_at(sstring pathname);
-    future<struct statvfs> statvfs(sstring pathname);
-    future<> remove_file(sstring pathname);
-    future<> rename_file(sstring old_pathname, sstring new_pathname);
-    future<> link_file(sstring oldpath, sstring newpath);
-    future<> chmod(sstring name, file_permissions permissions);
+    future<fs_type> file_system_at(sstring pathname) noexcept;
+    future<struct statvfs> statvfs(sstring pathname) noexcept;
+    future<> remove_file(sstring pathname) noexcept;
+    future<> rename_file(sstring old_pathname, sstring new_pathname) noexcept;
+    future<> link_file(sstring oldpath, sstring newpath) noexcept;
+    future<> chmod(sstring name, file_permissions permissions) noexcept;
 
     // In the following three methods, prepare_io is not guaranteed to execute in the same processor
     // in which it was generated. Therefore, care must be taken to avoid the use of objects that could
     // be destroyed within or at exit of prepare_io.
-    void submit_io(io_desc* desc,
-            noncopyable_function<void (internal::linux_abi::iocb&)> prepare_io);
-    future<internal::linux_abi::io_event> submit_io_read(io_queue* ioq,
+    void submit_io(kernel_completion* desc, internal::io_request req);
+    future<size_t> submit_io_read(io_queue* ioq,
             const io_priority_class& priority_class,
             size_t len,
-            noncopyable_function<void (internal::linux_abi::iocb&)> prepare_io);
-    future<internal::linux_abi::io_event> submit_io_write(io_queue* ioq,
+            internal::io_request req) noexcept;
+    future<size_t> submit_io_write(io_queue* ioq,
             const io_priority_class& priority_class,
             size_t len,
-            noncopyable_function<void (internal::linux_abi::iocb&)> prepare_io);
+            internal::io_request req) noexcept;
 
-    inline void handle_io_result(const internal::linux_abi::io_event& ev) {
-        auto res = long(ev.res);
+    inline void handle_io_result(ssize_t res) {
         if (res < 0) {
             ++_io_stats.aio_errors;
             throw_kernel_error(res);
@@ -543,7 +545,7 @@ public:
         return _stop_requested.wait(timeout, [this] { return _stopping; });
     }
 
-    void at_exit(std::function<future<> ()> func);
+    void at_exit(noncopyable_function<future<> ()> func);
 
     template <typename Func>
     void at_destroy(Func&& func) {
@@ -551,10 +553,10 @@ public:
     }
 
 #ifdef SEASTAR_SHUFFLE_TASK_QUEUE
-    void shuffle(std::unique_ptr<task>&, task_queue&);
+    void shuffle(task*&, task_queue&);
 #endif
 
-    void add_task(std::unique_ptr<task>&& t) {
+    void add_task(task* t) noexcept {
         auto sg = t->group();
         auto* q = _task_queues[sg._id].get();
         bool was_empty = q->_q.empty();
@@ -566,7 +568,7 @@ public:
             activate(*q);
         }
     }
-    void add_urgent_task(std::unique_ptr<task>&& t) {
+    void add_urgent_task(task* t) noexcept {
         auto sg = t->group();
         auto* q = _task_queues[sg._id].get();
         bool was_empty = q->_q.empty();
@@ -592,12 +594,13 @@ public:
     }
     void force_poll();
 
-    void add_high_priority_task(std::unique_ptr<task>&&);
+    void add_high_priority_task(task*) noexcept;
 
     network_stack& net() { return *_network_stack; }
-    shard_id cpu_id() const { return _id; }
 
-    void start_epoll();
+    [[deprecated("Use this_shard_id")]]
+    shard_id cpu_id() const;
+
     void sleep();
 
     steady_clock_type::duration total_idle_time();
@@ -605,6 +608,7 @@ public:
     std::chrono::nanoseconds total_steal_time();
 
     const io_stats& get_io_stats() const { return _io_stats; }
+    uint64_t abandoned_failed_futures() const { return _abandoned_failed_futures; }
 #ifdef HAVE_OSV
     void timer_thread_func();
     void set_timer(sched::timer &tmr, s64 t);
@@ -624,9 +628,7 @@ private:
     void register_metrics();
     future<> write_all_part(pollable_fd_state& fd, const void* buffer, size_t size, size_t completed);
 
-    bool process_io();
-
-    future<> fdatasync(int fd);
+    future<> fdatasync(int fd) noexcept;
 
     void add_timer(timer<steady_clock_type>*);
     bool queue_timer(timer<steady_clock_type>*);
@@ -643,6 +645,7 @@ private:
     friend class alien::message_queue;
     friend class pollable_fd;
     friend class pollable_fd_state;
+    friend struct pollable_fd_state_deleter;
     friend class posix_file_impl;
     friend class blockdev_file_impl;
     friend class readable_eventfd;
@@ -651,10 +654,11 @@ private:
     friend class timer<manual_clock>;
     friend class smp;
     friend class smp_message_queue;
-    friend class poller;
+    friend class internal::poller;
     friend class scheduling_group;
     friend void add_to_flush_poller(output_stream<char>* os);
     friend int ::_Unwind_RaiseException(struct _Unwind_Exception *h);
+    friend void report_failed_future(const std::exception_ptr& eptr) noexcept;
     metrics::metric_groups _metric_groups;
     friend future<scheduling_group> create_scheduling_group(sstring name, float shares);
     friend future<> seastar::destroy_scheduling_group(scheduling_group);
@@ -677,12 +681,14 @@ private:
     })
     friend future<typename function_traits<Reducer>::return_type>
         reduce_scheduling_group_specific(Reducer reducer, Initial initial_val, scheduling_group_key key);
+
+    future<struct stat> fstat(int fd) noexcept;
+    future<struct statfs> fstatfs(int fd) noexcept;
+    friend future<shared_ptr<file_impl>> make_file_impl(int fd, file_open_options options, int flags) noexcept;
 public:
-    bool wait_and_process(int timeout = 0, const sigset_t* active_sigmask = nullptr);
     future<> readable(pollable_fd_state& fd);
     future<> writeable(pollable_fd_state& fd);
     future<> readable_or_writeable(pollable_fd_state& fd);
-    void forget(pollable_fd_state& fd);
     void abort_reader(pollable_fd_state& fd);
     void abort_writer(pollable_fd_state& fd);
     void enable_timer(steady_clock_type::time_point when);
@@ -707,7 +713,7 @@ public:
 template <typename Func> // signature: bool ()
 inline
 std::unique_ptr<reactor::pollfn>
-reactor::make_pollfn(Func&& func) {
+internal::make_pollfn(Func&& func) {
     struct the_pollfn : pollfn {
         the_pollfn(Func&& func) : func(std::forward<Func>(func)) {}
         Func func;
@@ -733,11 +739,6 @@ inline bool engine_is_ready() {
 }
 
 inline
-pollable_fd_state::~pollable_fd_state() {
-    engine().forget(*this);
-}
-
-inline
 size_t iovec_len(const iovec* begin, size_t len)
 {
     size_t ret = 0;
@@ -748,7 +749,7 @@ size_t iovec_len(const iovec* begin, size_t len)
     return ret;
 }
 
-inline int alarm_signal() {
+inline int hrtimer_signal() {
     // We don't want to use SIGALRM, because the boost unit test library
     // also plays with it.
     return SIGRTMIN;

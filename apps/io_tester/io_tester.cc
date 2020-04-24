@@ -188,6 +188,13 @@ public:
     future<> start(sstring dir) {
         return do_start(dir);
     }
+
+    future<> stop() {
+        if (_file) {
+            return _file.close();
+        }
+        return make_ready_future<>();
+    }
 protected:
     sstring type_str() const {
         return std::unordered_map<request_type, sstring>{
@@ -284,7 +291,7 @@ public:
     io_class_data(job_config cfg) : class_data(std::move(cfg)) {}
 
     future<> do_start(sstring dir) override {
-        auto fname = format("{}/test-{}-{:d}", dir, name(), engine().cpu_id());
+        auto fname = format("{}/test-{}-{:d}", dir, name(), this_shard_id());
         return open_file_dma(fname, open_flags::rw | open_flags::create | open_flags::truncate).then([this, fname] (auto f) {
             _file = f;
             return remove_file(fname);
@@ -518,7 +525,7 @@ class context {
 public:
     context(sstring dir, std::vector<job_config> req_config, unsigned duration)
             : _cl(boost::copy_range<std::vector<std::unique_ptr<class_data>>>(req_config
-                | boost::adaptors::filtered([] (auto& cfg) { return cfg.shard_placement.is_set(engine().cpu_id()); })
+                | boost::adaptors::filtered([] (auto& cfg) { return cfg.shard_placement.is_set(this_shard_id()); })
                 | boost::adaptors::transformed([] (auto& cfg) { return cfg.gen_class_data(); })
             ))
             , _dir(dir)
@@ -526,7 +533,11 @@ public:
             , _finished(0)
     {}
 
-    future<> stop() { return make_ready_future<>(); }
+    future<> stop() {
+        return parallel_for_each(_cl, [] (std::unique_ptr<class_data>& cl) {
+            return cl->stop();
+        });
+    }
 
     future<> start() {
         return parallel_for_each(_cl, [this] (std::unique_ptr<class_data>& cl) {
@@ -544,7 +555,7 @@ public:
 
     future<> print_stats() {
         return _finished.wait(_cl.size()).then([this] {
-            fmt::print("Shard {:>2}\n", engine().cpu_id());
+            fmt::print("Shard {:>2}\n", this_shard_id());
             auto idx = 0;
             for (auto& cl: _cl) {
                 fmt::print("Class {:>2} ({})\n", idx++, cl->describe_class());
@@ -610,6 +621,7 @@ int main(int ac, char** av) {
                     return c.print_stats();
                 }).get();
             }
+            ctx.stop().get0();
         }).or_terminate();
     });
 }

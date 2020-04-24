@@ -53,16 +53,20 @@ ipv4::ipv4(interface* netif)
     , _gw_address(0)
     , _netmask(0)
     , _l3(netif, eth_protocol_num::ipv4, [this] { return get_packet(); })
-    , _rx_packets(_l3.receive([this] (packet p, ethernet_address ea) {
-        return handle_received_packet(std::move(p), ea); },
-      [this] (forward_hash& out_hash_data, packet& p, size_t off) {
-        return forward(out_hash_data, p, off);}))
     , _tcp(*this)
     , _icmp(*this)
     , _udp(*this)
     , _l4({ { uint8_t(ip_protocol_num::tcp), &_tcp }, { uint8_t(ip_protocol_num::icmp), &_icmp }, { uint8_t(ip_protocol_num::udp), &_udp }})
 {
     namespace sm = seastar::metrics;
+    // FIXME: ignored future
+    (void)_l3.receive(
+        [this](packet p, ethernet_address ea) {
+            return handle_received_packet(std::move(p), ea);
+        },
+        [this](forward_hash& out_hash_data, packet& p, size_t off) {
+            return forward(out_hash_data, p, off);
+        });
 
     _metrics.add_group("ipv4", {
         //
@@ -183,7 +187,7 @@ ipv4::handle_received_packet(packet p, ethernet_address from) {
             auto dropped_size = frag.mem_size;
             auto& ip_data = frag.data.map.begin()->second;
             // Choose a cpu to forward this packet
-            auto cpu_id = engine().cpu_id();
+            auto cpu_id = this_shard_id();
             auto l4 = _l4[h.ip_proto];
             if (l4) {
                 size_t l4_offset = 0;
@@ -194,7 +198,7 @@ ipv4::handle_received_packet(packet p, ethernet_address from) {
                 if (forwarded) {
                     cpu_id = _netif->hash2cpu(toeplitz_hash(_netif->rss_key(), hash_data));
                     // No need to forward if the dst cpu is the current cpu
-                    if (cpu_id == engine().cpu_id()) {
+                    if (cpu_id == this_shard_id()) {
                         l4->received(std::move(ip_data), h.src_ip, h.dst_ip);
                     } else {
                         auto to = _netif->hw_address();

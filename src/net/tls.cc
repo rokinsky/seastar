@@ -24,6 +24,8 @@
 #include <system_error>
 
 #include <seastar/core/reactor.hh>
+#include <seastar/core/seastar.hh>
+#include <seastar/core/file.hh>
 #include <seastar/core/thread.hh>
 #include <seastar/core/sstring.hh>
 #include <seastar/core/semaphore.hh>
@@ -32,6 +34,8 @@
 #include <seastar/net/tls.hh>
 #include <seastar/net/stack.hh>
 #include <seastar/util/std-compat.hh>
+
+#include <boost/range/iterator_range.hpp>
 
 namespace seastar {
 
@@ -625,6 +629,9 @@ public:
         if (_connected) {
             return make_ready_future<>();
         }
+        if (_type == type::CLIENT && !_hostname.empty()) {
+            gnutls_server_name_set(*this, GNUTLS_NAME_DNS, _hostname.data(), _hostname.size());
+        }
         try {
             auto res = gnutls_handshake(*this);
             if (res < 0) {
@@ -872,7 +879,7 @@ public:
         try {
             scattered_message<char> msg;
             for (int i = 0; i < iovcnt; ++i) {
-                msg.append(sstring(reinterpret_cast<const char *>(iov[i].iov_base), iov[i].iov_len));
+                msg.append(compat::string_view(reinterpret_cast<const char *>(iov[i].iov_base), iov[i].iov_len));
             }
             auto n = msg.size();
             _output_pending = _out.put(std::move(msg).release());
@@ -945,7 +952,7 @@ public:
                    return make_ready_future<stop_iteration>(stop_iteration::no);
                 });
             });
-        }).finally([me = shared_from_this()] {});
+        });
     }
     future<> shutdown() {
         // first, make sure any pending write is done.
@@ -958,7 +965,11 @@ public:
         // in which case we will be no-op.
         return with_semaphore(_out_sem, 1,
                         std::bind(&session::do_shutdown, this)).then(
-                        std::bind(&session::wait_for_eof, this));
+                        std::bind(&session::wait_for_eof, this)).finally([me = shared_from_this()] {});
+        // note moved finally clause above. It is theorethically possible
+        // that we could complete do_shutdown just before the close calls 
+        // below, get pre-empted, have "close()" finish, get freed, and 
+        // then call wait_for_eof on stale pointer.
     }
     void close() {
         // only do once.
@@ -978,8 +989,8 @@ public:
                 // make sure to wait for handshake attempt to leave semaphores. Must be in same order as
                 // handshake aqcuire, because in worst case, we get here while a reader is attempting
                 // re-handshake.
-                return _in_sem.wait().then([this] {
-                    return _out_sem.wait();
+                return with_semaphore(_in_sem, 1, [this] {
+                    return with_semaphore(_out_sem, 1, [this] {});
                 });
             }).then_wrapped([me = std::move(me)](future<> f) { // must keep object alive until here.
                 f.ignore_ready_future();
@@ -1146,7 +1157,7 @@ class tls_socket_impl : public net::socket_impl {
     ::seastar::socket _socket;
 public:
     tls_socket_impl(shared_ptr<certificate_credentials> cred, sstring name)
-            : _cred(cred), _name(std::move(name)), _socket(engine().net().socket()) {
+            : _cred(cred), _name(std::move(name)), _socket(make_socket()) {
     }
     virtual future<connected_socket> connect(socket_address sa, socket_address local, transport proto = transport::TCP) override {
         return _socket.connect(sa, local, proto).then([cred = std::move(_cred), name = std::move(_name)](connected_socket s) mutable {
@@ -1204,7 +1215,7 @@ future<connected_socket> tls::wrap_server(shared_ptr<server_credentials> cred, c
 }
 
 server_socket tls::listen(shared_ptr<server_credentials> creds, socket_address sa, listen_options opts) {
-    return listen(std::move(creds), engine().listen(sa, opts));
+    return listen(std::move(creds), seastar::listen(sa, opts));
 }
 
 server_socket tls::listen(shared_ptr<server_credentials> creds, server_socket ss) {

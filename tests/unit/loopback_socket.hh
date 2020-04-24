@@ -29,7 +29,6 @@
 #include <seastar/core/future-util.hh>
 #include <seastar/core/do_with.hh>
 #include <seastar/net/stack.hh>
-#include <seastar/core/reactor.hh>
 #include <seastar/core/sharded.hh>
 
 namespace seastar {
@@ -210,16 +209,16 @@ public:
         _pending.resize(smp::count);
     }
     server_socket get_server_socket() {
-       if (!_pending[engine().cpu_id()]) {
-           _pending[engine().cpu_id()] = make_lw_shared<queue<connected_socket>>(10);
+       if (!_pending[this_shard_id()]) {
+           _pending[this_shard_id()] = make_lw_shared<queue<connected_socket>>(10);
        }
-       return server_socket(std::make_unique<loopback_server_socket_impl>(_pending[engine().cpu_id()]));
+       return server_socket(std::make_unique<loopback_server_socket_impl>(_pending[this_shard_id()]));
     }
     future<> make_new_server_connection(foreign_ptr<lw_shared_ptr<loopback_buffer>> b1, lw_shared_ptr<loopback_buffer> b2) {
-        if (!_pending[engine().cpu_id()]) {
-            _pending[engine().cpu_id()] = make_lw_shared<queue<connected_socket>>(10);
+        if (!_pending[this_shard_id()]) {
+            _pending[this_shard_id()] = make_lw_shared<queue<connected_socket>>(10);
         }
-        return _pending[engine().cpu_id()]->push_eventually(connected_socket(std::make_unique<loopback_connected_socket_impl>(std::move(b1), b2)));
+        return _pending[this_shard_id()]->push_eventually(connected_socket(std::make_unique<loopback_connected_socket_impl>(std::move(b1), b2)));
     }
     connected_socket make_new_client_connection(lw_shared_ptr<loopback_buffer> b1, foreign_ptr<lw_shared_ptr<loopback_buffer>> b2) {
         return connected_socket(std::make_unique<loopback_connected_socket_impl>(std::move(b2), b1));
@@ -229,6 +228,11 @@ public:
     }
     void destroy_shard(unsigned shard) {
         _pending[shard] = nullptr;
+    }
+    future<> destroy_all_shards() {
+        return smp::invoke_on_all([this] () {
+            destroy_shard(this_shard_id());
+        });
     }
 };
 
@@ -241,7 +245,7 @@ public:
     loopback_socket_impl(loopback_connection_factory& factory, loopback_error_injector* error_injector = nullptr)
             : _factory(factory), _error_injector(error_injector)
     { }
-    future<connected_socket> connect(socket_address sa, socket_address local, seastar::transport proto = seastar::transport::TCP) {
+    future<connected_socket> connect(socket_address sa, socket_address local, seastar::transport proto = seastar::transport::TCP) override {
         auto shard = _factory.next_shard();
         _b1 = make_lw_shared<loopback_buffer>(_error_injector, loopback_buffer::type::SERVER_TX);
         return smp::submit_to(shard, [this, b1 = make_foreign(_b1)] () mutable {
@@ -257,7 +261,7 @@ public:
     virtual void set_reuseaddr(bool reuseaddr) override {}
     virtual bool get_reuseaddr() const override { return false; };
 
-    void shutdown() {
+    void shutdown() override {
         _b1->shutdown();
         (void)smp::submit_to(_b2.get_owner_shard(), [b2 = std::move(_b2)] {
             b2->shutdown();

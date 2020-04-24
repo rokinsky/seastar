@@ -48,6 +48,10 @@ option (Seastar_EXPERIMENTAL_COROUTINES_TS
   "Enable experimental support for Coroutines TS."
   OFF)
 
+option (Seastar_SSTRING
+  "Use seastar's own string implementation"
+  ON)
+
 set (Seastar_API_LEVEL
   "2"
   CACHE
@@ -239,14 +243,46 @@ option (Seastar_SPLIT_DWARF
   "Use split dwarf."
   OFF)
 
+option (Seastar_HEAP_PROFILING
+    "Enable heap profiling. No effect when Seastar is compiled with the default allocator."
+    OFF)
+
 set (Seastar_TEST_TIMEOUT
   "300"
   CACHE
   STRING
   "Maximum allowed time for a test to run, in seconds.")
 
+# We set the following environment variables
+# * ASAN_OPTIONS=disable_coredump=0:abort_on_error=1
+#   By default asan disables core dumps because they used to be
+#   huge. This is no longer the case since the shadow memory is
+#   excluded, so it is safe to enable them.
+# * UBSAN_OPTIONS=halt_on_error=1:abort_on_error=1
+#   Fail the test if any undefined behavior is found and use abort
+#   instead of exit. Using abort is what causes core dumps to be
+#   produced.
+# * BOOST_TEST_CATCH_SYSTEM_ERRORS=no
+#   Normally the boost test library handles SIGABRT and prevents core
+#   dumps from being produced.
+set (Seastar_TEST_ENVIRONMENT
+  "ASAN_OPTIONS=disable_coredump=0:abort_on_error=1;UBSAN_OPTIONS=halt_on_error=1:abort_on_error=1;BOOST_TEST_CATCH_SYSTEM_ERRORS=no"
+  CACHE
+  STRING
+  "Environment variables for running tests")
+
 option (Seastar_UNUSED_RESULT_ERROR
   "Make [[nodiscard]] violations an error (instead of a warning)."
+  OFF)
+
+set (Seastar_STACK_GUARDS
+  "DEFAULT"
+  CACHE
+  STRING
+  "Enable stack guards. Can be ON, OFF or DEFAULT (which enables it for non release builds)")
+
+option (Seastar_EXPERIMENTAL_FS
+  "Compile experimental SeastarFS sources (requires C++17 support)"
   OFF)
 
 # When Seastar is embedded with `add_subdirectory`, disable the non-library targets.
@@ -276,6 +312,8 @@ seastar_find_dependencies ()
 
 # Private build dependencies not visible to consumers
 find_package (ragel 6.10 REQUIRED)
+find_package (Threads REQUIRED)
+find_package (PthreadSetName REQUIRED)
 
 #
 # Code generation helpers.
@@ -545,10 +583,12 @@ add_library (seastar STATIC
   src/core/file-impl.hh
   src/core/fsqual.cc
   src/core/fstream.cc
+  src/core/future.cc
   src/core/future-util.cc
   src/core/linux-aio.cc
   src/core/memory.cc
   src/core/metrics.cc
+  src/core/on_internal_error.cc
   src/core/posix.cc
   src/core/prometheus.cc
   src/core/reactor.cc
@@ -558,6 +598,7 @@ add_library (seastar STATIC
   src/core/scollectd-impl.hh
   src/core/systemwide_memory_barrier.cc
   src/core/smp.cc
+  src/core/sstring.cc
   src/core/thread.cc
   src/core/uname.cc
   src/core/vla.hh
@@ -602,11 +643,60 @@ add_library (seastar STATIC
   src/util/alloc_failure_injector.cc
   src/util/backtrace.cc
   src/util/conversions.cc
+  src/util/exceptions.cc
+  src/util/file.cc
   src/util/log.cc
   src/util/program-options.cc
-  src/util/read_first_line.cc)
+  src/util/read_first_line.cc
+  src/util/tmp_file.cc)
 
 add_library (Seastar::seastar ALIAS seastar)
+
+if (Seastar_EXPERIMENTAL_FS)
+  message(STATUS "Experimental SeastarFS is enabled")
+  target_sources(seastar
+    PRIVATE
+    # SeastarFS source files
+    include/seastar/fs/block_device.hh
+    include/seastar/fs/exceptions.hh
+    include/seastar/fs/file.hh
+    include/seastar/fs/overloaded.hh
+    include/seastar/fs/stat.hh
+    include/seastar/fs/temporary_file.hh
+    src/fs/bitwise.hh
+    src/fs/bootstrap_record.cc
+    src/fs/bootstrap_record.hh
+    src/fs/cluster.hh
+    src/fs/cluster_allocator.cc
+    src/fs/cluster_allocator.hh
+    src/fs/cluster_writer.hh
+    src/fs/crc.hh
+    src/fs/device_reader.cc
+    src/fs/device_reader.hh
+    src/fs/file.cc
+    src/fs/inode.hh
+    src/fs/inode_info.hh
+    src/fs/metadata_disk_entries.hh
+    src/fs/metadata_log.cc
+    src/fs/metadata_log.hh
+    src/fs/metadata_log_bootstrap.cc
+    src/fs/metadata_log_bootstrap.hh
+    src/fs/metadata_log_operations/create_and_open_unlinked_file.hh
+    src/fs/metadata_log_operations/create_file.hh
+    src/fs/metadata_log_operations/link_file.hh
+    src/fs/metadata_log_operations/read.hh
+    src/fs/metadata_log_operations/truncate.hh
+    src/fs/metadata_log_operations/unlink_or_remove_file.hh
+    src/fs/metadata_log_operations/write.hh
+    src/fs/metadata_to_disk_buffer.hh
+    src/fs/path.hh
+    src/fs/range.hh
+    src/fs/to_disk_buffer.hh
+    src/fs/units.hh
+    src/fs/unix_metadata.hh
+    src/fs/value_shared_lock.hh
+  )
+endif()
 
 add_dependencies (seastar
   seastar_http_request_parser
@@ -627,6 +717,7 @@ set (Seastar_PRIVATE_CXX_FLAGS
   -UNDEBUG
   -Wall
   -Werror
+  -Wno-array-bounds # Disabled because of https://gcc.gnu.org/bugzilla/show_bug.cgi?id=93437
   -Wno-error=deprecated-declarations)
 
 if (Seastar_COMPRESS_DEBUG)
@@ -659,7 +750,8 @@ target_link_libraries (seastar
     lksctp-tools::lksctp-tools
     protobuf::libprotobuf
     rt::rt
-    yaml-cpp::yaml-cpp)
+    yaml-cpp::yaml-cpp
+    Threads::Threads)
 
 if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "Sanitize"))
   set (Seastar_Sanitizers_OPTIONS ${Sanitizers_COMPILER_OPTIONS})
@@ -711,6 +803,10 @@ if (Seastar_EXPERIMENTAL_COROUTINES_TS)
   target_compile_definitions (seastar PUBLIC SEASTAR_COROUTINES_TS)
 endif ()
 
+if (Seastar_SSTRING)
+  target_compile_options (seastar PUBLIC -DSEASTAR_SSTRING)
+endif ()
+
 if (Seastar_GCC6_CONCEPTS OR Concepts_FOUND)
   target_compile_definitions (seastar
     PUBLIC SEASTAR_HAVE_GCC6_CONCEPTS)
@@ -758,6 +854,13 @@ if (Seastar_SPLIT_DWARF AND (NOT (CMAKE_BUILD_TYPE STREQUAL "Dev")))
   set (Seastar_SPLIT_DWARF_FLAG "-Wl,--gdb-index")
   target_link_libraries (seastar PUBLIC ${Seastar_SPLIT_DWARF_FLAG})
   target_compile_options (seastar PUBLIC "-gsplit-dwarf")
+endif ()
+
+if (Seastar_HEAP_PROFILING)
+    set_property (
+      SOURCE "src/core/memory.cc"
+      PROPERTY
+      COMPILE_DEFINITIONS SEASTAR_HEAPPROF)
 endif ()
 
 if (Seastar_DPDK)
@@ -849,7 +952,21 @@ if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "Sanitize"
       SEASTAR_DEBUG
       SEASTAR_DEFAULT_ALLOCATOR
       SEASTAR_DEBUG_SHARED_PTR
-      SEASTAR_SHUFFLE_TASK_QUEUE
+      SEASTAR_SHUFFLE_TASK_QUEUE)
+endif ()
+
+set (Seastar_STACK_GUARD_MODES "Debug" "Sanitize" "Dev")
+if ((Seastar_STACK_GUARDS STREQUAL "ON") OR
+    ((Seastar_STACK_GUARDS STREQUAL "DEFAULT") AND
+     (CMAKE_BUILD_TYPE IN_LIST Seastar_STACK_GUARD_MODES)))
+  seastar_supports_flag ("-fstack-clash-protection" StackClashProtection_FOUND)
+  if (StackClashProtection_FOUND)
+    target_compile_options (seastar
+      PUBLIC
+      -fstack-clash-protection)
+  endif ()
+  target_compile_definitions (seastar
+    PRIVATE
       SEASTAR_THREAD_STACK_GUARDS)
 endif ()
 

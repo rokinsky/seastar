@@ -20,8 +20,10 @@
  */
 
 #include <seastar/core/reactor.hh>
+#include <seastar/core/thread_cputime_clock.hh>
 #include <seastar/testing/test_case.hh>
 #include <seastar/testing/thread_test_case.hh>
+#include <../../src/core/stall_detector.hh>
 #include <atomic>
 #include <chrono>
 
@@ -45,8 +47,8 @@ public:
 };
 
 void spin(std::chrono::duration<double> how_much) {
-    auto end = std::chrono::steady_clock::now() + how_much;
-    while (std::chrono::steady_clock::now() < end) {
+    auto end = internal::cpu_stall_detector::clock_type::now() + how_much;
+    while (internal::cpu_stall_detector::clock_type::now() < end) {
         // spin!
     }
 }

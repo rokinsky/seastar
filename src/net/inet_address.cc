@@ -26,6 +26,7 @@
 #include <seastar/net/socket_defs.hh>
 #include <seastar/net/dns.hh>
 #include <seastar/net/ip.hh>
+#include <seastar/core/reactor.hh>
 #include <seastar/core/print.hh>
 
 seastar::net::inet_address::inet_address()
@@ -121,8 +122,7 @@ bool seastar::net::inet_address::operator==(const inet_address& o) const {
     case family::INET:
         return _in.s_addr == o._in.s_addr;
     case family::INET6:
-        return std::equal(std::begin(_in6.s6_addr), std::end(_in6.s6_addr),
-                        std::begin(o._in6.s6_addr)) && _scope == o._scope;
+        return std::equal(std::begin(_in6.s6_addr), std::end(_in6.s6_addr), std::begin(o._in6.s6_addr));
     default:
         return false;
     }

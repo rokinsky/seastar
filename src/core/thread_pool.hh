@@ -39,7 +39,7 @@ public:
     explicit thread_pool(reactor* r, sstring thread_name);
     ~thread_pool();
     template <typename T, typename Func>
-    future<T> submit(Func func) {
+    future<T> submit(Func func) noexcept {
         ++_aio_threaded_fallbacks;
         return inter_thread_wq.submit<T>(std::move(func));
     }
@@ -61,7 +61,7 @@ public:
 #else
 public:
     template <typename T, typename Func>
-    future<T> submit(Func func) { std::cout << "thread_pool not yet implemented on osv\n"; abort(); }
+    future<T> submit(Func func) { std::cerr << "thread_pool not yet implemented on osv\n"; abort(); }
 #endif
 private:
     void work(sstring thread_name);

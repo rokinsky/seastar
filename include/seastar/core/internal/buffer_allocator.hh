@@ -16,31 +16,28 @@
  * under the License.
  */
 /*
- * Copyright (C) 2019 ScyllaDB Ltd.
+ * Copyright (C) 2020 ScyllaDB
  */
 
 #pragma once
 
-#include <seastar/core/linux-aio.hh>
-#include <exception>
-
 namespace seastar {
 
-class io_desc {
-    promise<seastar::internal::linux_abi::io_event> _pr;
+template <typename CharType>
+class temporary_buffer;
+
+namespace internal {
+
+// Internal interface for allocating buffers for reads. Used to decouple
+// allocation strategies (where to allocate from, and what sizes) from the
+// point where allocation happens, to make it as late as possible.
+class buffer_allocator {
 public:
-    virtual ~io_desc() = default;
-    virtual void set_exception(std::exception_ptr eptr) {
-        _pr.set_exception(std::move(eptr));
-    }
-
-    virtual void set_value(seastar::internal::linux_abi::io_event& ev) {
-        _pr.set_value(ev);
-    }
-
-    future<seastar::internal::linux_abi::io_event> get_future() {
-        return _pr.get_future();
-    }
+    virtual ~buffer_allocator() = default;
+    virtual temporary_buffer<char> allocate_buffer() = 0;
 };
+
+
+}
 
 }
