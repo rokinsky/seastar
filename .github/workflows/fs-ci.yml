@@ -41,7 +41,7 @@ jobs:
       - name: Change mtime
         if: steps.cache.outputs.cache-hit == 'true'
         run: |
-          OLDEST_MTIME=$(find ind build/${{ matrix.mode }} -type f -printf '%.10T@\n' | sort | head -n 1)
+          OLDEST_MTIME=$(find build/${{ matrix.mode }} -type f -printf '%.10T@\n' | sort | head -n 1)
           export OLDEST_MTIME=$((OLDEST_MTIME-1))
           echo $OLDEST_MTIME
           find $(ls -1 | grep -v '^build$') -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
