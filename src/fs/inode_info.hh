@@ -84,7 +84,7 @@ struct inode_info {
             return (data.empty() ? 0 : data.rbegin()->second.data_range.end);
         }
 
-        // Represents which data vectors are reconstructed after removing intersection
+        // Tells which parts of data vector (relative to intersection) are reconstructed after removing intersection
         enum class cut_result {
             NONE,
             LEFT,
@@ -151,12 +151,12 @@ struct inode_info {
                 if (not left.data_range.is_empty()) {
                     data.emplace(left.data_range.beg, std::move(left));
                 } else {
-                    cr = cut_result::LEFT;
+                    cr = cut_result::RIGHT;
                 }
                 if (not right.data_range.is_empty()) {
                     data.emplace(right.data_range.beg, std::move(right));
                 } else {
-                    cr = cut_result::RIGHT;
+                    cr = cut_result::LEFT;
                 }
 
                 // Process deleted vector

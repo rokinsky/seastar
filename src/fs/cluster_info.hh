@@ -24,6 +24,7 @@
 #include "fs/cluster.hh"
 #include "fs/inode.hh"
 #include "fs/units.hh"
+
 #include <cassert>
 #include <map>
 
@@ -43,7 +44,7 @@ private:
     std::map<disk_offset_t, cluster_data_vec> _data;
 
 public:
-    constexpr const decltype(_data)& get_data() const & noexcept {
+    constexpr const decltype(_data)& get_data() const noexcept {
         return _data;
     }
 

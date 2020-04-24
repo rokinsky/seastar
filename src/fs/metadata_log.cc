@@ -107,31 +107,31 @@ void metadata_log::write_update(inode_info::file& file, inode_data_vec new_data_
 void metadata_log::cut_out_data_range(inode_info::file& file, file_range range) {
     using CR = inode_info::file::cut_result;
     file.cut_out_data_range(range, [&](inode_data_vec data_vec, CR cr) {
-        int new_writes_cnt;
-        if (cr == CR::BOTH) {
-            new_writes_cnt = 2;
-        } else if (cr == CR::LEFT || cr == CR::RIGHT) {
-            new_writes_cnt = 1;
-        } else {
-            new_writes_cnt = 0;
-        }
+        int new_writes_cnt = [&] {
+            switch (cr) {
+            case CR::BOTH: return 2;
+            case CR::LEFT: return 1;
+            case CR::RIGHT: return 1;
+            case CR::NONE: return 0;
+            }
+        }();
         std::visit(overloaded {
-            [&](inode_data_vec::in_mem_data& mem) {
+            [&](const inode_data_vec::in_mem_data&) {
                 size_t log_decrease = ondisk_entry_size<ondisk_small_write_header>(data_vec.data_range.size());
                 _rewrite_log_size -= log_decrease;
                 _rewrite_log_size += new_writes_cnt * ondisk_entry_size<ondisk_small_write_header>(0);
             },
-            [&](inode_data_vec::on_disk_data& disk_data) {
+            [&](const inode_data_vec::on_disk_data& disk_data) {
                 // TODO: Differentiate between large write and large write without mtime
                 size_t log_decrease = data_vec.data_range.size() == _cluster_size ?
                     ondisk_entry_size<ondisk_large_write>() :
                     ondisk_entry_size<ondisk_medium_write>();
                 _rewrite_log_size -= log_decrease;
-                // Remaining data is smaller than original so it's less than large write
+                // Remaining data is smaller than original so it is not a large write anymore
                 _rewrite_log_size += new_writes_cnt * ondisk_entry_size<ondisk_medium_write>();
                 _clusters[offset_to_cluster_id(disk_data.device_offset, _cluster_size)].remove_data(disk_data.device_offset, data_vec.data_range);
             },
-            [&](inode_data_vec::hole_data&) {
+            [&](const inode_data_vec::hole_data&) {
             },
         }, data_vec.data_location);
     });
@@ -143,8 +143,9 @@ inode_info& metadata_log::memory_only_create_inode(inode_t inode, bool is_direct
     _ondisk_log_size += log_increase;
     _rewrite_log_size += log_increase;
     // During rewrite we'll start with a truncate setting the file size to remember trailing holes
-    if (!is_directory)
+    if (!is_directory) {
         _rewrite_log_size += ondisk_entry_size<ondisk_truncate>();
+    }
     return _inodes.emplace(inode, inode_info {
         0,
         0,
@@ -166,7 +167,7 @@ void metadata_log::memory_only_delete_inode(inode_t inode) {
     assert(not it->second.is_linked());
 
     std::visit(overloaded {
-        [](inode_info::directory& dir) {
+        [](const inode_info::directory& dir) {
             assert(dir.entries.empty());
         },
         [&](inode_info::file& file) {
@@ -174,7 +175,7 @@ void metadata_log::memory_only_delete_inode(inode_t inode) {
                 0,
                 std::numeric_limits<decltype(file_range::end)>::max()
             });
-            ondisk_entry_size<ondisk_truncate>();
+            _rewrite_log_size -= ondisk_entry_size<ondisk_truncate>();
         }
     }, it->second.contents);
 
@@ -200,9 +201,9 @@ void metadata_log::memory_only_small_write(inode_t inode, file_offset_t file_off
 void metadata_log::memory_only_disk_write(inode_t inode, file_offset_t file_offset, disk_offset_t disk_offset,
         size_t write_len) {
     assert(write_len <= _cluster_size);
-    size_t log_increase = write_len == _cluster_size ?
+    size_t log_increase = (write_len == _cluster_size ?
         ondisk_entry_size<ondisk_large_write>() :
-        ondisk_entry_size<ondisk_medium_write>();
+        ondisk_entry_size<ondisk_medium_write>());
     inode_data_vec data_vec = {
         {file_offset, file_offset + write_len},
         inode_data_vec::on_disk_data {disk_offset}
