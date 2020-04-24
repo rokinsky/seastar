@@ -2,9 +2,9 @@ name: "fs: ci"
 
 on:
   push:
-    branches: [ zpp_fs ]
+    branches: [ master, zpp_fs ]
   pull_request:
-    branches: [ zpp_fs, fs-* ]
+    branches: [ master, zpp_fs, fs-* ]
 
 jobs:
   build-and-test:
@@ -19,6 +19,13 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v2
+
+      - name: Cache Build
+        id: cache-build
+        uses: actions/cache@v1
+        with:
+          path: build/${{ matrix.mode }}
+          key: ${{ runner.os }}-build-${{ matrix.mode }}
 
       - name: Set ENV variables
         run: echo "::set-env name=SEASTAR_FS_TESTS::$(echo tests/unit/fs_*_test.cc | sed 's/\.cc//g')"
