@@ -27,10 +27,6 @@ jobs:
           path: build/${{ matrix.mode }}
           key: ${{ runner.os }}-build-${{ matrix.mode }}-fs
 
-      - name: List build directory
-        if: steps.cache.outputs.cache-hit == 'true'
-        run: ls -la build/${{ matrix.mode }}
-
       - name: Set ENV variables
         run: echo "::set-env name=SEASTAR_FS_TESTS::$(echo tests/unit/fs_*_test.cc | sed 's/\.cc//g')"
 
@@ -38,7 +34,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./configure.py --mode=${{ matrix.mode }} --c++-dialect ${{ matrix.dialect }} --enable-experimental-fs
 
-      - name: Change mtime
+      - name: Change mtime # We are going to rebuild only fs files
         if: steps.cache.outputs.cache-hit == 'true'
         run: |
           OLDEST_MTIME=$(find build/${{ matrix.mode }} -type f -printf '%.10T@\n' | sort | head -n 1)
@@ -46,14 +42,6 @@ jobs:
           echo $OLDEST_MTIME
           find $(ls -1 | grep -v '^build$') -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
           find $(ls -1 | grep -v '^build$') | grep -P '/fs(/|_)|CMakeLists.txt' | xargs touch -c -m
-#         shell: bash
-#         run: |
-#           find . -type f -printf "%.10T@\n" | sort | read OLDEST_MTIME
-#           export OLDEST_MTIME=$((OLDEST_MTIME-1))
-#           find build/${{ matrix.mode }} -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
-#           find src tests | grep -P '/fs(/|_)|CMakeLists.txt' | xargs touch -c -m
-
-          #find ${TRAVIS_BUILD_DIR} -type f -exec touch -c -m -d “@$OLDEST_MTIME” {} \;
 
       - name: Build
         run: ninja -C build/${{ matrix.mode }} ${{ env.SEASTAR_FS_TESTS }}
