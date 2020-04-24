@@ -39,7 +39,8 @@ jobs:
         run: |
           OLDEST_MTIME=$(find build/${{ matrix.mode }} -type f -printf '%.10T@\n' | sort | head -n 1)
           export OLDEST_MTIME=$((OLDEST_MTIME-1))
-          find $(ls -1 | grep -v '^build$') -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
+          find . -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
+          #find $(ls -1 | grep -v '^build$') -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
           #find $(ls -1 | grep -v '^build$') | grep -P '/fs(/|_)|CMakeLists.txt' | xargs touch -c -m
 
       - name: Build
