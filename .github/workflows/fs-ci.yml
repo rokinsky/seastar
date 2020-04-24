@@ -26,7 +26,7 @@ jobs:
         with:
           path: build/${{ matrix.mode }}
           key: ${{ runner.os }}-build-${{ matrix.mode }}
-          
+
       - name: List build directory
         run: ls -la build/${{ matrix.mode }}
 
@@ -36,6 +36,13 @@ jobs:
       - name: Configure
         if: steps.cache.outputs.cache-hit != 'true'
         run: ./configure.py --mode=${{ matrix.mode }} --c++-dialect ${{ matrix.dialect }} --enable-experimental-fs
+
+      - name: Change ninja mtime
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: | 
+          find . -type f -printf "%.10T@\n" | sort | read OLDEST_MTIME
+          export OLDEST_MTIME=$((OLDEST_MTIME-1))
+          find build/${{ matrix.mode }} -type f -exec touch -c -m -d “@$OLDEST_MTIME” {} \;
 
       - name: Build
         run: ninja -C build/${{ matrix.mode }} ${{ env.SEASTAR_FS_TESTS }}
