@@ -4,7 +4,7 @@ on:
   push:
     branches: [ master, zpp_fs ]
   pull_request:
-    branches: [ master, zpp_fs, 'fs-*' ]
+    branches: [ master, zpp_fs, fs-* ]
 
 jobs:
   build-and-test:
