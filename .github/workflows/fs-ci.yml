@@ -27,21 +27,20 @@ jobs:
           path: build/${{ matrix.mode }}
           key: ${{ runner.os }}-build-${{ matrix.mode }}-fs
 
-      - name: Set ENV variables
-        run: echo "::set-env name=SEASTAR_FS_TESTS::$(echo tests/unit/fs_*_test.cc | sed 's/\.cc//g')"
-
-      - name: Change mtime # We are going to rebuild only fs files
+      - name: Change mtime
         if: steps.cache.outputs.cache-hit == 'true'
         run: |
           OLDEST_MTIME=$(find build/${{ matrix.mode }} -type f -printf '%.10T@\n' | sort | head -n 1)
           export OLDEST_MTIME=$((OLDEST_MTIME-1))
-          find . -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
-          #find $(ls -1 | grep -v '^build$') -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
-          #find $(ls -1 | grep -v '^build$') | grep -P '/fs(/|_)|CMakeLists.txt' | xargs touch -c -m
+          find $(ls -1 | grep -v '^build$') -type f -exec touch -c -m -d "@$OLDEST_MTIME" {} \;
+          find $(ls -1 | grep -v '^build$') | grep -P '/fs(/|_)|CMakeLists.txt' | xargs touch -c -m
 
       - name: Configure
         #if: steps.cache.outputs.cache-hit != 'true'
         run: ./configure.py --mode=${{ matrix.mode }} --c++-dialect ${{ matrix.dialect }} --enable-experimental-fs
+
+      - name: Set ENV variables
+        run: echo "::set-env name=SEASTAR_FS_TESTS::$(echo tests/unit/fs_*_test.cc | sed 's/\.cc//g')"
 
       - name: Build
         run: ninja -C build/${{ matrix.mode }} ${{ env.SEASTAR_FS_TESTS }}
