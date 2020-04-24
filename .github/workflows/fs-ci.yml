@@ -2,9 +2,9 @@ name: "fs: ci"
 
 on:
   push:
-    branches: [ master, zpp_fs ]
+    branches: [ zpp_fs ]
   pull_request:
-    branches: [ master, zpp_fs, fs-* ]
+    branches: [ zpp_fs, fs-* ]
 
 jobs:
   build-and-test:
@@ -36,7 +36,6 @@ jobs:
           find $(ls -1 | grep -v '^build$') | grep -P '/fs(/|_)|CMakeLists.txt' | xargs touch -c -m
 
       - name: Configure
-        #if: steps.cache.outputs.cache-hit != 'true'
         run: ./configure.py --mode=${{ matrix.mode }} --c++-dialect ${{ matrix.dialect }} --enable-experimental-fs
 
       - name: Set ENV variables
